@@ -1,8 +1,8 @@
-class_name ModEntry
+class_name VmmModEntry
 extends RefCounted
 
 # One installed mod, either as a .vmz archive or an unpacked directory.
-# Constructed by ModRegistry; consumed by ConflictDetector and the UI.
+# Constructed by VmmModRegistry; consumed by VmmConflictDetector and the UI.
 
 var path: String                 # absolute path to .vmz file or directory
 var is_archive: bool             # true if .vmz, false if directory
@@ -55,10 +55,10 @@ func script_extends() -> Dictionary:
 
 # Returns the text content of `file_path` inside this mod, or "" if absent.
 # Re-opens the archive each call; small mods make this cheap, but callers
-# in tight loops should batch reads via a freshly opened ModArchive instead.
+# in tight loops should batch reads via a freshly opened VmmModArchive.
 func read_file_text(file_path: String) -> String:
 	if is_archive:
-		var arch := ModArchive.new()
+		var arch := VmmModArchive.new()
 		if arch.open(path) != OK:
 			return ""
 		var text := arch.read_text(file_path)

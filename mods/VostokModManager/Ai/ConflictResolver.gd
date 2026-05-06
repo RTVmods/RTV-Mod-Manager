@@ -1,9 +1,9 @@
-class_name ConflictResolver
+class_name VmmConflictResolver
 extends RefCounted
 
 # AI-driven resolver for file_overlap conflicts on .gd files. Builds a
 # structured prompt (game source + each mod's version) and submits it via
-# ClaudeCodeRunner. Parses Claude's JSON verdict back into a Dictionary.
+# VmmClaudeCodeRunner. Parses Claude's JSON verdict back into a Dictionary.
 #
 # Verdict shape returned via `resolution_ready`:
 #   {
@@ -20,8 +20,8 @@ extends RefCounted
 
 signal resolution_ready(verdict: Dictionary)
 
-var runner: ClaudeCodeRunner
-var registry: ModRegistry
+var runner: VmmClaudeCodeRunner
+var registry: VmmModRegistry
 
 # Optional. When set, the resolver will look up the original game script
 # at `<game_source_path>/<rel>` (where `rel` is the conflicting res://
@@ -34,7 +34,7 @@ var game_source_path: String = ""
 var _pending: Dictionary = {}
 
 
-func _init(p_runner: ClaudeCodeRunner, p_registry: ModRegistry) -> void:
+func _init(p_runner: VmmClaudeCodeRunner, p_registry: VmmModRegistry) -> void:
 	runner = p_runner
 	registry = p_registry
 	runner.request_completed.connect(_on_runner_completed)

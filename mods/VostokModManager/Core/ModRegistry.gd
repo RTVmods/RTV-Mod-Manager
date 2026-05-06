@@ -1,7 +1,7 @@
-class_name ModRegistry
+class_name VmmModRegistry
 extends RefCounted
 
-# Scans the game's mods folder and builds a list of installed ModEntry
+# Scans the game's mods folder and builds a list of installed VmmModEntry
 # instances. Recognizes:
 #   - <mods>/*.vmz                    → enabled archive mod
 #   - <mods>/<DirName>/mod.txt        → enabled directory mod
@@ -11,7 +11,7 @@ extends RefCounted
 # are ignored.
 
 var mods_dir: String
-var entries: Array[ModEntry] = []
+var entries: Array[VmmModEntry] = []
 
 
 func scan(p_mods_dir: String) -> Error:
@@ -26,15 +26,15 @@ func scan(p_mods_dir: String) -> Error:
 	return OK
 
 
-func find_by_id(mod_id: String) -> ModEntry:
+func find_by_id(p_mod_id: String) -> VmmModEntry:
 	for e in entries:
-		if e.mod_id() == mod_id:
+		if e.mod_id() == p_mod_id:
 			return e
 	return null
 
 
-func enabled() -> Array[ModEntry]:
-	var out: Array[ModEntry] = []
+func enabled() -> Array[VmmModEntry]:
+	var out: Array[VmmModEntry] = []
 	for e in entries:
 		if e.is_enabled:
 			out.append(e)
@@ -70,12 +70,12 @@ func _scan_dir(dir_path: String, is_enabled: bool) -> void:
 	dir.list_dir_end()
 
 
-func _load_archive_entry(p_path: String, is_enabled: bool) -> ModEntry:
-	var arch := ModArchive.new()
+func _load_archive_entry(p_path: String, is_enabled: bool) -> VmmModEntry:
+	var arch := VmmModArchive.new()
 	if arch.open(p_path) != OK:
-		push_warning("ModRegistry: could not open archive %s" % p_path)
+		push_warning("VmmModRegistry: could not open archive %s" % p_path)
 		return null
-	var entry := ModEntry.new()
+	var entry := VmmModEntry.new()
 	entry.path = p_path
 	entry.is_archive = true
 	entry.is_enabled = is_enabled
@@ -85,8 +85,8 @@ func _load_archive_entry(p_path: String, is_enabled: bool) -> ModEntry:
 	return entry
 
 
-func _load_dir_entry(p_path: String, is_enabled: bool) -> ModEntry:
-	var entry := ModEntry.new()
+func _load_dir_entry(p_path: String, is_enabled: bool) -> VmmModEntry:
+	var entry := VmmModEntry.new()
 	entry.path = p_path
 	entry.is_archive = false
 	entry.is_enabled = is_enabled
@@ -98,7 +98,7 @@ func _load_dir_entry(p_path: String, is_enabled: bool) -> ModEntry:
 	f.close()
 	var cfg := ConfigFile.new()
 	if cfg.parse(text) != OK:
-		push_warning("ModRegistry: failed to parse %s" % manifest_path)
+		push_warning("VmmModRegistry: failed to parse %s" % manifest_path)
 		return null
 	for section in cfg.get_sections():
 		var section_data: Dictionary = {}

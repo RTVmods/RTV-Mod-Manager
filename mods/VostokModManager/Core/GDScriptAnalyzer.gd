@@ -1,4 +1,4 @@
-class_name GDScriptAnalyzer
+class_name VmmGDScriptAnalyzer
 extends RefCounted
 
 # Static analysis of GDScript source. Recognizes:

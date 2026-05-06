@@ -1,18 +1,19 @@
 ; Engine configuration file.
-; It's best edited using the editor UI and not directly,
-; since the parameters that go here are not all obvious.
 ;
-; Format:
-;   [section] ; section goes between []
-;   param=value ; assign values to parameters
+; Dev-only file. NOT shipped in the .vmz package.
+;
+; In standalone Godot dev, the manager UI is launched directly as the main
+; scene so we get instant F5 iteration. In-game, mod.txt's [autoload]
+; registers Main.gd which opens the same UI on F8. Both environments use
+; the exact same scripts.
 
 config_version=5
 
 [application]
 
 config/name="Vostok Mod Manager"
-config/description="Mod manager for Road to Vostok"
-run/main_scene="res://scenes/main.tscn"
+config/description="Mod manager for Road to Vostok — ships as a .vmz mod."
+run/main_scene="res://mods/VostokModManager/Ui/MainScreen.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 

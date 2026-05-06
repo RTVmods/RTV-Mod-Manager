@@ -1,4 +1,4 @@
-class_name ClaudeCodeRunner
+class_name VmmClaudeCodeRunner
 extends RefCounted
 
 # Drives the user's locally-installed `claude` CLI as a subprocess to power

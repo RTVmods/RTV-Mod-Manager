@@ -20,3 +20,7 @@ Thumbs.db
 
 # Local
 *.log
+
+# Build output
+dist/
+*.vmz

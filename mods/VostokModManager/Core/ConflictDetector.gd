@@ -1,4 +1,4 @@
-class_name ConflictDetector
+class_name VmmConflictDetector
 extends RefCounted
 
 # Finds conflicts among enabled mods. Returns Array of Conflict dicts:
@@ -32,9 +32,9 @@ const TYPE_SUPER_CHAIN_CONSTRAINT := "super_chain_constraint"
 
 
 # Manifest-only detection. Fast; no archive reads beyond what
-# ModRegistry already did.
-static func detect_manifest_conflicts(entries: Array[ModEntry]) -> Array:
-	var live: Array[ModEntry] = []
+# VmmModRegistry already did.
+static func detect_manifest_conflicts(entries: Array[VmmModEntry]) -> Array:
+	var live: Array[VmmModEntry] = []
 	for e in entries:
 		if e.is_enabled:
 			live.append(e)
@@ -55,8 +55,8 @@ static func detect_manifest_conflicts(entries: Array[ModEntry]) -> Array:
 # Deep detection: opens each archive, reads .gd contents, runs analyzer.
 # Costs ~1 archive open + N file reads per enabled mod. For 50 mods with
 # ~10 .gd files each, expect a few hundred milliseconds.
-static func detect_script_conflicts(entries: Array[ModEntry]) -> Array:
-	var live: Array[ModEntry] = []
+static func detect_script_conflicts(entries: Array[VmmModEntry]) -> Array:
+	var live: Array[VmmModEntry] = []
 	for e in entries:
 		if e.is_enabled:
 			live.append(e)
@@ -73,7 +73,7 @@ static func detect_script_conflicts(entries: Array[ModEntry]) -> Array:
 
 
 # Convenience: both passes.
-static func detect_all(entries: Array[ModEntry]) -> Array:
+static func detect_all(entries: Array[VmmModEntry]) -> Array:
 	var out := detect_manifest_conflicts(entries)
 	out.append_array(detect_script_conflicts(entries))
 	return out
@@ -81,7 +81,7 @@ static func detect_all(entries: Array[ModEntry]) -> Array:
 
 # --- internals -----------------------------------------------------------
 
-static func _overlap_by_files(entries: Array[ModEntry]) -> Array:
+static func _overlap_by_files(entries: Array[VmmModEntry]) -> Array:
 	var by_path: Dictionary = {}
 	for e in entries:
 		for f in e.files:
@@ -104,7 +104,7 @@ static func _overlap_by_files(entries: Array[ModEntry]) -> Array:
 			out.append({
 				"type": TYPE_FILE_OVERLAP,
 				"key": path,
-				"mod_ids": owners.map(func(e: ModEntry) -> String: return e.mod_id()),
+				"mod_ids": owners.map(func(e: VmmModEntry) -> String: return e.mod_id()),
 				"details": {
 					"is_gdscript": path.ends_with(".gd"),
 				},
@@ -113,7 +113,7 @@ static func _overlap_by_files(entries: Array[ModEntry]) -> Array:
 
 
 static func _overlap_by_section(
-	entries: Array[ModEntry], section: String, conflict_type: String
+	entries: Array[VmmModEntry], section: String, conflict_type: String
 ) -> Array:
 	var by_key: Dictionary = {}  # key -> Array[{mod, value}]
 	for e in entries:
@@ -130,7 +130,7 @@ static func _overlap_by_section(
 				"type": conflict_type,
 				"key": str(key),
 				"mod_ids": owners.map(
-					func(o: Dictionary) -> String: return (o["mod"] as ModEntry).mod_id()
+					func(o: Dictionary) -> String: return (o["mod"] as VmmModEntry).mod_id()
 				),
 				"details": {
 					"values": owners.map(
@@ -141,10 +141,10 @@ static func _overlap_by_section(
 	return out
 
 
-static func _analyze_mod_scripts(entry: ModEntry) -> Dictionary:
+static func _analyze_mod_scripts(entry: VmmModEntry) -> Dictionary:
 	var out: Dictionary = {}
 	if entry.is_archive:
-		var arch := ModArchive.new()
+		var arch := VmmModArchive.new()
 		if arch.open(entry.path) != OK:
 			return out
 		for f in entry.files:
@@ -152,7 +152,7 @@ static func _analyze_mod_scripts(entry: ModEntry) -> Dictionary:
 				continue
 			var src := arch.read_text(f)
 			if src != "":
-				out[f] = GDScriptAnalyzer.analyze(src)
+				out[f] = VmmGDScriptAnalyzer.analyze(src)
 		arch.close()
 	else:
 		for f in entry.files:
@@ -160,12 +160,12 @@ static func _analyze_mod_scripts(entry: ModEntry) -> Dictionary:
 				continue
 			var src := entry.read_file_text(f)
 			if src != "":
-				out[f] = GDScriptAnalyzer.analyze(src)
+				out[f] = VmmGDScriptAnalyzer.analyze(src)
 	return out
 
 
 static func _class_name_collisions(
-	entries: Array[ModEntry], analyses: Dictionary
+	entries: Array[VmmModEntry], analyses: Dictionary
 ) -> Array:
 	var by_class: Dictionary = {}
 	for e in entries:
@@ -198,7 +198,7 @@ static func _class_name_collisions(
 
 
 static func _take_over_collisions(
-	entries: Array[ModEntry], analyses: Dictionary
+	entries: Array[VmmModEntry], analyses: Dictionary
 ) -> Array:
 	var by_target: Dictionary = {}
 	for e in entries:
@@ -233,7 +233,7 @@ static func _take_over_collisions(
 # Emitted as a "conflict" of type SUPER_CHAIN_CONSTRAINT carrying the
 # implied ordering in details.before / details.after.
 static func _super_chain_constraints(
-	entries: Array[ModEntry], analyses: Dictionary
+	entries: Array[VmmModEntry], analyses: Dictionary
 ) -> Array:
 	# extended_path -> { mod_id: { func_name: calls_super } }
 	var by_target: Dictionary = {}
@@ -257,7 +257,6 @@ static func _super_chain_constraints(
 		var mod_ids: Array = per_mod.keys()
 		if mod_ids.size() < 2:
 			continue
-		# For each function name, see who chains and who replaces.
 		var fn_set: Dictionary = {}
 		for mid in mod_ids:
 			var funcs: Dictionary = per_mod[mid]

@@ -1,4 +1,4 @@
-class_name ModArchive
+class_name VmmModArchive
 extends RefCounted
 
 # Reads a Road to Vostok .vmz mod archive (zip) and parses its mod.txt.
@@ -70,7 +70,7 @@ func get_manifest() -> Dictionary:
 	var cfg := ConfigFile.new()
 	var err := cfg.parse(text)
 	if err != OK:
-		push_warning("ModArchive: failed to parse mod.txt in %s (err=%d)" % [path, err])
+		push_warning("VmmModArchive: failed to parse mod.txt in %s (err=%d)" % [path, err])
 		return {}
 	var m: Dictionary = {}
 	for section in cfg.get_sections():
