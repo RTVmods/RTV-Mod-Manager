@@ -12,7 +12,8 @@ Files outside that subtree (project.godot, icon.svg, this script, .git, etc.)
 are dev-only and NOT included in the package.
 """
 
-import os
+from __future__ import annotations
+
 import sys
 import zipfile
 from pathlib import Path
