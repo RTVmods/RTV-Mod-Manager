@@ -55,11 +55,22 @@ func _ready() -> void:
 	backdrop.gui_input.connect(_on_backdrop_input)
 	add_child(backdrop)
 
-	# Centered panel — explicit pos/size, not anchors.
+	# Centered panel — explicit pos/size, not anchors. Custom stylebox so
+	# the panel reads clearly against the game's already-dark menu.
 	var panel := PanelContainer.new()
 	panel.position = vp.size * 0.05
 	panel.size = vp.size * 0.9
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var stylebox := StyleBoxFlat.new()
+	stylebox.bg_color = Color(0.10, 0.12, 0.16, 0.97)
+	stylebox.set_border_width_all(2)
+	stylebox.border_color = Color(0.45, 0.65, 0.85, 1.0)
+	stylebox.set_corner_radius_all(6)
+	stylebox.content_margin_left = 16
+	stylebox.content_margin_right = 16
+	stylebox.content_margin_top = 12
+	stylebox.content_margin_bottom = 12
+	panel.add_theme_stylebox_override("panel", stylebox)
 	add_child(panel)
 
 	var root := VBoxContainer.new()

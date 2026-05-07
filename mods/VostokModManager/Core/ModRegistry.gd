@@ -62,11 +62,11 @@ func _scan_dir(dir_path: String, is_enabled: bool) -> void:
 				continue
 			var manifest_path := full.path_join("mod.txt")
 			if FileAccess.file_exists(manifest_path):
-				var entry := _load_dir_entry(full, is_enabled)
+				var entry = _load_dir_entry(full, is_enabled)
 				if entry != null:
 					entries.append(entry)
 		elif name.to_lower().ends_with(".vmz"):
-			var entry := _load_archive_entry(full, is_enabled)
+			var entry = _load_archive_entry(full, is_enabled)
 			if entry != null:
 				entries.append(entry)
 	dir.list_dir_end()
