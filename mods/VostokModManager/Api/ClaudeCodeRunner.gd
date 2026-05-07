@@ -37,6 +37,22 @@ func get_resolved_path() -> String:
 	return _claude_path
 
 
+# Returns true if the user has Anthropic's Claude Desktop installed via
+# Microsoft Store (MSIX). Detected by the presence of the per-package
+# reparse point at %APPDATA%/Claude — that folder only exists when the
+# MSIX package is registered.
+#
+# We check this when detection fails, so we can surface a clearer error:
+# the MSIX install is sandboxed and its claude binary is not reachable
+# from external processes (no execution alias, no PATH entry). The user
+# needs the standalone CLI from npm.
+func has_msix_install() -> bool:
+	var appdata := OS.get_environment("APPDATA")
+	if appdata == "":
+		return false
+	return DirAccess.dir_exists_absolute(appdata.path_join("Claude"))
+
+
 # Probes for `claude` on PATH and at known install locations.
 # Sets `is_available()` accordingly. Safe to call repeatedly.
 func detect() -> void:

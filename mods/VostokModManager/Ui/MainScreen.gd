@@ -583,10 +583,20 @@ func _update_claude_status() -> void:
 			_claude.get_version(),
 			_claude.get_resolved_path(),
 		]
+	elif _claude.has_msix_install():
+		# Tell the user their existing Microsoft Store install can't be
+		# used — saves the 30 minutes I spent chasing the ghost path.
+		_claude_label.text = (
+			"Claude Code: ✗  Detected Claude Desktop (Microsoft Store), "
+			+ "but its CLI is sandboxed and unreachable from outside the "
+			+ "package. Install the standalone CLI: "
+			+ "`npm install -g @anthropic-ai/claude-code`."
+		)
 	else:
 		_claude_label.text = (
 			"Claude Code: ✗ not found — AI conflict resolution disabled. "
-			+ "Install from claude.com/claude-code, then click Browse... below."
+			+ "Install Node.js (nodejs.org), then run "
+			+ "`npm install -g @anthropic-ai/claude-code`."
 		)
 	_refresh_setup_banner()
 
@@ -596,11 +606,23 @@ func _update_claude_status() -> void:
 func _refresh_setup_banner() -> void:
 	var msgs: Array[String] = []
 	if not _claude.is_available():
-		msgs.append(
-			"• Claude Code not detected. Install from claude.com/claude-code, "
-			+ "then click Browse... next to \"Claude Code path\" and pick "
-			+ "claude.exe."
-		)
+		if _claude.has_msix_install():
+			msgs.append(
+				"• Detected Claude Desktop (Microsoft Store) — that "
+				+ "version is sandboxed and can't be invoked by other "
+				+ "apps. Install the standalone CLI: install Node.js "
+				+ "from nodejs.org, then in a NEW terminal run "
+				+ "`npm install -g @anthropic-ai/claude-code`. Restart "
+				+ "the game when done."
+			)
+		else:
+			msgs.append(
+				"• Claude Code not detected. Install Node.js from "
+				+ "nodejs.org, then in a NEW terminal run "
+				+ "`npm install -g @anthropic-ai/claude-code`. Restart "
+				+ "the game when done. Or paste a known claude.exe path "
+				+ "into the input below and click Save."
+			)
 	if _settings["game_source_path"] == "" or not _looks_like_decomp(_settings["game_source_path"]):
 		msgs.append(
 			"• Game source (Decomp/) not configured. Click \"How?\" next to "
@@ -611,7 +633,7 @@ func _refresh_setup_banner() -> void:
 		_setup_banner.visible = false
 		return
 	_setup_banner_label.text = "⚙ Setup needed:\n\n" + "\n\n".join(PackedStringArray(msgs))
-	_setup_banner.custom_minimum_size = Vector2(0, 40 + 36 * msgs.size())
+	_setup_banner.custom_minimum_size = Vector2(0, 40 + 50 * msgs.size())
 	_setup_banner.visible = true
 
 
