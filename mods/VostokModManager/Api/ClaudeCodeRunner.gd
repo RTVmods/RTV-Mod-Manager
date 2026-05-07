@@ -61,14 +61,53 @@ func detect() -> void:
 func _candidate_paths() -> Array[String]:
 	var paths: Array[String] = ["claude"]
 	var home := OS.get_environment("USERPROFILE")
-	if home != "":
-		paths.append(home + "/.claude/local/claude.exe")
-		paths.append(home + "/.claude/local/claude.cmd")
-		paths.append(home + "/.claude/local/claude")
 	var appdata := OS.get_environment("APPDATA")
+	var localappdata := OS.get_environment("LOCALAPPDATA")
+
+	# Anthropic Claude Desktop installs the claude-code CLI at
+	# %APPDATA%/Claude/claude-code/<version>/claude.exe — multiple
+	# versions can coexist after upgrades, so we list the directory
+	# and try the lex-newest first (works for typical SemVer; older
+	# versions are tried as fallbacks if the newest isn't responsive).
 	if appdata != "":
-		paths.append(appdata + "/npm/claude.cmd")
+		var claude_code_root := appdata.path_join("Claude").path_join("claude-code")
+		var versions := _list_subdirs(claude_code_root)
+		versions.sort()
+		versions.reverse()
+		for v in versions:
+			paths.append(claude_code_root.path_join(v).path_join("claude.exe"))
+
+	# npm global install (rare on Windows but still seen)
+	if appdata != "":
+		paths.append(appdata.path_join("npm").path_join("claude.cmd"))
+	if home != "":
+		paths.append(home.path_join(".claude").path_join("local").path_join("claude.exe"))
+		paths.append(home.path_join(".claude").path_join("local").path_join("claude.cmd"))
+		paths.append(home.path_join(".claude").path_join("local").path_join("claude"))
+	# Some package managers (scoop, winget) drop here
+	if localappdata != "":
+		paths.append(localappdata.path_join("Programs").path_join("claude").path_join("claude.exe"))
 	return paths
+
+
+# Lists immediate subdirectory names (no recursion). Returns [] if the
+# directory doesn't exist or can't be opened.
+func _list_subdirs(dir_path: String) -> Array[String]:
+	var out: Array[String] = []
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return out
+	dir.list_dir_begin()
+	while true:
+		var name := dir.get_next()
+		if name == "":
+			break
+		if name.begins_with("."):
+			continue
+		if dir.current_is_dir():
+			out.append(name)
+	dir.list_dir_end()
+	return out
 
 
 # Submits a prompt to Claude Code. Returns a request ID; `request_completed`
