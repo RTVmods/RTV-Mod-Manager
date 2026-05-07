@@ -18,6 +18,7 @@ const VmmModRegistry = preload("res://mods/VostokModManager/Core/ModRegistry.gd"
 const VmmModWorkshopClient = preload("res://mods/VostokModManager/Api/ModWorkshopClient.gd")
 const VmmConflictDetector = preload("res://mods/VostokModManager/Core/ConflictDetector.gd")
 const VmmConflictResolver = preload("res://mods/VostokModManager/Ai/ConflictResolver.gd")
+const VmmSettings = preload("res://mods/VostokModManager/Core/Settings.gd")
 
 var _claude := VmmClaudeCodeRunner.new()
 var _registry := VmmModRegistry.new()
@@ -31,6 +32,11 @@ var _updates_label: Label
 var _update_button: Button
 var _mods_list: VBoxContainer
 var _conflicts_list: VBoxContainer
+var _claude_path_input: LineEdit
+var _decomp_path_input: LineEdit
+var _settings: Dictionary = VmmSettings.DEFAULTS.duplicate()
+# request_id of an in-flight conflict resolution call.
+var _pending_resolve_request: int = 0
 
 # mw_id (int) -> latest version (str), populated by ModWorkshop check.
 var _latest_versions: Dictionary = {}
@@ -47,6 +53,10 @@ var _pending_download_request: int = 0
 var _pending_download_target: String = ""    # final destination path
 var _pending_download_temp: String = ""      # download-into path
 var _pending_download_label: String = ""     # for status messages
+
+# Last conflict set (cached so we can re-render after settings or
+# resolver state changes without re-running the deep detector).
+var _last_conflicts: Array = []
 
 
 func _ready() -> void:
@@ -108,6 +118,25 @@ func _ready() -> void:
 
 	_claude_label = Label.new()
 	root.add_child(_claude_label)
+
+	# Inline settings: Claude Code path + Decomp/ source path. These let
+	# the user enable AI conflict resolution by pointing us at their
+	# claude binary when our auto-detection misses it, and at the
+	# decompiled game source so Claude has the original script as
+	# context when comparing two mod overrides of the same file.
+	_claude_path_input = _build_path_row(
+		root,
+		"  Claude Code path:",
+		"(auto-detect — only fill if not found above)",
+		_save_claude_path,
+	)
+	_decomp_path_input = _build_path_row(
+		root,
+		"  Game source (Decomp/):",
+		"e.g. C:/Users/Joao/Desktop/RoadToVostok Dev/Decomp",
+		_save_decomp_path,
+	)
+
 	_mods_label = Label.new()
 	root.add_child(_mods_label)
 	_updates_label = Label.new()
@@ -138,6 +167,12 @@ func _ready() -> void:
 	footer.modulate = Color(0.75, 0.78, 0.85)
 	root.add_child(footer)
 
+	# Load persisted settings and apply them to the runner / inputs.
+	_settings = VmmSettings.load_or_default()
+	_claude.override_path = _settings["claude_path"]
+	_claude_path_input.text = _settings["claude_path"]
+	_decomp_path_input.text = _settings["game_source_path"]
+
 	set_process_input(true)
 	await get_tree().process_frame
 	_run_smoke()
@@ -167,6 +202,49 @@ func _close() -> void:
 		parent.queue_free()
 	else:
 		queue_free()
+
+
+func _build_path_row(
+	parent: Container,
+	label_text: String,
+	placeholder: String,
+	on_save: Callable,
+) -> LineEdit:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.custom_minimum_size = Vector2(220, 0)
+	row.add_child(lbl)
+	var input := LineEdit.new()
+	input.placeholder_text = placeholder
+	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(input)
+	var btn := Button.new()
+	btn.text = "Save"
+	btn.pressed.connect(on_save)
+	row.add_child(btn)
+	return input
+
+
+func _save_claude_path() -> void:
+	_settings["claude_path"] = _claude_path_input.text.strip_edges()
+	VmmSettings.save(_settings)
+	_claude.override_path = _settings["claude_path"]
+	_claude.detect()
+	_update_claude_status()
+	_populate_conflicts_list(_last_conflicts)  # re-render so Resolve buttons enable
+
+
+func _save_decomp_path() -> void:
+	_settings["game_source_path"] = _decomp_path_input.text.strip_edges()
+	VmmSettings.save(_settings)
+	if _resolver != null:
+		_resolver.game_source_path = _settings["game_source_path"]
+	# A path saved-but-empty resets it; either way no UI change needed
+	# beyond reflecting the current value back into the input.
+	_decomp_path_input.text = _settings["game_source_path"]
 
 
 func _build_scroll_section(parent: Container, header_text: String) -> VBoxContainer:
@@ -213,11 +291,14 @@ func _run_smoke() -> void:
 	_conflicts_label.text = "Conflicts: detecting (deep analysis) ..."
 	await get_tree().process_frame
 
-	var conflicts := VmmConflictDetector.detect_all(_registry.entries)
-	_update_conflicts_status(conflicts)
-	_populate_conflicts_list(conflicts)
+	_last_conflicts = VmmConflictDetector.detect_all(_registry.entries)
+	_update_conflicts_status(_last_conflicts)
 
 	_resolver = VmmConflictResolver.new(_claude, _registry)
+	_resolver.game_source_path = _settings["game_source_path"]
+	_resolver.resolution_ready.connect(_on_resolution_ready)
+
+	_populate_conflicts_list(_last_conflicts)
 
 	# Auto-run a ModWorkshop update check on first open.
 	_check_updates()
@@ -353,11 +434,9 @@ func _toggle_mod(entry) -> void:
 	_populate_mods_list()
 	# Re-run conflict detection — different enabled set means different
 	# conflicts. Cheap (a few archive reads); fine to do per-click.
-	var conflicts := VmmConflictDetector.detect_all(_registry.entries)
-	_update_conflicts_status(conflicts)
-	for child in _conflicts_list.get_children():
-		child.queue_free()
-	_populate_conflicts_list(conflicts)
+	_last_conflicts = VmmConflictDetector.detect_all(_registry.entries)
+	_update_conflicts_status(_last_conflicts)
+	_populate_conflicts_list(_last_conflicts)
 
 
 # True if we have ModWorkshop data for this mod and its installed
@@ -527,6 +606,121 @@ func _on_download_complete(rid: int, save_path: String, error: String) -> void:
 	_populate_mods_list()
 
 
+# --- AI conflict resolution ---------------------------------------------
+
+func _resolve_conflict(conflict: Dictionary) -> void:
+	if _pending_resolve_request != 0:
+		return
+	if not _claude.is_available():
+		return
+	_pending_resolve_request = _resolver.resolve_file_overlap(conflict)
+	_conflicts_label.text = (
+		"Resolving %s with Claude Code ..." % str(conflict.get("key", ""))
+	)
+	# Re-render the conflicts list to disable all Resolve buttons.
+	_populate_conflicts_list(_last_conflicts)
+
+
+func _on_resolution_ready(verdict: Dictionary) -> void:
+	_pending_resolve_request = 0
+	_update_conflicts_status(_last_conflicts)
+	_populate_conflicts_list(_last_conflicts)
+	_show_resolution_dialog(verdict)
+
+
+# Builds a popup window showing Claude's verdict for a file_overlap.
+# Free-form: a header, the reason, and either the merged source (read-only
+# TextEdit, copy-able) or the suggested load order. v2 will add Apply
+# buttons; for now this is read-only — the user reviews and patches their
+# mods themselves based on what Claude suggests.
+func _show_resolution_dialog(verdict: Dictionary) -> void:
+	var dialog := Window.new()
+	var conflict_key: String = str(verdict.get("conflict_key", ""))
+	dialog.title = "Conflict resolution: %s" % conflict_key
+	dialog.size = Vector2i(960, 640)
+	dialog.exclusive = false
+	dialog.close_requested.connect(dialog.queue_free)
+
+	var vbox := VBoxContainer.new()
+	vbox.anchor_right = 1.0
+	vbox.anchor_bottom = 1.0
+	vbox.offset_left = 12
+	vbox.offset_top = 12
+	vbox.offset_right = -12
+	vbox.offset_bottom = -12
+	vbox.add_theme_constant_override("separation", 8)
+	dialog.add_child(vbox)
+
+	var ok: bool = bool(verdict.get("ok", false))
+	if not ok:
+		var err_lbl := Label.new()
+		err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		err_lbl.text = "Error: %s" % str(verdict.get("error", "unknown"))
+		vbox.add_child(err_lbl)
+		var raw: String = str(verdict.get("raw_text", ""))
+		if raw != "":
+			var raw_lbl := Label.new()
+			raw_lbl.text = "Claude's raw response:"
+			vbox.add_child(raw_lbl)
+			var raw_edit := TextEdit.new()
+			raw_edit.text = raw
+			raw_edit.editable = false
+			raw_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			raw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			vbox.add_child(raw_edit)
+	else:
+		var v: String = str(verdict.get("verdict", ""))
+		var icon := "?"
+		match v:
+			"merge_safe":
+				icon = "✓"
+			"order_resolves":
+				icon = "⚠"
+			"incompatible":
+				icon = "✗"
+		var verdict_lbl := Label.new()
+		verdict_lbl.text = "%s  %s" % [icon, v]
+		verdict_lbl.add_theme_font_size_override("font_size", 18)
+		vbox.add_child(verdict_lbl)
+
+		var reason_lbl := Label.new()
+		reason_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		reason_lbl.text = str(verdict.get("reason", ""))
+		vbox.add_child(reason_lbl)
+
+		if v == "merge_safe":
+			var hdr := Label.new()
+			hdr.text = "Proposed merged source (read-only — copy and review before applying):"
+			vbox.add_child(hdr)
+			var src_edit := TextEdit.new()
+			src_edit.text = str(verdict.get("merged_source", ""))
+			src_edit.editable = false
+			src_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			src_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			vbox.add_child(src_edit)
+		elif v == "order_resolves":
+			var order_lbl := Label.new()
+			order_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			var order: Array = verdict.get("load_order", [])
+			order_lbl.text = "Suggested load order (earlier first):\n  " + "\n  ".join(
+				PackedStringArray(order)
+			)
+			vbox.add_child(order_lbl)
+
+		var cost_lbl := Label.new()
+		cost_lbl.text = "Cost: $%.4f" % float(verdict.get("cost_usd", 0.0))
+		cost_lbl.modulate = Color(0.7, 0.72, 0.78)
+		vbox.add_child(cost_lbl)
+
+	var close_btn := Button.new()
+	close_btn.text = "Close"
+	close_btn.pressed.connect(dialog.queue_free)
+	vbox.add_child(close_btn)
+
+	add_child(dialog)
+	dialog.popup_centered()
+
+
 func _update_conflicts_status(conflicts: Array) -> void:
 	if conflicts.is_empty():
 		_conflicts_label.text = "Conflicts: none detected ✓"
@@ -542,12 +736,48 @@ func _update_conflicts_status(conflicts: Array) -> void:
 
 
 func _populate_conflicts_list(conflicts: Array) -> void:
+	for child in _conflicts_list.get_children():
+		child.queue_free()
 	for c in conflicts:
-		var row := Label.new()
-		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var ids: Array = c.get("mod_ids", [])
 		var t: String = str(c.get("type", "?"))
+		var ids: Array = c.get("mod_ids", [])
+
+		var row := HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		# Per-row Resolve button — only for file_overlap conflicts on
+		# .gd files (the only thing the AI resolver currently knows
+		# how to merge / order). Disabled if Claude Code isn't reachable.
+		if t == "file_overlap":
+			var details: Dictionary = c.get("details", {})
+			var resolve_btn := Button.new()
+			resolve_btn.text = "Resolve"
+			resolve_btn.custom_minimum_size = Vector2(80, 0)
+			var is_gd: bool = bool(details.get("is_gdscript", false))
+			resolve_btn.disabled = (
+				not _claude.is_available()
+				or _pending_resolve_request != 0
+				or not is_gd
+			)
+			if not is_gd:
+				resolve_btn.tooltip_text = (
+					"Resolve only handles .gd file conflicts for now."
+				)
+			elif not _claude.is_available():
+				resolve_btn.tooltip_text = (
+					"Claude Code not detected. Set the path in Settings."
+				)
+			resolve_btn.pressed.connect(_resolve_conflict.bind(c))
+			row.add_child(resolve_btn)
+		else:
+			# Spacer to keep label columns aligned across rows.
+			var spacer := Control.new()
+			spacer.custom_minimum_size = Vector2(80, 0)
+			row.add_child(spacer)
+
+		var lbl := Label.new()
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var prefix := ""
 		if t == "super_chain_constraint":
 			var details: Dictionary = c.get("details", {})
@@ -560,10 +790,12 @@ func _populate_conflicts_list(conflicts: Array) -> void:
 					prefix = "⚠ "  # current order violates: `before` loads after `after`
 			else:
 				prefix = "·  "  # constraint involves a disabled mod
-		row.text = "%s[%s]  %s\n    mods: %s" % [
+		lbl.text = "%s[%s]  %s\n    mods: %s" % [
 			prefix,
 			t,
 			c.get("key", "?"),
 			", ".join(PackedStringArray(ids)),
 		]
+		row.add_child(lbl)
+
 		_conflicts_list.add_child(row)

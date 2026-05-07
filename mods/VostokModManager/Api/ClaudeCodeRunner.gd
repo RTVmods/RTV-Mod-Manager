@@ -19,6 +19,11 @@ var _version: String = ""
 var _next_request_id: int = 1
 var _threads: Dictionary = {}  # id -> Thread
 
+# Manual override path supplied by the user via Settings. Tried first in
+# `detect()` before the built-in candidate list, so the user can point us
+# at their actual claude binary when auto-detection fails.
+var override_path: String = ""
+
 
 func is_available() -> bool:
 	return _available
@@ -38,7 +43,12 @@ func detect() -> void:
 	_available = false
 	_version = ""
 	_claude_path = ""
-	for candidate in _candidate_paths():
+	var paths: Array[String] = []
+	if override_path != "":
+		paths.append(override_path)
+	for p in _candidate_paths():
+		paths.append(p)
+	for candidate in paths:
 		var output: Array = []
 		var exit := OS.execute(candidate, ["--version"], output, true)
 		if exit == 0:
