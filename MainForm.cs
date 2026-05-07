@@ -1,17 +1,11 @@
-// Top-level window. v0.3.2 — Claude Code detection + ModWorkshop
-// update tracking now wired up.
+// Top-level window. v0.3.3 — interactive mods grid: per-row Toggle
+// (enable/disable, moves the .vmz to/from Disabled/) and Update
+// (downloads the latest .vmz from ModWorkshop, swaps it in place).
 //
-// On show:
-//   1. Detect claude (synchronous; just runs `claude --version`)
-//   2. Scan mods folder (synchronous; ZIP read per mod)
-//   3. Detect conflicts (synchronous; ~hundreds of ms for 50 mods)
-//   4. Async ModWorkshop /mods/versions batch call → re-render the
-//      mods list with ✓ current / ⚠ X.Y available / (no MW link)
-//      status badges per row.
-//
-// Settings panel, AI conflict resolver, per-row Enable/Update/Resolve
-// buttons come in subsequent commits.
+// Conflicts column is still a read-only ListBox; AI Resolve buttons +
+// Settings panel + resolution dialog land in the next commit.
 
+using VostokModManager.Ai;
 using VostokModManager.Api;
 using VostokModManager.Domain;
 
@@ -26,23 +20,37 @@ public class MainForm : Form
     private readonly ModRegistry _registry = new();
     private readonly ClaudeCodeRunner _claude = new();
     private readonly ModWorkshopClient _mw = new();
+    private readonly ConflictResolver _resolver;
 
     /// <summary>mod_workshop_id → latest version (populated after the
     /// /mods/versions call).</summary>
     private readonly Dictionary<int, string> _latestVersions = new();
     private List<ConflictDetector.Conflict> _lastConflicts = new();
 
+    /// <summary>Backing list for the mods grid, in display order. The
+    /// grid binds to row indices into this list, so click handlers
+    /// look up entries by row number.</summary>
+    private List<ModEntry> _displayed = new();
+
+    /// <summary>True while a long-running per-row action is in flight
+    /// (download / etc.). Disables the action buttons across the grid.</summary>
+    private bool _busy;
+
     private Label _claudeLabel = null!;
     private Label _modsLabel = null!;
     private Label _updatesLabel = null!;
     private Label _conflictsLabel = null!;
-    private ListBox _modsList = null!;
+    private DataGridView _modsGrid = null!;
     private ListBox _conflictsList = null!;
 
     public MainForm()
     {
         _settings = Settings.Load();
         _claude.OverridePath = _settings.ClaudePath;
+        _resolver = new ConflictResolver(_claude, _registry)
+        {
+            GameSourcePath = _settings.GameSourcePath,
+        };
         InitializeWindow();
         BuildLayout();
         Shown += async (_, _) => await RunStartupAsync();
@@ -108,10 +116,17 @@ public class MainForm : Form
             BackColor = Color.Transparent,
             SplitterWidth = 6,
         };
-        split.Panel1.Controls.Add(BuildPanel("Installed mods", out _modsList));
-        split.Panel2.Controls.Add(BuildPanel("Conflicts", out _conflictsList));
+
+        // Left: interactive mods grid.
+        _modsGrid = BuildModsGrid();
+        var modsHost = WrapInPanel("Installed mods", _modsGrid);
+        split.Panel1.Controls.Add(modsHost);
+
+        // Right: read-only conflicts list (becomes a grid in the next commit).
+        var conflictsHost = WrapInPanelWithList("Conflicts", out _conflictsList);
+        split.Panel2.Controls.Add(conflictsHost);
+
         root.Controls.Add(split, 0, 5);
-        // Center the splitter once the form has a real size.
         split.Resize += (_, _) =>
         {
             if (split.Width > 100)
@@ -127,7 +142,112 @@ public class MainForm : Form
         ForeColor = Color.FromArgb(180, 190, 210),
     };
 
-    private static Panel BuildPanel(string headerText, out ListBox list)
+    private DataGridView BuildModsGrid()
+    {
+        var grid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AutoGenerateColumns = false,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            ReadOnly = true,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            RowHeadersVisible = false,
+            BackgroundColor = Color.FromArgb(18, 22, 30),
+            BorderStyle = BorderStyle.FixedSingle,
+            EnableHeadersVisualStyles = false,
+            ColumnHeadersDefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(36, 42, 54),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                SelectionBackColor = Color.FromArgb(36, 42, 54),
+                SelectionForeColor = Color.FromArgb(220, 225, 235),
+            },
+            DefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(18, 22, 30),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                SelectionBackColor = Color.FromArgb(40, 60, 90),
+                SelectionForeColor = Color.FromArgb(255, 255, 255),
+                Font = new Font("Consolas", 9f),
+            },
+            GridColor = Color.FromArgb(40, 46, 58),
+            ColumnHeadersHeight = 28,
+            RowTemplate = { Height = 24 },
+        };
+
+        // Columns. AutoGenerateColumns = false so we control the layout.
+        grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "Toggle",
+            HeaderText = "",
+            Width = 80,
+            UseColumnTextForButtonValue = false,
+            FlatStyle = FlatStyle.System,
+        });
+        grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "Update",
+            HeaderText = "",
+            Width = 80,
+            UseColumnTextForButtonValue = false,
+            FlatStyle = FlatStyle.System,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Pos",
+            HeaderText = "#",
+            Width = 36,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Status",
+            HeaderText = "",
+            Width = 24,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Name",
+            HeaderText = "Mod",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 100,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Version",
+            HeaderText = "Version",
+            Width = 80,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Priority",
+            HeaderText = "Prio",
+            Width = 50,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "UpdateBadge",
+            HeaderText = "Update status",
+            Width = 150,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "ModId",
+            HeaderText = "ID",
+            Width = 220,
+        });
+
+        grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
+        return grid;
+    }
+
+    private static Panel WrapInPanel(string headerText, Control body)
     {
         var p = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         var hdr = new Label
@@ -138,6 +258,14 @@ public class MainForm : Form
             Font = new Font("Segoe UI", 11f, FontStyle.Bold),
             ForeColor = Color.FromArgb(220, 225, 235),
         };
+        body.Dock = DockStyle.Fill;
+        p.Controls.Add(body);
+        p.Controls.Add(hdr);
+        return p;
+    }
+
+    private static Panel WrapInPanelWithList(string headerText, out ListBox list)
+    {
         list = new ListBox
         {
             Dock = DockStyle.Fill,
@@ -147,20 +275,14 @@ public class MainForm : Form
             IntegralHeight = false,
             Font = new Font("Consolas", 9f),
         };
-        p.Controls.Add(list);
-        p.Controls.Add(hdr);
-        return p;
+        return WrapInPanel(headerText, list);
     }
 
     private async Task RunStartupAsync()
     {
-        // Claude detection — synchronous, fast (one --version call)
         _claude.Detect();
         UpdateClaudeStatus();
 
-        // Scan mods + conflicts — synchronous, runs on the UI thread
-        // but is fast enough (~200ms for 50 mods) that DoEvents-style
-        // progress isn't necessary.
         _modsLabel.Text = $"Mods: scanning {DefaultModsDir} ...";
         if (!_registry.Scan(DefaultModsDir))
         {
@@ -169,14 +291,13 @@ public class MainForm : Form
             return;
         }
         UpdateModsStatus();
-        PopulateModsList();
+        PopulateModsGrid();
 
         _conflictsLabel.Text = "Conflicts: detecting (deep analysis) ...";
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
 
-        // ModWorkshop update check — async, doesn't block UI
         await CheckUpdatesAsync();
     }
 
@@ -227,39 +348,53 @@ public class MainForm : Form
         _conflictsLabel.Text = "Conflicts: " + string.Join(", ", byType);
     }
 
-    private void PopulateModsList()
+    private void PopulateModsGrid()
     {
         // Sort: enabled first, by priority asc, then by filename.
-        // Mirrors the v0.2 sort_for_load_order comparator.
-        var sorted = _registry.Entries
+        _displayed = _registry.Entries
             .OrderByDescending(e => e.IsEnabled)
             .ThenBy(e => e.IsEnabled ? e.Priority : 0)
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
             .ToList();
-        _modsList.BeginUpdate();
-        _modsList.Items.Clear();
+
+        _modsGrid.SuspendLayout();
+        _modsGrid.Rows.Clear();
         var pos = 0;
-        foreach (var e in sorted)
+        foreach (var e in _displayed)
         {
-            var posStr = e.IsEnabled ? $"[{++pos,2}]" : "  · ";
-            var status = e.IsEnabled ? "●" : "○";
-            var name = string.IsNullOrEmpty(e.DisplayName)
-                ? Path.GetFileName(e.Path)
-                : e.DisplayName;
-            var badge = UpdateBadge(e);
-            _modsList.Items.Add(
-                $"{posStr} {status}  {name}  v{e.Version}   p={e.Priority}   {badge}   [{e.ModId}]"
-            );
+            var rowIdx = _modsGrid.Rows.Add();
+            var row = _modsGrid.Rows[rowIdx];
+            row.Cells["Toggle"].Value = e.IsEnabled ? "Disable" : "Enable";
+            row.Cells["Update"].Value = "Update";
+            ((DataGridViewButtonCell)row.Cells["Update"]).Tag =
+                _busy || !IsOutdated(e) ? "disabled" : "";
+            row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
+            row.Cells["Status"].Value = e.IsEnabled ? "●" : "○";
+            row.Cells["Name"].Value = !string.IsNullOrEmpty(e.DisplayName)
+                ? e.DisplayName
+                : Path.GetFileName(e.Path);
+            row.Cells["Version"].Value = e.Version;
+            row.Cells["Priority"].Value = e.Priority.ToString();
+            row.Cells["UpdateBadge"].Value = UpdateBadge(e);
+            row.Cells["ModId"].Value = e.ModId;
         }
-        _modsList.EndUpdate();
+        _modsGrid.ResumeLayout();
+    }
+
+    private bool IsOutdated(ModEntry e)
+    {
+        var mw = e.ModWorkshopId;
+        if (mw <= 0) return false;
+        if (!_latestVersions.TryGetValue(mw, out var latest)) return false;
+        if (string.IsNullOrEmpty(latest)) return false;
+        return latest != e.Version;
     }
 
     private string UpdateBadge(ModEntry e)
     {
         var mw = e.ModWorkshopId;
         if (mw <= 0) return "(no MW link)";
-        if (!_latestVersions.TryGetValue(mw, out var latest))
-            return ""; // check not run yet
+        if (!_latestVersions.TryGetValue(mw, out var latest)) return "";
         if (string.IsNullOrEmpty(latest)) return "(unknown)";
         if (latest == e.Version) return "✓ current";
         return $"⚠ {latest} available";
@@ -308,12 +443,135 @@ public class MainForm : Form
             }
             _updatesLabel.Text =
                 $"Updates: {outdated} outdated, {current} current, {unknown} unknown";
-            // Re-render the mod list so each row gets the badge.
-            PopulateModsList();
+            PopulateModsGrid();
         }
         catch (Exception ex)
         {
             _updatesLabel.Text = $"Updates: check failed — {ex.Message}";
         }
+    }
+
+    // --- per-row actions -------------------------------------------
+
+    private async Task OnGridCellClickedAsync(DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+        if (_busy) return;
+        var col = _modsGrid.Columns[e.ColumnIndex].Name;
+        var entry = _displayed[e.RowIndex];
+        switch (col)
+        {
+            case "Toggle":
+                ToggleMod(entry);
+                break;
+            case "Update":
+                if (IsOutdated(entry))
+                    await UpdateModAsync(entry);
+                break;
+        }
+    }
+
+    private void ToggleMod(ModEntry e)
+    {
+        var fileName = Path.GetFileName(e.Path);
+        string dst;
+        if (e.IsEnabled)
+        {
+            var disabledDir = Path.Combine(DefaultModsDir, "Disabled");
+            try { Directory.CreateDirectory(disabledDir); }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't create Disabled folder", ex);
+                return;
+            }
+            dst = Path.Combine(disabledDir, fileName);
+        }
+        else
+        {
+            dst = Path.Combine(DefaultModsDir, fileName);
+        }
+        try
+        {
+            if (e.IsArchive) File.Move(e.Path, dst);
+            else Directory.Move(e.Path, dst);
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Couldn't move {fileName}", ex);
+            return;
+        }
+        // Rescan + redetect conflicts (different enabled set may have
+        // a different conflict set).
+        _registry.Scan(DefaultModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+    }
+
+    private async Task UpdateModAsync(ModEntry e)
+    {
+        var mw = e.ModWorkshopId;
+        if (mw <= 0) return;
+        var label = string.IsNullOrEmpty(e.DisplayName)
+            ? Path.GetFileName(e.Path)
+            : e.DisplayName;
+        var finalPath = e.Path;
+        var tempPath = finalPath + ".download";
+
+        _busy = true;
+        _updatesLabel.Text = $"Downloading {label} ...";
+        PopulateModsGrid();  // re-render to disable buttons
+
+        try
+        {
+            // Clean up any leftover from a prior failed attempt.
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+
+            await _mw.DownloadLatestAsync(mw, tempPath);
+
+            // Swap the file. If the original is locked (game running
+            // and reading it), File.Delete throws — we leave the temp
+            // file in place and tell the user to rename manually.
+            if (File.Exists(finalPath))
+            {
+                try { File.Delete(finalPath); }
+                catch (Exception ex)
+                {
+                    _updatesLabel.Text =
+                        $"Downloaded {label} to {Path.GetFileName(tempPath)}, but " +
+                        $"couldn't replace existing file ({ex.Message}). " +
+                        "Quit the game and rename the .download file manually.";
+                    return;
+                }
+            }
+            File.Move(tempPath, finalPath);
+
+            _updatesLabel.Text =
+                $"Updated {label}. (Mod's internal version may still " +
+                "lag the ModWorkshop reported version — that's a mod-author quirk.)";
+
+            _registry.Scan(DefaultModsDir);
+            UpdateModsStatus();
+            PopulateModsGrid();
+        }
+        catch (Exception ex)
+        {
+            if (File.Exists(tempPath))
+            { try { File.Delete(tempPath); } catch { } }
+            ShowError($"Update failed for {label}", ex);
+        }
+        finally
+        {
+            _busy = false;
+            PopulateModsGrid();
+        }
+    }
+
+    private void ShowError(string title, Exception ex)
+    {
+        MessageBox.Show(this, ex.Message, title,
+            MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
