@@ -13,12 +13,19 @@ const _DEFAULT_MODS_DIR := "C:/Program Files (x86)/Steam/steamapps/common/Road t
 var _claude := VmmClaudeCodeRunner.new()
 var _registry := VmmModRegistry.new()
 var _resolver: VmmConflictResolver
+var _mw_client: VmmModWorkshopClient
 
 var _claude_label: Label
 var _mods_label: Label
 var _conflicts_label: Label
+var _updates_label: Label
+var _update_button: Button
 var _mods_list: VBoxContainer
 var _conflicts_list: VBoxContainer
+
+# mw_id (int) -> latest version (str), populated by ModWorkshop check.
+var _latest_versions: Dictionary = {}
+var _pending_update_request: int = 0
 
 
 func _ready() -> void:
@@ -51,6 +58,11 @@ func _ready() -> void:
 	title.add_theme_font_size_override("font_size", 22)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
+	_update_button = Button.new()
+	_update_button.text = "Check Updates"
+	_update_button.pressed.connect(_check_updates)
+	_update_button.disabled = true  # enabled after registry scan
+	header.add_child(_update_button)
 	var close_btn := Button.new()
 	close_btn.text = "Close (Esc)"
 	close_btn.pressed.connect(_close)
@@ -60,8 +72,17 @@ func _ready() -> void:
 	root.add_child(_claude_label)
 	_mods_label = Label.new()
 	root.add_child(_mods_label)
+	_updates_label = Label.new()
+	root.add_child(_updates_label)
 	_conflicts_label = Label.new()
 	root.add_child(_conflicts_label)
+
+	# ModWorkshop client must live in the scene tree (it spawns HTTPRequest
+	# children). Add as a child of self so it's freed when we close.
+	_mw_client = VmmModWorkshopClient.new()
+	add_child(_mw_client)
+	_mw_client.versions_ready.connect(_on_versions_ready)
+	_mw_client.versions_failed.connect(_on_versions_failed)
 
 	var split := HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -133,6 +154,7 @@ func _run_smoke() -> void:
 
 	_update_mods_status()
 	_populate_mods_list()
+	_update_button.disabled = false
 
 	_conflicts_label.text = "Conflicts: detecting (deep analysis) ..."
 	await get_tree().process_frame
@@ -142,6 +164,9 @@ func _run_smoke() -> void:
 	_populate_conflicts_list(conflicts)
 
 	_resolver = VmmConflictResolver.new(_claude, _registry)
+
+	# Auto-run a ModWorkshop update check on first open.
+	_check_updates()
 
 
 func _update_claude_status() -> void:
@@ -167,6 +192,11 @@ func _update_mods_status() -> void:
 
 
 func _populate_mods_list() -> void:
+	# Clear any previously-rendered rows so the list reflects the current
+	# state (used both on first render and when re-rendering after an
+	# update check).
+	for child in _mods_list.get_children():
+		child.queue_free()
 	for entry in _registry.entries:
 		var row := Label.new()
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -174,14 +204,83 @@ func _populate_mods_list() -> void:
 		var label_name := entry.display_name()
 		if label_name == "":
 			label_name = entry.path.get_file()
-		row.text = "%s  %s  v%s   [%s]   modworkshop=%d" % [
+		var update_badge := _update_badge(entry)
+		row.text = "%s  %s  v%s   %s   [%s]" % [
 			status,
 			label_name,
 			entry.version(),
+			update_badge,
 			entry.mod_id(),
-			entry.modworkshop_id(),
 		]
 		_mods_list.add_child(row)
+
+
+# Returns a short status string for the right-hand "version status"
+# column. Empty until we've fetched ModWorkshop data.
+func _update_badge(entry: VmmModEntry) -> String:
+	var mw := entry.modworkshop_id()
+	if mw <= 0:
+		return "(no ModWorkshop link)"
+	if not _latest_versions.has(mw):
+		return ""  # check not run yet
+	var latest := str(_latest_versions[mw])
+	if latest == "":
+		return "(unknown)"
+	if latest == entry.version():
+		return "✓ current"
+	return "⚠ %s available" % latest
+
+
+# --- update check -------------------------------------------------------
+
+func _check_updates() -> void:
+	var mw_ids: Array = []
+	for e in _registry.enabled():
+		var mid := e.modworkshop_id()
+		if mid > 0:
+			mw_ids.append(mid)
+	if mw_ids.is_empty():
+		_updates_label.text = "Updates: no mods have a ModWorkshop link"
+		return
+	_update_button.disabled = true
+	_updates_label.text = "Updates: checking %d mods on ModWorkshop ..." % mw_ids.size()
+	_pending_update_request = _mw_client.check_versions(mw_ids)
+
+
+func _on_versions_ready(request_id: int, versions: Dictionary) -> void:
+	if request_id != _pending_update_request:
+		return
+	_pending_update_request = 0
+	_update_button.disabled = false
+	_latest_versions = versions
+
+	var outdated := 0
+	var unknown := 0
+	var current := 0
+	for e in _registry.enabled():
+		var mw := e.modworkshop_id()
+		if mw <= 0:
+			continue
+		if not versions.has(mw):
+			unknown += 1
+			continue
+		if str(versions[mw]) == e.version():
+			current += 1
+		else:
+			outdated += 1
+	_updates_label.text = (
+		"Updates: %d outdated, %d current, %d unknown"
+		% [outdated, current, unknown]
+	)
+	_populate_mods_list()
+
+
+func _on_versions_failed(request_id: int, error: String) -> void:
+	if request_id != _pending_update_request:
+		return
+	_pending_update_request = 0
+	_update_button.disabled = false
+	_updates_label.text = "Updates: check failed — %s" % error
 
 
 func _update_conflicts_status(conflicts: Array) -> void:
