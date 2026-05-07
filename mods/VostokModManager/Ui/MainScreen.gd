@@ -34,6 +34,8 @@ var _mods_list: VBoxContainer
 var _conflicts_list: VBoxContainer
 var _claude_path_input: LineEdit
 var _decomp_path_input: LineEdit
+var _setup_banner: Panel
+var _setup_banner_label: Label
 var _settings: Dictionary = VmmSettings.DEFAULTS.duplicate()
 # request_id of an in-flight conflict resolution call.
 var _pending_resolve_request: int = 0
@@ -116,6 +118,29 @@ func _ready() -> void:
 	close_btn.pressed.connect(_close)
 	header.add_child(close_btn)
 
+	# Setup banner: shown when Claude Code or Decomp aren't configured.
+	# Empty/hidden when both are good. Built lazily in _refresh_setup_banner.
+	_setup_banner = Panel.new()
+	_setup_banner.visible = false
+	var banner_style := StyleBoxFlat.new()
+	banner_style.bg_color = Color(0.55, 0.40, 0.10, 0.65)
+	banner_style.set_border_width_all(2)
+	banner_style.border_color = Color(1.0, 0.75, 0.30, 1.0)
+	banner_style.set_corner_radius_all(4)
+	banner_style.content_margin_left = 12
+	banner_style.content_margin_right = 12
+	banner_style.content_margin_top = 8
+	banner_style.content_margin_bottom = 8
+	_setup_banner.add_theme_stylebox_override("panel", banner_style)
+	root.add_child(_setup_banner)
+	_setup_banner_label = Label.new()
+	_setup_banner_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_setup_banner.add_child(_setup_banner_label)
+	# Anchor the label to fill the panel so the stylebox padding is honored.
+	_setup_banner_label.anchor_right = 1.0
+	_setup_banner_label.anchor_bottom = 1.0
+	_setup_banner.custom_minimum_size = Vector2(0, 60)
+
 	_claude_label = Label.new()
 	root.add_child(_claude_label)
 
@@ -129,12 +154,16 @@ func _ready() -> void:
 		"  Claude Code path:",
 		"(auto-detect — only fill if not found above)",
 		_save_claude_path,
+		_browse_claude_path,
 	)
 	_decomp_path_input = _build_path_row(
 		root,
 		"  Game source (Decomp/):",
-		"e.g. C:/Users/Joao/Desktop/RoadToVostok Dev/Decomp",
+		"path to the decompiled game source folder",
 		_save_decomp_path,
+		_browse_decomp_path,
+		"How?",
+		_show_decomp_help,
 	)
 
 	_mods_label = Label.new()
@@ -173,6 +202,15 @@ func _ready() -> void:
 	_claude_path_input.text = _settings["claude_path"]
 	_decomp_path_input.text = _settings["game_source_path"]
 
+	# Auto-detect Decomp on first run. Only applied if the user hasn't
+	# already set a path — we never overwrite an explicit choice.
+	if _settings["game_source_path"] == "":
+		var detected := _autodetect_decomp_path()
+		if detected != "":
+			_settings["game_source_path"] = detected
+			VmmSettings.save(_settings)
+			_decomp_path_input.text = detected
+
 	set_process_input(true)
 	await get_tree().process_frame
 	_run_smoke()
@@ -209,6 +247,9 @@ func _build_path_row(
 	label_text: String,
 	placeholder: String,
 	on_save: Callable,
+	on_browse: Callable,
+	extra_button_text: String = "",
+	on_extra: Callable = Callable(),
 ) -> LineEdit:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -221,10 +262,19 @@ func _build_path_row(
 	input.placeholder_text = placeholder
 	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(input)
-	var btn := Button.new()
-	btn.text = "Save"
-	btn.pressed.connect(on_save)
-	row.add_child(btn)
+	var browse_btn := Button.new()
+	browse_btn.text = "Browse..."
+	browse_btn.pressed.connect(on_browse)
+	row.add_child(browse_btn)
+	var save_btn := Button.new()
+	save_btn.text = "Save"
+	save_btn.pressed.connect(on_save)
+	row.add_child(save_btn)
+	if extra_button_text != "" and on_extra.is_valid():
+		var extra_btn := Button.new()
+		extra_btn.text = extra_button_text
+		extra_btn.pressed.connect(on_extra)
+		row.add_child(extra_btn)
 	return input
 
 
@@ -245,6 +295,175 @@ func _save_decomp_path() -> void:
 	# A path saved-but-empty resets it; either way no UI change needed
 	# beyond reflecting the current value back into the input.
 	_decomp_path_input.text = _settings["game_source_path"]
+	_refresh_setup_banner()
+
+
+# --- Browse pickers -----------------------------------------------------
+
+func _browse_claude_path() -> void:
+	var dialog := FileDialog.new()
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.filters = PackedStringArray(["*.exe,*.cmd,*.bat ; Claude Code binary"])
+	dialog.title = "Locate claude.exe"
+	dialog.size = Vector2i(900, 600)
+	dialog.file_selected.connect(func(path: String):
+		_claude_path_input.text = path
+		_save_claude_path()
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.7)
+
+
+func _browse_decomp_path() -> void:
+	var dialog := FileDialog.new()
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dialog.title = "Locate the decompiled game source folder"
+	dialog.size = Vector2i(900, 600)
+	dialog.dir_selected.connect(func(path: String):
+		_decomp_path_input.text = path
+		_save_decomp_path()
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.7)
+
+
+# Auto-detect a Decomp folder by checking a list of plausible locations.
+# A folder counts as "the Decomp/" if it contains both Scripts/Loader.gd
+# and Scripts/Interface.gd — landmark files we know the game ships.
+# Returns the absolute path if found, "" otherwise.
+func _autodetect_decomp_path() -> String:
+	var candidates: Array[String] = []
+	var home := OS.get_environment("USERPROFILE")
+	var exe_path := OS.get_executable_path()
+	var game_dir := exe_path.get_base_dir() if exe_path != "" else ""
+	if game_dir != "":
+		candidates.append(game_dir.path_join("Decomp"))
+		candidates.append(game_dir.get_base_dir().path_join("Decomp"))
+	if home != "":
+		candidates.append(home.path_join("Documents").path_join("RoadToVostok_Decomp"))
+		candidates.append(home.path_join("Desktop").path_join("RoadToVostok Dev").path_join("Decomp"))
+		candidates.append(home.path_join("Desktop").path_join("Decomp"))
+	for c in candidates:
+		if _looks_like_decomp(c):
+			return c
+	return ""
+
+
+func _looks_like_decomp(path: String) -> bool:
+	if path == "" or not DirAccess.dir_exists_absolute(path):
+		return false
+	var landmarks: Array[String] = [
+		path.path_join("Scripts").path_join("Loader.gd"),
+		path.path_join("Scripts").path_join("Interface.gd"),
+	]
+	for f in landmarks:
+		if not FileAccess.file_exists(f):
+			return false
+	return true
+
+
+# --- Decomp how-to modal ------------------------------------------------
+
+func _show_decomp_help() -> void:
+	var dialog := Window.new()
+	dialog.title = "How to set up the Decomp/ folder"
+	dialog.size = Vector2i(820, 620)
+	dialog.exclusive = false
+	dialog.close_requested.connect(dialog.queue_free)
+
+	var vbox := VBoxContainer.new()
+	vbox.anchor_right = 1.0
+	vbox.anchor_bottom = 1.0
+	vbox.offset_left = 16
+	vbox.offset_top = 16
+	vbox.offset_right = -16
+	vbox.offset_bottom = -16
+	vbox.add_theme_constant_override("separation", 10)
+	dialog.add_child(vbox)
+
+	var intro := Label.new()
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intro.text = (
+		"The Decomp/ folder is the decompiled source of Road to Vostok. "
+		+ "It's optional but strongly recommended: when two mods both override "
+		+ "the same game script, the AI conflict resolver uses the original "
+		+ "version from Decomp/ as context to produce a much better merge.\n\n"
+		+ "It's a one-time setup. Once extracted, the Manager remembers the "
+		+ "path."
+	)
+	vbox.add_child(intro)
+
+	var steps_header := Label.new()
+	steps_header.text = "Extracting it (one-time, ~5 minutes):"
+	steps_header.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(steps_header)
+
+	var steps := Label.new()
+	steps.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	steps.text = (
+		"1. Download gdre_tools (Godot RE Tools) from:\n"
+		+ "       https://github.com/bruvzg/gdsdecomp/releases\n"
+		+ "    Pick the latest Windows release (gdre_tools.exe).\n\n"
+		+ "2. Run gdre_tools.exe. In the GUI, choose \"RE Tools\" >\n"
+		+ "    \"Recover Project\" (or the equivalent extract option).\n\n"
+		+ "3. Point it at your game pack:\n"
+		+ "       %s\n\n"
+		+ "4. Choose an output folder. Suggested:\n"
+		+ "       %s\n\n"
+		+ "5. Wait for extraction to finish (~5GB of output).\n\n"
+		+ "6. Come back here and paste that output folder into\n"
+		+ "    the \"Game source (Decomp/)\" input above. Or click\n"
+		+ "    Browse... to pick it visually."
+	) % [
+		_guess_pck_path(),
+		_guess_default_decomp_output(),
+	]
+	vbox.add_child(steps)
+
+	var note := Label.new()
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.modulate = Color(0.75, 0.78, 0.85)
+	note.text = (
+		"Note: gdre_tools is a separate community tool, not part of the "
+		+ "Mod Manager. We don't bundle it because it's a 50MB+ Godot "
+		+ "executable in its own right and the user-data .pck is too "
+		+ "large (~5GB) to extract in the background without a clear "
+		+ "consent step. Once extracted, you only do this once."
+	)
+	vbox.add_child(note)
+
+	var close_btn := Button.new()
+	close_btn.text = "Close"
+	close_btn.pressed.connect(dialog.queue_free)
+	vbox.add_child(close_btn)
+
+	add_child(dialog)
+	dialog.popup_centered()
+
+
+func _guess_pck_path() -> String:
+	var exe := OS.get_executable_path()
+	if exe == "":
+		return "<game install>/RTV.pck"
+	var dir := exe.get_base_dir()
+	for name in ["RTV.pck", "Road to Vostok.pck"]:
+		var p := dir.path_join(name)
+		if FileAccess.file_exists(p):
+			return p
+	return dir.path_join("RTV.pck")
+
+
+func _guess_default_decomp_output() -> String:
+	var home := OS.get_environment("USERPROFILE")
+	if home == "":
+		return "<your-documents>/RoadToVostok_Decomp"
+	return home.path_join("Documents").path_join("RoadToVostok_Decomp")
 
 
 func _build_scroll_section(parent: Container, header_text: String) -> VBoxContainer:
@@ -313,8 +532,33 @@ func _update_claude_status() -> void:
 	else:
 		_claude_label.text = (
 			"Claude Code: ✗ not found — AI conflict resolution disabled. "
-			+ "Install from claude.com/claude-code or `npm i -g @anthropic-ai/claude-code`."
+			+ "Install from claude.com/claude-code, then click Browse... below."
 		)
+	_refresh_setup_banner()
+
+
+# Banner shown above everything when one or both required paths are
+# missing. Hidden once both are configured.
+func _refresh_setup_banner() -> void:
+	var msgs: Array[String] = []
+	if not _claude.is_available():
+		msgs.append(
+			"• Claude Code not detected. Install from claude.com/claude-code, "
+			+ "then click Browse... next to \"Claude Code path\" and pick "
+			+ "claude.exe."
+		)
+	if _settings["game_source_path"] == "" or not _looks_like_decomp(_settings["game_source_path"]):
+		msgs.append(
+			"• Game source (Decomp/) not configured. Click \"How?\" next to "
+			+ "the Decomp input below — extracting it once enables much "
+			+ "better AI conflict resolution."
+		)
+	if msgs.is_empty():
+		_setup_banner.visible = false
+		return
+	_setup_banner_label.text = "⚙ Setup needed:\n\n" + "\n\n".join(PackedStringArray(msgs))
+	_setup_banner.custom_minimum_size = Vector2(0, 40 + 36 * msgs.size())
+	_setup_banner.visible = true
 
 
 func _update_mods_status() -> void:
