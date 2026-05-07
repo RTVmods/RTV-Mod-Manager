@@ -36,6 +36,11 @@ var _conflicts_list: VBoxContainer
 var _latest_versions: Dictionary = {}
 var _pending_update_request: int = 0
 
+# mod_id -> 1-based load-order position. Populated by _populate_mods_list
+# and read by _populate_conflicts_list to mark super-chain constraints
+# as satisfied (✓) or violated (⚠).
+var _position_by_id: Dictionary = {}
+
 
 func _ready() -> void:
 	# Force explicit sizing from the viewport rect. Control children of a
@@ -238,7 +243,16 @@ func _populate_mods_list() -> void:
 	# update check or a toggle).
 	for child in _mods_list.get_children():
 		child.queue_free()
-	for entry in _registry.entries:
+
+	# Display order matches the game's load order: enabled mods first,
+	# sorted by priority (lower first), tie-broken by filename. Disabled
+	# mods follow, alphabetical. The numeric position is the load index.
+	var sorted_entries: Array = _registry.entries.duplicate()
+	sorted_entries.sort_custom(_sort_for_load_order)
+
+	_position_by_id.clear()
+	var position := 0
+	for entry in sorted_entries:
 		var row := HBoxContainer.new()
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
@@ -251,21 +265,45 @@ func _populate_mods_list() -> void:
 		var lbl := Label.new()
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var pos_str: String
+		if entry.is_enabled:
+			position += 1
+			_position_by_id[entry.mod_id()] = position
+			pos_str = "[%2d]" % position
+		else:
+			pos_str = "  · "
 		var status := "●" if entry.is_enabled else "○"
 		var label_name: String = entry.display_name()
 		if label_name == "":
 			label_name = entry.path.get_file()
 		var update_badge := _update_badge(entry)
-		lbl.text = "%s  %s  v%s   %s   [%s]" % [
+		var prio: int = entry.priority()
+		lbl.text = "%s %s  %s  v%s   p=%d   %s   [%s]" % [
+			pos_str,
 			status,
 			label_name,
 			entry.version(),
+			prio,
 			update_badge,
 			entry.mod_id(),
 		]
 		row.add_child(lbl)
 
 		_mods_list.add_child(row)
+
+
+# Comparator: enabled mods come first, then sort by priority ascending
+# (matches what the game's modloader does), then by filename for ties.
+# Disabled mods go below, sorted alphabetically.
+func _sort_for_load_order(a, b) -> bool:
+	if a.is_enabled != b.is_enabled:
+		return a.is_enabled  # true (enabled) sorts before false (disabled)
+	if a.is_enabled:
+		if a.priority() != b.priority():
+			return a.priority() < b.priority()
+	var an: String = a.path.get_file().to_lower()
+	var bn: String = b.path.get_file().to_lower()
+	return an < bn
 
 
 # Moves a mod between <mods>/ and <mods>/Disabled/. The game reads mods
@@ -294,6 +332,13 @@ func _toggle_mod(entry) -> void:
 	_registry.scan(_DEFAULT_MODS_DIR)
 	_update_mods_status()
 	_populate_mods_list()
+	# Re-run conflict detection — different enabled set means different
+	# conflicts. Cheap (a few archive reads); fine to do per-click.
+	var conflicts := VmmConflictDetector.detect_all(_registry.entries)
+	_update_conflicts_status(conflicts)
+	for child in _conflicts_list.get_children():
+		child.queue_free()
+	_populate_conflicts_list(conflicts)
 
 
 # Returns a short status string for the right-hand "version status"
@@ -384,8 +429,22 @@ func _populate_conflicts_list(conflicts: Array) -> void:
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var ids: Array = c.get("mod_ids", [])
-		row.text = "[%s]  %s\n    mods: %s" % [
-			c.get("type", "?"),
+		var t: String = str(c.get("type", "?"))
+		var prefix := ""
+		if t == "super_chain_constraint":
+			var details: Dictionary = c.get("details", {})
+			var before: String = str(details.get("before", ""))
+			var after: String = str(details.get("after", ""))
+			if _position_by_id.has(before) and _position_by_id.has(after):
+				if int(_position_by_id[before]) < int(_position_by_id[after]):
+					prefix = "✓ "  # current order satisfies the constraint
+				else:
+					prefix = "⚠ "  # current order violates: `before` loads after `after`
+			else:
+				prefix = "·  "  # constraint involves a disabled mod
+		row.text = "%s[%s]  %s\n    mods: %s" % [
+			prefix,
+			t,
 			c.get("key", "?"),
 			", ".join(PackedStringArray(ids)),
 		]
