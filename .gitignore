@@ -1,26 +1,25 @@
-# Godot 4
-.godot/
-.import/
-export.cfg
-*.translation
-# Note: export_presets.cfg IS committed for this project — it's the build
-# config, no secrets in it (no signing certs, no SSH credentials).
+# .NET
+bin/
+obj/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
 
-# Mono / C#
-.mono/
-data_*/
-mono_crash.*.json
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.swp
 
 # OS
 Thumbs.db
 .DS_Store
-
-# IDE
-.vscode/
-.idea/
 
 # Local
 *.log
 
 # Build output
 dist/
+publish/

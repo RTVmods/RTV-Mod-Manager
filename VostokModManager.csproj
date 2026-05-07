@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VostokModManager</RootNamespace>
+    <AssemblyName>VostokModManager</AssemblyName>
+    <Version>0.3.0</Version>
+    <Product>Vostok Mod Manager</Product>
+    <Description>Standalone mod manager for Road to Vostok</Description>
+  </PropertyGroup>
+
+  <!-- Single-file self-contained release build:
+       dotnet publish -c Release
+       produces publish/VostokModManager.exe — one file, no runtime
+       install needed on the user's machine. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishDir>publish/</PublishDir>
+  </PropertyGroup>
+
+</Project>
