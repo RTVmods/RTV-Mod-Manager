@@ -223,7 +223,7 @@ func _populate_mods_list() -> void:
 		var row := Label.new()
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		var status := "●" if entry.is_enabled else "○"
-		var label_name := entry.display_name()
+		var label_name: String = entry.display_name()
 		if label_name == "":
 			label_name = entry.path.get_file()
 		var update_badge := _update_badge(entry)
@@ -240,7 +240,7 @@ func _populate_mods_list() -> void:
 # Returns a short status string for the right-hand "version status"
 # column. Empty until we've fetched ModWorkshop data.
 func _update_badge(entry) -> String:
-	var mw := entry.modworkshop_id()
+	var mw: int = entry.modworkshop_id()
 	if mw <= 0:
 		return "(no ModWorkshop link)"
 	if not _latest_versions.has(mw):
@@ -258,7 +258,7 @@ func _update_badge(entry) -> String:
 func _check_updates() -> void:
 	var mw_ids: Array = []
 	for e in _registry.enabled():
-		var mid := e.modworkshop_id()
+		var mid: int = e.modworkshop_id()
 		if mid > 0:
 			mw_ids.append(mid)
 	if mw_ids.is_empty():
@@ -280,7 +280,7 @@ func _on_versions_ready(request_id: int, versions: Dictionary) -> void:
 	var unknown := 0
 	var current := 0
 	for e in _registry.enabled():
-		var mw := e.modworkshop_id()
+		var mw: int = e.modworkshop_id()
 		if mw <= 0:
 			continue
 		if not versions.has(mw):

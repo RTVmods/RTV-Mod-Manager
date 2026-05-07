@@ -160,7 +160,7 @@ static func _analyze_mod_scripts(entry) -> Dictionary:
 		for f in entry.files:
 			if not f.ends_with(".gd"):
 				continue
-			var src := entry.read_file_text(f)
+			var src: String = entry.read_file_text(f)
 			if src != "":
 				out[f] = VmmGDScriptAnalyzer.analyze(src)
 	return out

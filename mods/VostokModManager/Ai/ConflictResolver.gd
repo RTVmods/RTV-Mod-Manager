@@ -48,7 +48,7 @@ func resolve_file_overlap(conflict: Dictionary) -> int:
 	var conflict_key := str(conflict.get("key", ""))
 	var mod_ids: Array = conflict.get("mod_ids", [])
 	var prompt := _build_prompt(conflict_key, mod_ids)
-	var rid := runner.submit(prompt)
+	var rid: int = runner.submit(prompt)
 	_pending[rid] = conflict_key
 	return rid
 
@@ -111,7 +111,7 @@ func _build_prompt(file_path: String, mod_ids: Array) -> String:
 
 	# Each mod's version of the contested file.
 	for mid in mod_ids:
-		var entry := registry.find_by_id(str(mid))
+		var entry = registry.find_by_id(str(mid))
 		if entry == null:
 			continue
 		parts.append("## Mod `%s` (%s, v%s)" % [
@@ -119,7 +119,7 @@ func _build_prompt(file_path: String, mod_ids: Array) -> String:
 			entry.display_name(),
 			entry.version(),
 		])
-		var desc := entry.description()
+		var desc: String = entry.description()
 		if desc != "":
 			parts.append("Description: %s" % desc)
 		parts.append("Version of `%s`:" % file_path)
