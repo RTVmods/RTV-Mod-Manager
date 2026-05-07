@@ -1,19 +1,17 @@
 ; Engine configuration file.
 ;
-; Dev-only file. NOT shipped in the .vmz package.
-;
-; In standalone Godot dev, the manager UI is launched directly as the main
-; scene so we get instant F5 iteration. In-game, mod.txt's [autoload]
-; registers Main.gd which opens the same UI on F8. Both environments use
-; the exact same scripts.
+; Vostok Mod Manager — standalone Godot 4.6 application. Manages
+; Road to Vostok mods from outside the running game: enable/disable,
+; track ModWorkshop updates, detect conflicts, AI-resolve overlaps via
+; local Claude Code subprocess.
 
 config_version=5
 
 [application]
 
 config/name="Vostok Mod Manager"
-config/description="Mod manager for Road to Vostok — ships as a .vmz mod."
-run/main_scene="res://mods/VostokModManager/Ui/MainScreen.tscn"
+config/description="Standalone mod manager for Road to Vostok"
+run/main_scene="res://scenes/MainScreen.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 

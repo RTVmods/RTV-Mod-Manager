@@ -9,8 +9,8 @@ extends RefCounted
 # Other folders without a mod.txt (e.g. config-only folders like MoreJobs/)
 # are ignored.
 
-const VmmModArchive = preload("res://mods/VostokModManager/Core/ModArchive.gd")
-const VmmModEntry = preload("res://mods/VostokModManager/Core/ModEntry.gd")
+const VmmModArchive = preload("res://scripts/Core/ModArchive.gd")
+const VmmModEntry = preload("res://scripts/Core/ModEntry.gd")
 
 var mods_dir: String
 var entries: Array = []  # Array of VmmModEntry instances

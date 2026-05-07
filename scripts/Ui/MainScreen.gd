@@ -1,24 +1,19 @@
 extends Control
 
-# Top-level Vostok Mod Manager UI. Instantiated by Main.gd autoload when
-# the user presses F8.
+# Top-level Vostok Mod Manager UI. Standalone Godot main scene — the
+# whole window IS the manager. Esc or window-close quits the app.
 #
-# Builds the layout programmatically for now — a centered semi-opaque
-# panel with status labels and two scrollable lists (mods, conflicts).
-# Esc or clicking the dim background dismisses it.
-#
-# All cross-script references are via preload() rather than class_name
-# globals — the game's ModLoader mounts our .vmz at runtime, so global
-# class_name registration doesn't apply.
+# Cross-script references go through preload() consts (carried over from
+# the previous in-game-mod incarnation; just as workable here).
 
 const _DEFAULT_MODS_DIR := "C:/Program Files (x86)/Steam/steamapps/common/Road to Vostok/mods"
 
-const VmmClaudeCodeRunner = preload("res://mods/VostokModManager/Api/ClaudeCodeRunner.gd")
-const VmmModRegistry = preload("res://mods/VostokModManager/Core/ModRegistry.gd")
-const VmmModWorkshopClient = preload("res://mods/VostokModManager/Api/ModWorkshopClient.gd")
-const VmmConflictDetector = preload("res://mods/VostokModManager/Core/ConflictDetector.gd")
-const VmmConflictResolver = preload("res://mods/VostokModManager/Ai/ConflictResolver.gd")
-const VmmSettings = preload("res://mods/VostokModManager/Core/Settings.gd")
+const VmmClaudeCodeRunner = preload("res://scripts/Api/ClaudeCodeRunner.gd")
+const VmmModRegistry = preload("res://scripts/Core/ModRegistry.gd")
+const VmmModWorkshopClient = preload("res://scripts/Api/ModWorkshopClient.gd")
+const VmmConflictDetector = preload("res://scripts/Core/ConflictDetector.gd")
+const VmmConflictResolver = preload("res://scripts/Ai/ConflictResolver.gd")
+const VmmSettings = preload("res://scripts/Core/Settings.gd")
 
 var _claude := VmmClaudeCodeRunner.new()
 var _registry := VmmModRegistry.new()
@@ -62,34 +57,17 @@ var _last_conflicts: Array = []
 
 
 func _ready() -> void:
-	# Force explicit sizing from the viewport rect. Control children of a
-	# CanvasLayer don't always resolve anchor-based sizing reliably,
-	# especially under canvas_items stretch mode (which Road to Vostok uses).
-	# Setting position+size explicitly bypasses anchor inheritance entirely.
-	var vp := get_viewport().get_visible_rect()
-	print("[VMM] MainScreen _ready  viewport=%s" % str(vp.size))
-	position = Vector2.ZERO
-	size = vp.size
+	# Standalone: we ARE the main scene, so fill the window with anchors
+	# and use a single PanelContainer for the styled background. No
+	# CanvasLayer / overlay tricks anymore.
+	anchor_right = 1.0
+	anchor_bottom = 1.0
 
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.55)
-	backdrop.position = Vector2.ZERO
-	backdrop.size = vp.size
-	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
-	backdrop.gui_input.connect(_on_backdrop_input)
-	add_child(backdrop)
-
-	# Centered panel — explicit pos/size, not anchors. Custom stylebox so
-	# the panel reads clearly against the game's already-dark menu.
 	var panel := PanelContainer.new()
-	panel.position = vp.size * 0.05
-	panel.size = vp.size * 0.9
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.anchor_right = 1.0
+	panel.anchor_bottom = 1.0
 	var stylebox := StyleBoxFlat.new()
-	stylebox.bg_color = Color(0.10, 0.12, 0.16, 0.97)
-	stylebox.set_border_width_all(2)
-	stylebox.border_color = Color(0.45, 0.65, 0.85, 1.0)
-	stylebox.set_corner_radius_all(6)
+	stylebox.bg_color = Color(0.10, 0.12, 0.16, 1.0)
 	stylebox.content_margin_left = 16
 	stylebox.content_margin_right = 16
 	stylebox.content_margin_top = 12
@@ -114,7 +92,7 @@ func _ready() -> void:
 	_update_button.disabled = true  # enabled after registry scan
 	header.add_child(_update_button)
 	var close_btn := Button.new()
-	close_btn.text = "Close (Esc)"
+	close_btn.text = "Quit (Esc)"
 	close_btn.pressed.connect(_close)
 	header.add_child(close_btn)
 
@@ -224,22 +202,9 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-func _on_backdrop_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var mb: InputEventMouseButton = event
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			_close()
-
-
 func _close() -> void:
-	# We're hosted inside a CanvasLayer that the autoload created. Free
-	# the whole layer so it goes away cleanly; the autoload listens on
-	# tree_exited to drop its reference.
-	var parent := get_parent()
-	if parent != null and parent is CanvasLayer:
-		parent.queue_free()
-	else:
-		queue_free()
+	# Standalone: closing the manager == quitting the app.
+	get_tree().quit()
 
 
 func _build_path_row(

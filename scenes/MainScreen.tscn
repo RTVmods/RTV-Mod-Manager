@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://mods/VostokModManager/Ui/MainScreen.gd" id="1_main_screen"]
+[ext_resource type="Script" path="res://scripts/Ui/MainScreen.gd" id="1_main_screen"]
 
 [node name="MainScreen" type="Control"]
 anchors_preset = 15

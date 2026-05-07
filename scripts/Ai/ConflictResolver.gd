@@ -4,8 +4,8 @@ extends RefCounted
 # structured prompt (game source + each mod's version) and submits it via
 # the Claude Code runner. Parses Claude's JSON verdict back into a Dictionary.
 
-const VmmClaudeCodeRunner = preload("res://mods/VostokModManager/Api/ClaudeCodeRunner.gd")
-const VmmModRegistry = preload("res://mods/VostokModManager/Core/ModRegistry.gd")
+const VmmClaudeCodeRunner = preload("res://scripts/Api/ClaudeCodeRunner.gd")
+const VmmModRegistry = preload("res://scripts/Core/ModRegistry.gd")
 #
 # Verdict shape returned via `resolution_ready`:
 #   {

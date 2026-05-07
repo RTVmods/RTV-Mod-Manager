@@ -21,8 +21,8 @@ extends RefCounted
 #                                load-order constraint (mod A's func calls
 #                                super(), mod B overrides same func without)
 
-const VmmModArchive = preload("res://mods/VostokModManager/Core/ModArchive.gd")
-const VmmGDScriptAnalyzer = preload("res://mods/VostokModManager/Core/GDScriptAnalyzer.gd")
+const VmmModArchive = preload("res://scripts/Core/ModArchive.gd")
+const VmmGDScriptAnalyzer = preload("res://scripts/Core/GDScriptAnalyzer.gd")
 
 const TYPE_FILE_OVERLAP := "file_overlap"
 const TYPE_AUTOLOAD_COLLISION := "autoload_collision"

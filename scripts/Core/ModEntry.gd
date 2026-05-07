@@ -3,7 +3,7 @@ extends RefCounted
 # One installed mod, either as a .vmz archive or an unpacked directory.
 # Constructed by ModRegistry; consumed by ConflictDetector and the UI.
 
-const VmmModArchive = preload("res://mods/VostokModManager/Core/ModArchive.gd")
+const VmmModArchive = preload("res://scripts/Core/ModArchive.gd")
 
 var path: String                 # absolute path to .vmz file or directory
 var is_archive: bool             # true if .vmz, false if directory
