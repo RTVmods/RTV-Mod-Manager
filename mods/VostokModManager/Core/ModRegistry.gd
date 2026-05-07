@@ -1,4 +1,3 @@
-class_name VmmModRegistry
 extends RefCounted
 
 # Scans the game's mods folder and builds a list of installed VmmModEntry
@@ -10,8 +9,11 @@ extends RefCounted
 # Other folders without a mod.txt (e.g. config-only folders like MoreJobs/)
 # are ignored.
 
+const VmmModArchive = preload("res://mods/VostokModManager/Core/ModArchive.gd")
+const VmmModEntry = preload("res://mods/VostokModManager/Core/ModEntry.gd")
+
 var mods_dir: String
-var entries: Array[VmmModEntry] = []
+var entries: Array = []  # Array of VmmModEntry instances
 
 
 func scan(p_mods_dir: String) -> Error:
@@ -26,15 +28,15 @@ func scan(p_mods_dir: String) -> Error:
 	return OK
 
 
-func find_by_id(p_mod_id: String) -> VmmModEntry:
+func find_by_id(p_mod_id: String):
 	for e in entries:
 		if e.mod_id() == p_mod_id:
 			return e
 	return null
 
 
-func enabled() -> Array[VmmModEntry]:
-	var out: Array[VmmModEntry] = []
+func enabled() -> Array:
+	var out: Array = []
 	for e in entries:
 		if e.is_enabled:
 			out.append(e)
@@ -70,7 +72,7 @@ func _scan_dir(dir_path: String, is_enabled: bool) -> void:
 	dir.list_dir_end()
 
 
-func _load_archive_entry(p_path: String, is_enabled: bool) -> VmmModEntry:
+func _load_archive_entry(p_path: String, is_enabled: bool):
 	var arch := VmmModArchive.new()
 	if arch.open(p_path) != OK:
 		push_warning("VmmModRegistry: could not open archive %s" % p_path)
@@ -85,7 +87,7 @@ func _load_archive_entry(p_path: String, is_enabled: bool) -> VmmModEntry:
 	return entry
 
 
-func _load_dir_entry(p_path: String, is_enabled: bool) -> VmmModEntry:
+func _load_dir_entry(p_path: String, is_enabled: bool):
 	var entry := VmmModEntry.new()
 	entry.path = p_path
 	entry.is_archive = false

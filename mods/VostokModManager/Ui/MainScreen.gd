@@ -1,19 +1,28 @@
 extends Control
 
-# Top-level Vostok Mod Manager UI. In dev (standalone Godot project) this
-# scene is the main_scene. In-game, it's instantiated by the Main.gd
-# autoload when the user presses F8.
+# Top-level Vostok Mod Manager UI. Instantiated by Main.gd autoload when
+# the user presses F8.
 #
 # Builds the layout programmatically for now — a centered semi-opaque
 # panel with status labels and two scrollable lists (mods, conflicts).
 # Esc or clicking the dim background dismisses it.
+#
+# All cross-script references are via preload() rather than class_name
+# globals — the game's ModLoader mounts our .vmz at runtime, so global
+# class_name registration doesn't apply.
 
 const _DEFAULT_MODS_DIR := "C:/Program Files (x86)/Steam/steamapps/common/Road to Vostok/mods"
 
+const VmmClaudeCodeRunner = preload("res://mods/VostokModManager/Api/ClaudeCodeRunner.gd")
+const VmmModRegistry = preload("res://mods/VostokModManager/Core/ModRegistry.gd")
+const VmmModWorkshopClient = preload("res://mods/VostokModManager/Api/ModWorkshopClient.gd")
+const VmmConflictDetector = preload("res://mods/VostokModManager/Core/ConflictDetector.gd")
+const VmmConflictResolver = preload("res://mods/VostokModManager/Ai/ConflictResolver.gd")
+
 var _claude := VmmClaudeCodeRunner.new()
 var _registry := VmmModRegistry.new()
-var _resolver: VmmConflictResolver
-var _mw_client: VmmModWorkshopClient
+var _resolver  # VmmConflictResolver
+var _mw_client # VmmModWorkshopClient
 
 var _claude_label: Label
 var _mods_label: Label
@@ -38,10 +47,8 @@ func _ready() -> void:
 	position = Vector2.ZERO
 	size = vp.size
 
-	# Backdrop: bright red while we're confirming visibility. Switch to
-	# Color(0, 0, 0, 0.55) once the rendering path is verified.
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(1.0, 0.0, 0.0, 0.85)
+	backdrop.color = Color(0, 0, 0, 0.55)
 	backdrop.position = Vector2.ZERO
 	backdrop.size = vp.size
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -232,7 +239,7 @@ func _populate_mods_list() -> void:
 
 # Returns a short status string for the right-hand "version status"
 # column. Empty until we've fetched ModWorkshop data.
-func _update_badge(entry: VmmModEntry) -> String:
+func _update_badge(entry) -> String:
 	var mw := entry.modworkshop_id()
 	if mw <= 0:
 		return "(no ModWorkshop link)"

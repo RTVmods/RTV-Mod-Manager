@@ -1,7 +1,13 @@
-class_name VmmModArchive
 extends RefCounted
 
 # Reads a Road to Vostok .vmz mod archive (zip) and parses its mod.txt.
+#
+# NOTE: We deliberately don't declare `class_name` on any mod script.
+# Godot registers class_name globals at static parse time, but the game's
+# ModLoader mounts our .vmz at runtime — too late for the global cache.
+# Other mods reference each other's scripts via preload(); we follow the
+# same convention. See the log entry "Class cache has only 2 entries" for
+# the modloader's own diagnosis of this constraint.
 #
 # mod.txt is Godot ConfigFile format. Returned manifest shape:
 #   {

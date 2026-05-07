@@ -1,4 +1,3 @@
-class_name VmmModWorkshopClient
 extends Node
 
 # Minimal HTTP client for the public ModWorkshop API.
