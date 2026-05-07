@@ -117,6 +117,14 @@ func _ready() -> void:
 	_mods_list = _build_scroll_section(split, "Installed mods")
 	_conflicts_list = _build_scroll_section(split, "Conflicts")
 
+	var footer := Label.new()
+	footer.text = (
+		"Note: enable/disable changes apply on next game launch — "
+		+ "the game reads the mods folder once at startup."
+	)
+	footer.modulate = Color(0.75, 0.78, 0.85)
+	root.add_child(footer)
+
 	set_process_input(true)
 	await get_tree().process_frame
 	_run_smoke()
@@ -227,25 +235,65 @@ func _update_mods_status() -> void:
 func _populate_mods_list() -> void:
 	# Clear any previously-rendered rows so the list reflects the current
 	# state (used both on first render and when re-rendering after an
-	# update check).
+	# update check or a toggle).
 	for child in _mods_list.get_children():
 		child.queue_free()
 	for entry in _registry.entries:
-		var row := Label.new()
-		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var row := HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		var toggle := Button.new()
+		toggle.text = "Disable" if entry.is_enabled else "Enable"
+		toggle.custom_minimum_size = Vector2(80, 0)
+		toggle.pressed.connect(_toggle_mod.bind(entry))
+		row.add_child(toggle)
+
+		var lbl := Label.new()
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var status := "●" if entry.is_enabled else "○"
 		var label_name: String = entry.display_name()
 		if label_name == "":
 			label_name = entry.path.get_file()
 		var update_badge := _update_badge(entry)
-		row.text = "%s  %s  v%s   %s   [%s]" % [
+		lbl.text = "%s  %s  v%s   %s   [%s]" % [
 			status,
 			label_name,
 			entry.version(),
 			update_badge,
 			entry.mod_id(),
 		]
+		row.add_child(lbl)
+
 		_mods_list.add_child(row)
+
+
+# Moves a mod between <mods>/ and <mods>/Disabled/. The game reads mods
+# at startup, so the user has to relaunch for changes to take effect —
+# that's surfaced in the footer label.
+func _toggle_mod(entry) -> void:
+	var src: String = entry.path
+	var file_name: String = src.get_file()
+	var dst: String
+	if entry.is_enabled:
+		var disabled_dir := _DEFAULT_MODS_DIR.path_join("Disabled")
+		if not DirAccess.dir_exists_absolute(disabled_dir):
+			DirAccess.make_dir_absolute(disabled_dir)
+		dst = disabled_dir.path_join(file_name)
+	else:
+		dst = _DEFAULT_MODS_DIR.path_join(file_name)
+
+	var err := DirAccess.rename_absolute(src, dst)
+	if err != OK:
+		push_error("[VMM] failed to move %s -> %s (err=%d)" % [src, dst, err])
+		_updates_label.text = "Toggle failed (err=%d) — see Godot output" % err
+		return
+
+	# Rescan from disk and refresh the UI. ModWorkshop versions are kept
+	# from the previous check (no need to re-hit the API on a local toggle).
+	_registry.scan(_DEFAULT_MODS_DIR)
+	_update_mods_status()
+	_populate_mods_list()
 
 
 # Returns a short status string for the right-hand "version status"
