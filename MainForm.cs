@@ -8,6 +8,7 @@
 using VostokModManager.Ai;
 using VostokModManager.Api;
 using VostokModManager.Domain;
+using VostokModManager.Ui;
 
 namespace VostokModManager;
 
@@ -41,7 +42,11 @@ public class MainForm : Form
     private Label _updatesLabel = null!;
     private Label _conflictsLabel = null!;
     private DataGridView _modsGrid = null!;
-    private ListBox _conflictsList = null!;
+    private DataGridView _conflictsGrid = null!;
+
+    /// <summary>Backing list for the conflicts grid, in display order.
+    /// Click handlers look up by row index.</summary>
+    private List<ConflictDetector.Conflict> _displayedConflicts = new();
 
     public MainForm()
     {
@@ -119,12 +124,11 @@ public class MainForm : Form
 
         // Left: interactive mods grid.
         _modsGrid = BuildModsGrid();
-        var modsHost = WrapInPanel("Installed mods", _modsGrid);
-        split.Panel1.Controls.Add(modsHost);
+        split.Panel1.Controls.Add(WrapInPanel("Installed mods", _modsGrid));
 
-        // Right: read-only conflicts list (becomes a grid in the next commit).
-        var conflictsHost = WrapInPanelWithList("Conflicts", out _conflictsList);
-        split.Panel2.Controls.Add(conflictsHost);
+        // Right: interactive conflicts grid with Resolve button.
+        _conflictsGrid = BuildConflictsGrid();
+        split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
         root.Controls.Add(split, 0, 5);
         split.Resize += (_, _) =>
@@ -233,17 +237,82 @@ public class MainForm : Form
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "UpdateBadge",
-            HeaderText = "Update status",
-            Width = 150,
+            HeaderText = "Update",
+            Width = 130,
+        });
+        // Mod ID intentionally not a column — it lives on the row's
+        // ToolTipText (hover the Name cell) since it's rarely needed
+        // visually and wastes space.
+
+        grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
+        return grid;
+    }
+
+
+    private DataGridView BuildConflictsGrid()
+    {
+        var grid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AutoGenerateColumns = false,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            ReadOnly = true,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            RowHeadersVisible = false,
+            BackgroundColor = Color.FromArgb(18, 22, 30),
+            BorderStyle = BorderStyle.FixedSingle,
+            EnableHeadersVisualStyles = false,
+            ColumnHeadersDefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(36, 42, 54),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                SelectionBackColor = Color.FromArgb(36, 42, 54),
+                SelectionForeColor = Color.FromArgb(220, 225, 235),
+            },
+            DefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(18, 22, 30),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                SelectionBackColor = Color.FromArgb(40, 60, 90),
+                SelectionForeColor = Color.FromArgb(255, 255, 255),
+                Font = new Font("Consolas", 9f),
+                WrapMode = DataGridViewTriState.True,
+            },
+            GridColor = Color.FromArgb(40, 46, 58),
+            ColumnHeadersHeight = 28,
+            RowTemplate = { Height = 24 },
+        };
+        grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "Resolve",
+            HeaderText = "",
+            Width = 80,
+            FlatStyle = FlatStyle.System,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "ModId",
-            HeaderText = "ID",
+            Name = "Type",
+            HeaderText = "Type",
+            Width = 180,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Key",
+            HeaderText = "Key",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 100,
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Mods",
+            HeaderText = "Mods",
             Width = 220,
         });
-
-        grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
+        grid.CellContentClick += async (_, e) => await OnConflictsCellClickedAsync(e);
         return grid;
     }
 
@@ -262,20 +331,6 @@ public class MainForm : Form
         p.Controls.Add(body);
         p.Controls.Add(hdr);
         return p;
-    }
-
-    private static Panel WrapInPanelWithList(string headerText, out ListBox list)
-    {
-        list = new ListBox
-        {
-            Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(18, 22, 30),
-            ForeColor = Color.FromArgb(220, 225, 235),
-            BorderStyle = BorderStyle.FixedSingle,
-            IntegralHeight = false,
-            Font = new Font("Consolas", 9f),
-        };
-        return WrapInPanel(headerText, list);
     }
 
     private async Task RunStartupAsync()
@@ -365,18 +420,20 @@ public class MainForm : Form
             var rowIdx = _modsGrid.Rows.Add();
             var row = _modsGrid.Rows[rowIdx];
             row.Cells["Toggle"].Value = e.IsEnabled ? "Disable" : "Enable";
-            row.Cells["Update"].Value = "Update";
-            ((DataGridViewButtonCell)row.Cells["Update"]).Tag =
-                _busy || !IsOutdated(e) ? "disabled" : "";
+            // Empty button-cell value renders as a blank button — the
+            // user can't act on it (handler checks IsOutdated before
+            // doing anything).
+            row.Cells["Update"].Value = IsOutdated(e) ? "Update" : "";
             row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
             row.Cells["Status"].Value = e.IsEnabled ? "●" : "○";
-            row.Cells["Name"].Value = !string.IsNullOrEmpty(e.DisplayName)
+            var name = !string.IsNullOrEmpty(e.DisplayName)
                 ? e.DisplayName
                 : Path.GetFileName(e.Path);
+            row.Cells["Name"].Value = name;
+            row.Cells["Name"].ToolTipText = $"id: {e.ModId}\npath: {e.Path}";
             row.Cells["Version"].Value = e.Version;
             row.Cells["Priority"].Value = e.Priority.ToString();
             row.Cells["UpdateBadge"].Value = UpdateBadge(e);
-            row.Cells["ModId"].Value = e.ModId;
         }
         _modsGrid.ResumeLayout();
     }
@@ -402,14 +459,28 @@ public class MainForm : Form
 
     private void PopulateConflictsList(List<ConflictDetector.Conflict> conflicts)
     {
-        _conflictsList.BeginUpdate();
-        _conflictsList.Items.Clear();
-        foreach (var c in conflicts)
+        _displayedConflicts = conflicts.ToList();
+        _conflictsGrid.SuspendLayout();
+        _conflictsGrid.Rows.Clear();
+        foreach (var c in _displayedConflicts)
         {
-            _conflictsList.Items.Add($"[{c.Type}]  {c.Key}");
-            _conflictsList.Items.Add($"    mods: {string.Join(", ", c.ModIds)}");
+            var rowIdx = _conflictsGrid.Rows.Add();
+            var row = _conflictsGrid.Rows[rowIdx];
+            row.Cells["Resolve"].Value = IsResolvable(c) ? "Resolve" : "";
+            row.Cells["Type"].Value = c.Type;
+            row.Cells["Key"].Value = c.Key;
+            row.Cells["Mods"].Value = string.Join(", ", c.ModIds);
         }
-        _conflictsList.EndUpdate();
+        _conflictsGrid.ResumeLayout();
+    }
+
+    private bool IsResolvable(ConflictDetector.Conflict c)
+    {
+        // v1: only handles file_overlap on .gd files, requires Claude.
+        if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP) return false;
+        if (!_claude.IsAvailable) return false;
+        return c.Details.TryGetValue("is_gdscript", out var v)
+            && v is bool b && b;
     }
 
     // --- async update check ---------------------------------------
@@ -573,5 +644,52 @@ public class MainForm : Form
     {
         MessageBox.Show(this, ex.Message, title,
             MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    // --- conflict resolve ----------------------------------------
+
+    private async Task OnConflictsCellClickedAsync(DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= _displayedConflicts.Count) return;
+        if (_busy) return;
+        var col = _conflictsGrid.Columns[e.ColumnIndex].Name;
+        if (col != "Resolve") return;
+        var conflict = _displayedConflicts[e.RowIndex];
+        if (!IsResolvable(conflict)) return;
+        await ResolveAsync(conflict);
+    }
+
+    private async Task ResolveAsync(ConflictDetector.Conflict conflict)
+    {
+        _busy = true;
+        var prevConflictsLabel = _conflictsLabel.Text;
+        _conflictsLabel.Text =
+            $"Resolving {conflict.Key} with Claude Code ...";
+        // Re-render grids to disable buttons during the call.
+        PopulateModsGrid();
+
+        ConflictResolver.Verdict verdict;
+        try
+        {
+            verdict = await _resolver.ResolveFileOverlapAsync(conflict);
+        }
+        catch (Exception ex)
+        {
+            verdict = new ConflictResolver.Verdict
+            {
+                Ok = false,
+                ConflictKey = conflict.Key,
+                Error = ex.Message,
+            };
+        }
+        finally
+        {
+            _busy = false;
+            _conflictsLabel.Text = prevConflictsLabel;
+            PopulateModsGrid();
+        }
+
+        using var dlg = new ResolutionDialog(verdict);
+        dlg.ShowDialog(this);
     }
 }
