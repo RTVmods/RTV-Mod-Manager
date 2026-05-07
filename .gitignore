@@ -2,8 +2,9 @@
 .godot/
 .import/
 export.cfg
-export_presets.cfg
 *.translation
+# Note: export_presets.cfg IS committed for this project — it's the build
+# config, no secrets in it (no signing certs, no SSH credentials).
 
 # Mono / C#
 .mono/
@@ -23,4 +24,3 @@ Thumbs.db
 
 # Build output
 dist/
-*.vmz
