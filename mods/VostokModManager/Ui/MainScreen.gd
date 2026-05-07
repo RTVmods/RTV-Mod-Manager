@@ -112,7 +112,14 @@ func _on_backdrop_input(event: InputEvent) -> void:
 
 
 func _close() -> void:
-	queue_free()
+	# We're hosted inside a CanvasLayer that the autoload created. Free
+	# the whole layer so it goes away cleanly; the autoload listens on
+	# tree_exited to drop its reference.
+	var parent := get_parent()
+	if parent != null and parent is CanvasLayer:
+		parent.queue_free()
+	else:
+		queue_free()
 
 
 func _build_scroll_section(parent: Container, header_text: String) -> VBoxContainer:
