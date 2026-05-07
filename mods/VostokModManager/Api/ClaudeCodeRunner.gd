@@ -48,9 +48,16 @@ func detect() -> void:
 		paths.append(override_path)
 	for p in _candidate_paths():
 		paths.append(p)
+	print("[VMM] detect(): trying %d candidate path(s)" % paths.size())
+	print("[VMM]   APPDATA=", OS.get_environment("APPDATA"))
 	for candidate in paths:
+		var exists := FileAccess.file_exists(candidate)
 		var output: Array = []
 		var exit := OS.execute(candidate, ["--version"], output, true)
+		var head: String = ""
+		if not output.is_empty():
+			head = str(output[0]).substr(0, 80).replace("\n", " | ")
+		print("[VMM]   try [%s] exists=%s exit=%d  out=%s" % [candidate, exists, exit, head])
 		if exit == 0:
 			_claude_path = candidate
 			_version = _first_line(output)

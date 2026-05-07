@@ -301,35 +301,89 @@ func _save_decomp_path() -> void:
 # --- Browse pickers -----------------------------------------------------
 
 func _browse_claude_path() -> void:
+	# Prefer native OS dialog — Godot 4's embedded FileDialog can fail
+	# to render when its host is inside a CanvasLayer.
+	var start_dir: String = _claude_path_input.text
+	if start_dir == "" or not FileAccess.file_exists(start_dir):
+		var appdata := OS.get_environment("APPDATA")
+		start_dir = appdata.path_join("Claude").path_join("claude-code") if appdata != "" else ""
+	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		var err := DisplayServer.file_dialog_show(
+			"Locate claude.exe",
+			start_dir,
+			"claude.exe",
+			false,  # show_hidden
+			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE,
+			PackedStringArray(["*.exe,*.cmd,*.bat ; Claude Code binary"]),
+			func(ok: bool, paths: PackedStringArray, _filter: int):
+				if ok and paths.size() > 0:
+					_claude_path_input.text = paths[0]
+					_save_claude_path()
+		)
+		if err == OK:
+			return
+		push_warning("[VMM] native file dialog failed (err=%d), falling back" % err)
+	_browse_claude_path_fallback()
+
+
+func _browse_claude_path_fallback() -> void:
 	var dialog := FileDialog.new()
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dialog.filters = PackedStringArray(["*.exe,*.cmd,*.bat ; Claude Code binary"])
 	dialog.title = "Locate claude.exe"
 	dialog.size = Vector2i(900, 600)
+	dialog.use_native_dialog = true
 	dialog.file_selected.connect(func(path: String):
 		_claude_path_input.text = path
 		_save_claude_path()
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
+	# Parent to the actual root window so the embedded path doesn't get
+	# trapped inside our CanvasLayer subtree.
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered_ratio(0.7)
 
 
 func _browse_decomp_path() -> void:
+	var start_dir: String = _decomp_path_input.text
+	if start_dir == "" or not DirAccess.dir_exists_absolute(start_dir):
+		var home := OS.get_environment("USERPROFILE")
+		start_dir = home if home != "" else ""
+	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		var err := DisplayServer.file_dialog_show(
+			"Locate the decompiled game source folder",
+			start_dir,
+			"",
+			false,
+			DisplayServer.FILE_DIALOG_MODE_OPEN_DIR,
+			PackedStringArray(),
+			func(ok: bool, paths: PackedStringArray, _filter: int):
+				if ok and paths.size() > 0:
+					_decomp_path_input.text = paths[0]
+					_save_decomp_path()
+		)
+		if err == OK:
+			return
+		push_warning("[VMM] native dir dialog failed (err=%d), falling back" % err)
+	_browse_decomp_path_fallback()
+
+
+func _browse_decomp_path_fallback() -> void:
 	var dialog := FileDialog.new()
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	dialog.title = "Locate the decompiled game source folder"
 	dialog.size = Vector2i(900, 600)
+	dialog.use_native_dialog = true
 	dialog.dir_selected.connect(func(path: String):
 		_decomp_path_input.text = path
 		_save_decomp_path()
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered_ratio(0.7)
 
 
