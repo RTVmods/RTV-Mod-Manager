@@ -41,6 +41,13 @@ var _pending_update_request: int = 0
 # as satisfied (✓) or violated (⚠).
 var _position_by_id: Dictionary = {}
 
+# In-flight ModWorkshop download. We allow only one at a time for
+# simplicity — the per-row Update buttons disable while one is running.
+var _pending_download_request: int = 0
+var _pending_download_target: String = ""    # final destination path
+var _pending_download_temp: String = ""      # download-into path
+var _pending_download_label: String = ""     # for status messages
+
 
 func _ready() -> void:
 	# Force explicit sizing from the viewport rect. Control children of a
@@ -114,6 +121,7 @@ func _ready() -> void:
 	add_child(_mw_client)
 	_mw_client.versions_ready.connect(_on_versions_ready)
 	_mw_client.versions_failed.connect(_on_versions_failed)
+	_mw_client.download_complete.connect(_on_download_complete)
 
 	var split := HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -259,8 +267,19 @@ func _populate_mods_list() -> void:
 		var toggle := Button.new()
 		toggle.text = "Disable" if entry.is_enabled else "Enable"
 		toggle.custom_minimum_size = Vector2(80, 0)
+		toggle.disabled = _pending_download_request != 0
 		toggle.pressed.connect(_toggle_mod.bind(entry))
 		row.add_child(toggle)
+
+		var update_btn := Button.new()
+		update_btn.text = "Update"
+		update_btn.custom_minimum_size = Vector2(80, 0)
+		update_btn.disabled = (
+			not _is_outdated(entry)
+			or _pending_download_request != 0
+		)
+		update_btn.pressed.connect(_update_mod.bind(entry))
+		row.add_child(update_btn)
 
 		var lbl := Label.new()
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -341,6 +360,20 @@ func _toggle_mod(entry) -> void:
 	_populate_conflicts_list(conflicts)
 
 
+# True if we have ModWorkshop data for this mod and its installed
+# version differs from the latest reported version.
+func _is_outdated(entry) -> bool:
+	var mw: int = entry.modworkshop_id()
+	if mw <= 0:
+		return false
+	if not _latest_versions.has(mw):
+		return false
+	var latest: String = str(_latest_versions[mw])
+	if latest == "":
+		return false
+	return latest != entry.version()
+
+
 # Returns a short status string for the right-hand "version status"
 # column. Empty until we've fetched ModWorkshop data.
 func _update_badge(entry) -> String:
@@ -407,6 +440,91 @@ func _on_versions_failed(request_id: int, error: String) -> void:
 	_pending_update_request = 0
 	_update_button.disabled = false
 	_updates_label.text = "Updates: check failed — %s" % error
+
+
+# --- per-mod update download ---------------------------------------------
+
+func _update_mod(entry) -> void:
+	if _pending_download_request != 0:
+		return
+	var mw: int = entry.modworkshop_id()
+	if mw <= 0:
+		return
+
+	# Download to a sibling .download file so a failure mid-transfer
+	# doesn't trash the existing .vmz. We rename to the final path on
+	# success.
+	var final_path: String = entry.path
+	var temp_path: String = final_path + ".download"
+	var label: String = entry.display_name()
+	if label == "":
+		label = final_path.get_file()
+
+	# Remove any leftover .download from a prior failed attempt.
+	if FileAccess.file_exists(temp_path):
+		DirAccess.remove_absolute(temp_path)
+
+	_pending_download_target = final_path
+	_pending_download_temp = temp_path
+	_pending_download_label = label
+	_pending_download_request = _mw_client.download_latest(mw, temp_path)
+	_updates_label.text = "Downloading %s ..." % label
+	# Re-render to disable buttons.
+	_populate_mods_list()
+
+
+func _on_download_complete(rid: int, save_path: String, error: String) -> void:
+	if rid != _pending_download_request:
+		return
+	var label := _pending_download_label
+	var final_path := _pending_download_target
+	var temp_path := _pending_download_temp
+	_pending_download_request = 0
+	_pending_download_target = ""
+	_pending_download_temp = ""
+	_pending_download_label = ""
+
+	if error != "":
+		# Clean up partial download.
+		if FileAccess.file_exists(save_path):
+			DirAccess.remove_absolute(save_path)
+		_updates_label.text = "Update failed for %s: %s" % [label, error]
+		_populate_mods_list()
+		return
+
+	# Swap: remove old file, rename temp into place.
+	if FileAccess.file_exists(final_path):
+		var rm_err := DirAccess.remove_absolute(final_path)
+		if rm_err != OK:
+			# File is probably locked by the running game. Leave the
+			# .download alongside and tell the user.
+			_updates_label.text = (
+				"Downloaded %s to %s but the existing file is locked "
+				+ "(err=%d). Quit the game, then manually replace "
+				+ "%s with the .download file."
+			) % [label, temp_path, rm_err, final_path.get_file()]
+			_populate_mods_list()
+			return
+	var rn_err := DirAccess.rename_absolute(temp_path, final_path)
+	if rn_err != OK:
+		_updates_label.text = (
+			"Downloaded %s but could not rename %s -> %s (err=%d)."
+			% [label, temp_path, final_path, rn_err]
+		)
+		_populate_mods_list()
+		return
+
+	_updates_label.text = (
+		"Updated %s — restart game to load new version."
+		% label
+	)
+	# Rescan + refresh badges. The new mod.txt should report the new
+	# version, so the row's badge should flip from "⚠ X available" to
+	# "✓ current" after rescan + a fresh /mods/versions check (already
+	# in cache, so we can just refresh from _latest_versions).
+	_registry.scan(_DEFAULT_MODS_DIR)
+	_update_mods_status()
+	_populate_mods_list()
 
 
 func _update_conflicts_status(conflicts: Array) -> void:

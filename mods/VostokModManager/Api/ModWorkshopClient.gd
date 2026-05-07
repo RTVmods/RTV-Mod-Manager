@@ -19,6 +19,7 @@ extends Node
 
 signal versions_ready(request_id: int, versions: Dictionary)
 signal versions_failed(request_id: int, error: String)
+signal download_complete(request_id: int, save_path: String, error: String)
 
 const _BASE_URL := "https://api.modworkshop.net"
 const _USER_AGENT := "VostokModManager/0.1.0 (+https://modworkshop.net/g/roadtovostok)"
@@ -76,6 +77,67 @@ func check_versions(mod_ids: Array) -> int:
 			"HTTPRequest.request returned %d" % err
 		)
 	return rid
+
+
+# Downloads the latest file for a mod. ModWorkshop's
+# /mods/{id}/files/latest/download returns a 302 to the storage URL;
+# Godot's HTTPRequest follows redirects automatically (default
+# max_redirects=8). The final response body is the .vmz/.zip bytes,
+# written directly to `save_path` via HTTPRequest.download_file.
+#
+# Result fires via `download_complete(request_id, save_path, error)`.
+# `error` is "" on success.
+func download_latest(mod_id: int, save_path: String) -> int:
+	var rid := _next_request_id
+	_next_request_id += 1
+	if mod_id <= 0:
+		call_deferred(
+			"emit_signal", "download_complete", rid, save_path,
+			"invalid mod_id %d" % mod_id
+		)
+		return rid
+
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.download_file = save_path
+	http.request_completed.connect(
+		_on_download_completed.bind(rid, http, save_path)
+	)
+
+	var headers := PackedStringArray([
+		"User-Agent: " + _USER_AGENT,
+		"Accept: application/octet-stream",
+	])
+	var url := "%s/mods/%d/files/latest/download" % [_BASE_URL, mod_id]
+	var err := http.request(url, headers, HTTPClient.METHOD_GET, "")
+	if err != OK:
+		http.queue_free()
+		call_deferred(
+			"emit_signal", "download_complete", rid, save_path,
+			"HTTPRequest.request returned %d" % err
+		)
+	return rid
+
+
+func _on_download_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	_body: PackedByteArray,
+	request_id: int,
+	http: HTTPRequest,
+	save_path: String,
+) -> void:
+	http.queue_free()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		download_complete.emit(
+			request_id, save_path, "transport error (result=%d)" % result
+		)
+		return
+	if response_code < 200 or response_code >= 300:
+		download_complete.emit(request_id, save_path, "HTTP %d" % response_code)
+		return
+	download_complete.emit(request_id, save_path, "")
 
 
 func _on_request_completed(
