@@ -29,21 +29,29 @@ var _pending_update_request: int = 0
 
 
 func _ready() -> void:
-	# Cover the screen with a dim backdrop. Click on the backdrop dismisses.
+	# Force explicit sizing from the viewport rect. Control children of a
+	# CanvasLayer don't always resolve anchor-based sizing reliably,
+	# especially under canvas_items stretch mode (which Road to Vostok uses).
+	# Setting position+size explicitly bypasses anchor inheritance entirely.
+	var vp := get_viewport().get_visible_rect()
+	print("[VMM] MainScreen _ready  viewport=%s" % str(vp.size))
+	position = Vector2.ZERO
+	size = vp.size
+
+	# Backdrop: bright red while we're confirming visibility. Switch to
+	# Color(0, 0, 0, 0.55) once the rendering path is verified.
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.55)
-	backdrop.anchor_right = 1.0
-	backdrop.anchor_bottom = 1.0
+	backdrop.color = Color(1.0, 0.0, 0.0, 0.85)
+	backdrop.position = Vector2.ZERO
+	backdrop.size = vp.size
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	backdrop.gui_input.connect(_on_backdrop_input)
 	add_child(backdrop)
 
-	# Centered panel with the actual content.
+	# Centered panel — explicit pos/size, not anchors.
 	var panel := PanelContainer.new()
-	panel.anchor_left = 0.05
-	panel.anchor_top = 0.05
-	panel.anchor_right = 0.95
-	panel.anchor_bottom = 0.95
+	panel.position = vp.size * 0.05
+	panel.size = vp.size * 0.9
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(panel)
 

@@ -10,9 +10,9 @@ extends Node
 
 const _UI_SCENE_PATH := "res://mods/VostokModManager/Ui/MainScreen.tscn"
 const _TOGGLE_KEY := KEY_F8
-# Game UI commonly lives on layers 1..10. We pick a high number so the
-# manager renders above anything the game itself draws.
-const _CANVAS_LAYER := 128
+# Game UI commonly lives on layers 1..10. Crank ours well above any
+# reasonable game layer so we render on top regardless of stack order.
+const _CANVAS_LAYER := 1024
 
 # We host the manager UI inside our own CanvasLayer so it renders on top
 # of the game's menus rather than behind them.
@@ -35,6 +35,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _toggle_ui() -> void:
+	print("[VMM] _toggle_ui called  (layer alive: %s)" % str(_layer != null and is_instance_valid(_layer)))
 	if _layer != null and is_instance_valid(_layer):
 		_layer.queue_free()
 		_layer = null
@@ -51,6 +52,7 @@ func _toggle_ui() -> void:
 	_layer.tree_exited.connect(_on_layer_freed)
 	_layer.add_child(scene.instantiate())
 	get_tree().root.add_child(_layer)
+	print("[VMM] CanvasLayer added to root, layer=%d" % _CANVAS_LAYER)
 
 
 func _on_layer_freed() -> void:
