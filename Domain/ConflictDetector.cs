@@ -74,6 +74,36 @@ public static class ConflictDetector
 
     // --- internals ----------------------------------------------------
 
+    /// <summary>Filename stems (case-insensitive) that almost
+    /// universally indicate per-mod human documentation rather than
+    /// game content. Covers any extension — README, README.md,
+    /// README.txt, etc. — by stripping the extension before matching.</summary>
+    private static readonly HashSet<string> _docStems = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "README", "READ_ME",
+        "INSTRUCTIONS",
+        "LICENSE", "LICENCE", "COPYING",
+        "CHANGELOG", "CHANGES",
+        "AUTHORS", "CONTRIBUTORS", "CREDITS",
+        "NOTICE", "TODO",
+    };
+
+    /// <summary>Exact-match dotfile names that don't carry extensions
+    /// the same way (".gitignore" has empty stem so the stem set
+    /// can't catch it).</summary>
+    private static readonly HashSet<string> _docFullNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".gitignore", ".gitattributes", ".editorconfig",
+    };
+
+    private static bool IsDocumentationFile(string path)
+    {
+        var name = Path.GetFileName(path);
+        if (_docFullNames.Contains(name)) return true;
+        var stem = Path.GetFileNameWithoutExtension(name);
+        return _docStems.Contains(stem);
+    }
+
     private static List<Conflict> OverlapByFiles(List<ModEntry> entries)
     {
         var byPath = new Dictionary<string, List<ModEntry>>();
@@ -87,6 +117,12 @@ public static class ConflictDetector
                 if (f == "mod.txt") continue;
                 if (f.EndsWith("/")) continue;
                 if (f.StartsWith(".godot/")) continue;
+                // Skip per-mod documentation files that share filenames
+                // across the ecosystem (every mod has a README.md). The
+                // game doesn't load these — colliding READMEs/LICENSEs
+                // are a packaging-hygiene issue, not a mod conflict —
+                // so they'd just be expensive noise in the resolver.
+                if (IsDocumentationFile(f)) continue;
                 if (!byPath.TryGetValue(f, out var list))
                 {
                     list = new List<ModEntry>();
