@@ -37,6 +37,11 @@ public class MainForm : Form
     /// (download / etc.). Disables the action buttons across the grid.</summary>
     private bool _busy;
 
+    /// <summary>True while we're rewriting the mods grid programmatically
+    /// — guards the CellValueChanged handler so it doesn't react to
+    /// our own Value assignments and try to "toggle" each row.</summary>
+    private bool _populatingMods;
+
     private Label _claudeLabel = null!;
     private Label _modsLabel = null!;
     private Label _updatesLabel = null!;
@@ -304,13 +309,16 @@ public class MainForm : Form
         };
 
         // Columns. AutoGenerateColumns = false so we control the layout.
-        grid.Columns.Add(new DataGridViewButtonColumn
+        // The grid is read-only by default, but the Enabled checkbox
+        // column overrides that so the user can flip mods on/off.
+        grid.ReadOnly = false;
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
         {
-            Name = "Toggle",
-            HeaderText = "",
-            Width = 80,
-            UseColumnTextForButtonValue = false,
-            FlatStyle = FlatStyle.System,
+            Name = "Enabled",
+            HeaderText = "On",
+            Width = 40,
+            ReadOnly = false,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -319,20 +327,15 @@ public class MainForm : Form
             Width = 80,
             UseColumnTextForButtonValue = false,
             FlatStyle = FlatStyle.System,
+            ReadOnly = true,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Pos",
             HeaderText = "#",
             Width = 36,
+            ReadOnly = true,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "Status",
-            HeaderText = "",
-            Width = 24,
-            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -340,6 +343,7 @@ public class MainForm : Form
             HeaderText = "Mod",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 100,
+            ReadOnly = true,
             // Don't let a narrow split-panel collapse this column —
             // the user reported the Name being invisible when Fill
             // had no minimum.
@@ -350,12 +354,14 @@ public class MainForm : Form
             Name = "Version",
             HeaderText = "Version",
             Width = 80,
+            ReadOnly = true,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Priority",
             HeaderText = "Prio",
             Width = 50,
+            ReadOnly = true,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -363,12 +369,25 @@ public class MainForm : Form
             Name = "UpdateBadge",
             HeaderText = "Update",
             Width = 110,
+            ReadOnly = true,
         });
         // Mod ID intentionally not a column — it lives on the row's
         // ToolTipText (hover the Name cell) since it's rarely needed
         // visually and wastes space.
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
+
+        // Checkbox-cell plumbing: by default DataGridView only fires
+        // CellValueChanged after the cell loses focus. CommitEdit on
+        // dirty-state-change makes it fire immediately on click,
+        // which is what users expect from a checkbox.
+        grid.CurrentCellDirtyStateChanged += (_, _) =>
+        {
+            if (grid.IsCurrentCellDirty
+                && grid.CurrentCell is DataGridViewCheckBoxCell)
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        };
+        grid.CellValueChanged += (_, e) => OnGridCellValueChanged(e);
         return grid;
     }
 
@@ -638,30 +657,40 @@ public class MainForm : Form
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Guard the CellValueChanged handler — setting the checkbox
+        // value programmatically would otherwise be indistinguishable
+        // from a user click and would re-toggle the mod.
+        _populatingMods = true;
         _modsGrid.SuspendLayout();
-        _modsGrid.Rows.Clear();
-        var pos = 0;
-        foreach (var e in _displayed)
+        try
         {
-            var rowIdx = _modsGrid.Rows.Add();
-            var row = _modsGrid.Rows[rowIdx];
-            row.Cells["Toggle"].Value = e.IsEnabled ? "Disable" : "Enable";
-            // Empty button-cell value renders as a blank button — the
-            // user can't act on it (handler checks IsOutdated before
-            // doing anything).
-            row.Cells["Update"].Value = IsOutdated(e) ? "Update" : "";
-            row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
-            row.Cells["Status"].Value = e.IsEnabled ? "●" : "○";
-            var name = !string.IsNullOrEmpty(e.DisplayName)
-                ? e.DisplayName
-                : Path.GetFileName(e.Path);
-            row.Cells["Name"].Value = name;
-            row.Cells["Name"].ToolTipText = $"id: {e.ModId}\npath: {e.Path}";
-            row.Cells["Version"].Value = e.Version;
-            row.Cells["Priority"].Value = e.Priority.ToString();
-            row.Cells["UpdateBadge"].Value = UpdateBadge(e);
+            _modsGrid.Rows.Clear();
+            var pos = 0;
+            foreach (var e in _displayed)
+            {
+                var rowIdx = _modsGrid.Rows.Add();
+                var row = _modsGrid.Rows[rowIdx];
+                row.Cells["Enabled"].Value = e.IsEnabled;
+                // Empty button-cell value renders as a blank button — the
+                // user can't act on it (handler checks IsOutdated before
+                // doing anything).
+                row.Cells["Update"].Value = IsOutdated(e) ? "Update" : "";
+                row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
+                var name = !string.IsNullOrEmpty(e.DisplayName)
+                    ? e.DisplayName
+                    : Path.GetFileName(e.Path);
+                row.Cells["Name"].Value = name;
+                row.Cells["Name"].ToolTipText = $"id: {e.ModId}\npath: {e.Path}";
+                row.Cells["Version"].Value = e.Version;
+                row.Cells["Priority"].Value = e.Priority.ToString();
+                row.Cells["UpdateBadge"].Value = UpdateBadge(e);
+            }
         }
-        _modsGrid.ResumeLayout();
+        finally
+        {
+            _modsGrid.ResumeLayout();
+            _populatingMods = false;
+        }
     }
 
     private bool IsOutdated(ModEntry e)
@@ -888,14 +917,30 @@ public class MainForm : Form
         var entry = _displayed[e.RowIndex];
         switch (col)
         {
-            case "Toggle":
-                ToggleMod(entry);
-                break;
             case "Update":
                 if (IsOutdated(entry))
                     await UpdateModAsync(entry);
                 break;
         }
+    }
+
+    /// <summary>Fires when the user toggles the Enabled checkbox.
+    /// CommitEdit on dirty-state-change makes this fire immediately
+    /// rather than on focus-loss. We diff the new bool against the
+    /// entry's current state so we don't double-toggle if the value is
+    /// already in sync (e.g. just after a programmatic populate).</summary>
+    private void OnGridCellValueChanged(DataGridViewCellEventArgs e)
+    {
+        if (_populatingMods) return;
+        if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+        if (e.ColumnIndex < 0 || e.ColumnIndex >= _modsGrid.Columns.Count) return;
+        if (_modsGrid.Columns[e.ColumnIndex].Name != "Enabled") return;
+        if (_busy) return;
+        var entry = _displayed[e.RowIndex];
+        var cellValue = _modsGrid.Rows[e.RowIndex].Cells["Enabled"].Value;
+        var nowChecked = cellValue is bool b && b;
+        if (nowChecked == entry.IsEnabled) return;
+        ToggleMod(entry);
     }
 
     private void ToggleMod(ModEntry e)
