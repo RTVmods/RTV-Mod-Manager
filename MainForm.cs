@@ -466,7 +466,8 @@ public class MainForm : Form
         {
             var rowIdx = _conflictsGrid.Rows.Add();
             var row = _conflictsGrid.Rows[rowIdx];
-            row.Cells["Resolve"].Value = IsResolvable(c) ? "Resolve" : "";
+            row.Cells["Resolve"].Value = IsButtonRow(c) ? "Resolve" : "";
+            row.Cells["Resolve"].ToolTipText = ResolveButtonTooltip(c);
             row.Cells["Type"].Value = c.Type;
             row.Cells["Key"].Value = c.Key;
             row.Cells["Mods"].Value = string.Join(", ", c.ModIds);
@@ -474,14 +475,34 @@ public class MainForm : Form
         _conflictsGrid.ResumeLayout();
     }
 
+    private string ResolveButtonTooltip(ConflictDetector.Conflict c)
+    {
+        if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP)
+            return "AI resolve only handles file_overlap conflicts in v1.";
+        if (!_claude.IsAvailable)
+            return "Claude Code not detected — install it to enable AI resolve.";
+        return "Send this conflict to Claude Code for analysis.";
+    }
+
+    /// <summary>True if the conflict can be sent to Claude. v1 covers
+    /// every file_overlap (Claude can merge any text file — README,
+    /// INSTRUCTIONS, .gd, etc. — though .gd is where real merges
+    /// happen). Other conflict types (autoload / hook / script_extend
+    /// / class_name / take_over / super_chain) require either custom
+    /// resolution prompts or aren't really merge candidates; we'll
+    /// add them iteratively.</summary>
     private bool IsResolvable(ConflictDetector.Conflict c)
     {
-        // v1: only handles file_overlap on .gd files, requires Claude.
         if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP) return false;
-        if (!_claude.IsAvailable) return false;
-        return c.Details.TryGetValue("is_gdscript", out var v)
-            && v is bool b && b;
+        return _claude.IsAvailable;
     }
+
+    /// <summary>True for any file_overlap regardless of Claude state —
+    /// drives whether the button cell shows "Resolve" or stays blank.
+    /// Click handler still re-checks IsResolvable() and surfaces a
+    /// clear hint if Claude isn't available.</summary>
+    private static bool IsButtonRow(ConflictDetector.Conflict c)
+        => c.Type == ConflictDetector.TYPE_FILE_OVERLAP;
 
     // --- async update check ---------------------------------------
 
@@ -651,11 +672,29 @@ public class MainForm : Form
     private async Task OnConflictsCellClickedAsync(DataGridViewCellEventArgs e)
     {
         if (e.RowIndex < 0 || e.RowIndex >= _displayedConflicts.Count) return;
-        if (_busy) return;
+        if (_busy)
+        {
+            _conflictsLabel.Text = "(Busy — wait for the current operation to finish.)";
+            return;
+        }
         var col = _conflictsGrid.Columns[e.ColumnIndex].Name;
         if (col != "Resolve") return;
         var conflict = _displayedConflicts[e.RowIndex];
-        if (!IsResolvable(conflict)) return;
+        if (!IsButtonRow(conflict))
+        {
+            _conflictsLabel.Text =
+                $"Resolve doesn't handle [{conflict.Type}] conflicts in v1 — "
+                + "only file_overlap.";
+            return;
+        }
+        if (!_claude.IsAvailable)
+        {
+            _conflictsLabel.Text =
+                "Resolve needs Claude Code. "
+                + "Install Node.js then `npm install -g @anthropic-ai/claude-code`, "
+                + "then restart the manager.";
+            return;
+        }
         await ResolveAsync(conflict);
     }
 
