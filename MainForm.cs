@@ -81,6 +81,11 @@ public class MainForm : Form
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 9f);
+        // ExtractAssociatedIcon pulls the .exe's own embedded icon
+        // (set via <ApplicationIcon> in the .csproj). Wrapped — older
+        // Win10 builds occasionally throw IOException on this call.
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+        catch { /* form falls back to the default WinForms icon */ }
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
