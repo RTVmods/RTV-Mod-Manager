@@ -129,7 +129,18 @@ public class ClaudeCodeRunner
 
     /// <summary>Runs claude with the given prompt and returns the
     /// result. Awaitable on the UI thread; the actual subprocess runs
-    /// without blocking the message loop.</summary>
+    /// without blocking the message loop.
+    ///
+    /// Prompt is piped via stdin rather than passed as a `-p` arg —
+    /// command-line length on Windows tops out at 32 KB, and our
+    /// prompts (multiple mod source files concatenated) routinely
+    /// exceed that. Stdin is unlimited.
+    ///
+    /// We don't pass `--disallowed-tools` because `*` is not a valid
+    /// tool name (the flag wants a comma/space-separated list of
+    /// real tool names like `Bash Edit`). For our prompt, Claude has
+    /// no tools to invoke anyway — it's instructed to return strict
+    /// JSON, no shell or file access.</summary>
     public async Task<RunResult> RunAsync(string prompt, CancellationToken ct = default)
     {
         if (!IsAvailable)
@@ -139,16 +150,14 @@ public class ClaudeCodeRunner
         {
             FileName = ResolvedPath,
             UseShellExecute = false,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
         psi.ArgumentList.Add("-p");
-        psi.ArgumentList.Add(prompt);
         psi.ArgumentList.Add("--output-format");
         psi.ArgumentList.Add("json");
-        psi.ArgumentList.Add("--disallowed-tools");
-        psi.ArgumentList.Add("*");
 
         Process? proc;
         try
@@ -164,35 +173,84 @@ public class ClaudeCodeRunner
 
         try
         {
+            // Write prompt to stdin and close it so claude knows to
+            // proceed (no more input coming).
+            try
+            {
+                await proc.StandardInput.WriteAsync(prompt.AsMemory(), ct);
+                await proc.StandardInput.FlushAsync(ct);
+            }
+            finally
+            {
+                proc.StandardInput.Close();
+            }
+
             var stdoutTask = proc.StandardOutput.ReadToEndAsync(ct);
             var stderrTask = proc.StandardError.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
             var stdout = await stdoutTask;
-            _ = await stderrTask; // captured in case we want to surface
+            var stderr = await stderrTask;
 
-            if (proc.ExitCode != 0)
-                return RunResult.Failure(
-                    $"claude exited with code {proc.ExitCode}",
-                    stdout: stdout);
-
+            // Even when claude returns is_error=true (e.g., "Not
+            // logged in"), it still prints valid JSON to stdout with
+            // exit 0. The exit-code branch only catches truly broken
+            // invocations (bad flag, can't start, etc.) — and those
+            // paths sometimes also include stderr we want to surface.
+            JsonDocument? doc = null;
+            JsonElement root = default;
+            var stdoutText = stdout ?? "";
             try
             {
-                using var doc = JsonDocument.Parse(stdout);
-                var root = doc.RootElement;
-                var text = root.TryGetProperty("result", out var r)
+                doc = JsonDocument.Parse(stdoutText);
+                root = doc.RootElement;
+            }
+            catch
+            {
+                // Not parseable — fall through to the exit-code branch.
+            }
+
+            if (proc.ExitCode != 0 && doc == null)
+            {
+                var errMsg = $"claude exited with code {proc.ExitCode}";
+                if (!string.IsNullOrWhiteSpace(stderr))
+                    errMsg += $"\nstderr:\n{stderr.Trim()}";
+                return RunResult.Failure(errMsg, stdout: stdoutText);
+            }
+
+            if (doc == null)
+            {
+                return RunResult.Failure(
+                    "Could not parse Claude Code JSON output.",
+                    stdout: stdoutText);
+            }
+
+            using (doc)
+            {
+                var resultText = root.TryGetProperty("result", out var r)
                     ? r.GetString() ?? ""
                     : "";
+                var isError = root.TryGetProperty("is_error", out var ie)
+                    && ie.ValueKind == JsonValueKind.True;
                 var cost = 0.0;
                 if (root.TryGetProperty("total_cost_usd", out var c)
                     && c.ValueKind == JsonValueKind.Number)
                     cost = c.GetDouble();
-                return RunResult.Success(text, cost, stdout);
-            }
-            catch
-            {
-                return RunResult.Failure(
-                    "Could not parse Claude Code JSON output.",
-                    stdout: stdout);
+
+                if (isError)
+                {
+                    // Pull a friendlier message for the common
+                    // not-logged-in case so we can surface a clear
+                    // banner instead of the raw text.
+                    var friendly = resultText.Contains("Not logged in",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? "Claude Code is installed but not logged in. "
+                          + "Open a terminal, run `claude` (no args), then "
+                          + "type `/login` and follow the browser flow."
+                        : resultText;
+                    return RunResult.Failure(friendly, stdout: stdoutText);
+                }
+
+                return RunResult.Success(resultText, cost, stdoutText);
             }
         }
         finally
