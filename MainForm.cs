@@ -162,16 +162,29 @@ public class MainForm : Form
         _conflictsGrid = BuildConflictsGrid();
         split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
-        root.Controls.Add(split, 0, 8);
-        // Mods is the primary view — give it ~62% of the width and
-        // keep the conflicts panel at a fixed share so widening the
-        // window grows the mods grid (where the wide Mod-name column
-        // benefits) rather than the conflicts grid.
-        split.Resize += (_, _) =>
+        // Mods is the primary view — give it ~62% of the width.
+        // Subscribe to Resize BEFORE adding the container to its
+        // parent — the Add triggers the initial layout pass, and a
+        // later subscription would miss that first event entirely.
+        // Shown fires after the form has its real client size, so it
+        // also guarantees a correct distance regardless of when the
+        // SplitContainer first landed at its final width.
+        void ApplySplit()
         {
             if (split.Width > 100)
-                split.SplitterDistance = (int)(split.Width * 0.62);
-        };
+            {
+                var dist = (int)(split.Width * 0.62);
+                // Clamp inside the SplitContainer's allowed range so
+                // a small window can't crash with an out-of-range
+                // SplitterDistance.
+                var min = split.Panel1MinSize;
+                var max = split.Width - split.Panel2MinSize - split.SplitterWidth;
+                if (max > min) split.SplitterDistance = Math.Clamp(dist, min, max);
+            }
+        }
+        split.Resize += (_, _) => ApplySplit();
+        root.Controls.Add(split, 0, 8);
+        Shown += (_, _) => ApplySplit();
     }
 
     private static Label NewStatus(string text) => new()
