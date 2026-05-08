@@ -57,12 +57,10 @@ public class ResolutionDialog : Form
             AutoSize = true,
             BackColor = Color.Transparent,
         };
-        var close = new Button
-        {
-            Text = "Close (Esc)",
-            Width = 110,
-            DialogResult = DialogResult.OK,
-        };
+        var close = MainForm.ThemedButton("Close (Esc)");
+        close.Width = 110;
+        close.AutoSize = false;
+        close.DialogResult = DialogResult.OK;
         close.Click += (_, _) => Close();
         closeRow.Controls.Add(close);
         Controls.Add(closeRow);
@@ -199,12 +197,8 @@ public class ResolutionDialog : Form
         };
         foreach (var m in v.Mods)
         {
-            var btn = new Button
-            {
-                Text = $"Apply to {m.DisplayName}…",
-                AutoSize = true,
-                Margin = new Padding(4, 0, 0, 0),
-            };
+            var btn = MainForm.ThemedButton($"Apply to {m.DisplayName}…");
+            btn.Margin = new Padding(4, 0, 0, 0);
             btn.Click += (_, _) => ApplyMergeToMod(m);
             btnRow.Controls.Add(btn);
         }

@@ -168,6 +168,28 @@ public class MainForm : Form
         ForeColor = Color.FromArgb(180, 190, 210),
     };
 
+    /// <summary>Themed Button factory — by default WinForms paints
+    /// Button controls in the system-light scheme regardless of the
+    /// parent form's BackColor/ForeColor, which renders our text in
+    /// near-white on near-white. FlatStyle=Flat with explicit colors
+    /// keeps everything readable against the dark slate panel.</summary>
+    public static Button ThemedButton(string text)
+    {
+        var b = new Button
+        {
+            Text = text,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(45, 55, 70),
+            ForeColor = Color.FromArgb(225, 230, 240),
+            AutoSize = true,
+            UseVisualStyleBackColor = false,
+        };
+        b.FlatAppearance.BorderColor = Color.FromArgb(85, 100, 120);
+        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 80, 105);
+        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 45, 60);
+        return b;
+    }
+
     private Panel BuildSetupBanner()
     {
         var p = new Panel
@@ -230,21 +252,13 @@ public class MainForm : Form
         };
         row.Controls.Add(input, 1, 0);
 
-        var browseBtn = new Button
-        {
-            Text = "Browse...",
-            AutoSize = true,
-            Margin = new Padding(4, 2, 0, 2),
-        };
+        var browseBtn = ThemedButton("Browse...");
+        browseBtn.Margin = new Padding(4, 2, 0, 2);
         browseBtn.Click += (_, _) => onBrowse();
         row.Controls.Add(browseBtn, 2, 0);
 
-        var saveBtn = new Button
-        {
-            Text = "Save",
-            AutoSize = true,
-            Margin = new Padding(4, 2, 0, 2),
-        };
+        var saveBtn = ThemedButton("Save");
+        saveBtn.Margin = new Padding(4, 2, 0, 2);
         saveBtn.Click += (_, _) => onSave();
         row.Controls.Add(saveBtn, 3, 0);
 
@@ -491,30 +505,18 @@ public class MainForm : Form
         _filterBox.TextChanged += (_, _) => PopulateModsGrid();
         bar.Controls.Add(_filterBox, 1, 0);
 
-        var enableAll = new Button
-        {
-            Text = "Enable all",
-            AutoSize = true,
-            Margin = new Padding(0, 2, 4, 2),
-        };
+        var enableAll = ThemedButton("Enable all");
+        enableAll.Margin = new Padding(0, 2, 4, 2);
         enableAll.Click += (_, _) => BulkToggle(enable: true);
         bar.Controls.Add(enableAll, 2, 0);
 
-        var disableAll = new Button
-        {
-            Text = "Disable all",
-            AutoSize = true,
-            Margin = new Padding(0, 2, 4, 2),
-        };
+        var disableAll = ThemedButton("Disable all");
+        disableAll.Margin = new Padding(0, 2, 4, 2);
         disableAll.Click += (_, _) => BulkToggle(enable: false);
         bar.Controls.Add(disableAll, 3, 0);
 
-        var refresh = new Button
-        {
-            Text = "Refresh",
-            AutoSize = true,
-            Margin = new Padding(0, 2, 0, 2),
-        };
+        var refresh = ThemedButton("Refresh");
+        refresh.Margin = new Padding(0, 2, 0, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
         bar.Controls.Add(refresh, 4, 0);
 
