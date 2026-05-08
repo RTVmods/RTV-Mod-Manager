@@ -905,11 +905,28 @@ public class MainForm : Form
             return;
         }
         var verb = enable ? "Enable" : "Disable";
+        // Show up to N mod names in the prompt so the user can spot
+        // anything they didn't mean to touch. Bigger N = more noise;
+        // 8 fits comfortably in the default MessageBox width.
+        const int previewCount = 8;
+        var preview = string.Join("\n",
+            targets.Take(previewCount)
+                   .Select(e => "  • " + (string.IsNullOrEmpty(e.DisplayName)
+                       ? Path.GetFileName(e.Path)
+                       : e.DisplayName)));
+        if (targets.Count > previewCount)
+            preview += $"\n  …and {targets.Count - previewCount} more";
         var dr = MessageBox.Show(this,
             $"{verb} all {targets.Count} {(enable ? "disabled" : "enabled")} mods?\n\n"
-            + "Each mod's .vmz will be moved between <mods>/ and <mods>/Disabled/.",
-            $"{verb} all",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            + preview + "\n\n"
+            + "Each mod's .vmz will be moved between <mods>/ and <mods>/Disabled/. "
+            + "You can undo with the opposite bulk action.",
+            $"{verb} all — confirm",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            // Default to No so a stray Enter cancels instead of
+            // bulk-toggling the entire mod list.
+            MessageBoxDefaultButton.Button2);
         if (dr != DialogResult.Yes) return;
 
         var failed = 0;
