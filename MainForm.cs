@@ -320,27 +320,27 @@ public class MainForm : Form
             ReadOnly = false,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
-        grid.Columns.Add(new DataGridViewButtonColumn
+        // Single icon-style Update column. Three cell states:
+        //   "⬆ {latest}" in orange — outdated, click to update
+        //   "✓"          in green  — current
+        //   "—"          muted     — no MW link / unknown
+        // Using a LinkColumn gets the hand cursor + visited-color
+        // semantics for free; non-link states are styled per-cell in
+        // PopulateModsGrid.
+        grid.Columns.Add(new DataGridViewLinkColumn
         {
             Name = "Update",
-            HeaderText = "",
+            HeaderText = "Update",
             Width = 80,
-            UseColumnTextForButtonValue = false,
-            // FlatStyle.System inherits the OS light theme — looks like
-            // a white tile on every row against our dark grid. Flat +
-            // themed colors lets the column blend in, and the
-            // CellPainting hook below hides the button entirely on
-            // rows where there's nothing to update.
-            FlatStyle = FlatStyle.Flat,
             ReadOnly = true,
+            TrackVisitedState = false,
+            LinkBehavior = LinkBehavior.HoverUnderline,
+            ActiveLinkColor = Color.FromArgb(255, 220, 120),
+            LinkColor = Color.FromArgb(255, 200, 80),
+            VisitedLinkColor = Color.FromArgb(255, 200, 80),
             DefaultCellStyle =
             {
-                BackColor = Color.FromArgb(45, 55, 70),
-                ForeColor = Color.FromArgb(225, 230, 240),
-                SelectionBackColor = Color.FromArgb(65, 80, 105),
-                SelectionForeColor = Color.FromArgb(255, 255, 255),
                 Alignment = DataGridViewContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
             },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -378,33 +378,13 @@ public class MainForm : Form
             ReadOnly = true,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
         });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "UpdateBadge",
-            HeaderText = "Update",
-            Width = 110,
-            ReadOnly = true,
-        });
+        // (Update + version status now collapse into the single
+        // "Update" link column at the start of the row.)
         // Mod ID intentionally not a column — it lives on the row's
         // ToolTipText (hover the Name cell) since it's rarely needed
         // visually and wastes space.
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
-
-        // Suppress the button chrome on Update cells with no value —
-        // by default a DataGridViewButtonCell paints its button frame
-        // even when the value is empty, which on this dark grid shows
-        // as a white tile on every non-outdated row.
-        grid.CellPainting += (_, e) =>
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (grid.Columns[e.ColumnIndex].Name != "Update") return;
-            var s = e.Value as string;
-            if (!string.IsNullOrEmpty(s)) return;
-            // Paint just the row background — no button.
-            e.PaintBackground(e.ClipBounds, true);
-            e.Handled = true;
-        };
 
         // Checkbox-cell plumbing: by default DataGridView only fires
         // CellValueChanged after the cell loses focus. CommitEdit on
@@ -700,10 +680,7 @@ public class MainForm : Form
                 var rowIdx = _modsGrid.Rows.Add();
                 var row = _modsGrid.Rows[rowIdx];
                 row.Cells["Enabled"].Value = e.IsEnabled;
-                // Empty button-cell value renders as a blank button — the
-                // user can't act on it (handler checks IsOutdated before
-                // doing anything).
-                row.Cells["Update"].Value = IsOutdated(e) ? "Update" : "";
+                StyleUpdateCell(row.Cells["Update"], e);
                 row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
                 var name = !string.IsNullOrEmpty(e.DisplayName)
                     ? e.DisplayName
@@ -712,7 +689,6 @@ public class MainForm : Form
                 row.Cells["Name"].ToolTipText = $"id: {e.ModId}\npath: {e.Path}";
                 row.Cells["Version"].Value = e.Version;
                 row.Cells["Priority"].Value = e.Priority.ToString();
-                row.Cells["UpdateBadge"].Value = UpdateBadge(e);
             }
         }
         finally
@@ -731,14 +707,59 @@ public class MainForm : Form
         return latest != e.Version;
     }
 
-    private string UpdateBadge(ModEntry e)
+    /// <summary>Writes the Update column's text + per-cell style for a
+    /// row. The DataGridViewLinkCell renders link-blue by default; we
+    /// override LinkColor per-cell to get green (current) / orange
+    /// (outdated) / muted-grey (no info) variants. Only outdated rows
+    /// keep an underline-on-hover and the hand cursor — the others are
+    /// styled to look static even though they're still link cells.</summary>
+    private void StyleUpdateCell(DataGridViewCell cell, ModEntry e)
     {
         var mw = e.ModWorkshopId;
-        if (mw <= 0) return "(no MW link)";
-        if (!_latestVersions.TryGetValue(mw, out var latest)) return "";
-        if (string.IsNullOrEmpty(latest)) return "(unknown)";
-        if (latest == e.Version) return "✓ current";
-        return $"⚠ {latest} available";
+        var muted = Color.FromArgb(120, 130, 150);
+        var orange = Color.FromArgb(255, 200, 80);
+        var green = Color.FromArgb(120, 220, 140);
+
+        string text;
+        Color color;
+        string tip;
+
+        if (mw <= 0)
+        {
+            text = "—";
+            color = muted;
+            tip = "No ModWorkshop link in mod.txt — can't check for updates.";
+        }
+        else if (!_latestVersions.TryGetValue(mw, out var latest)
+                 || string.IsNullOrEmpty(latest))
+        {
+            text = "—";
+            color = muted;
+            tip = "Update status unknown (cache miss). Click Refresh to check.";
+        }
+        else if (latest == e.Version)
+        {
+            text = "✓";
+            color = green;
+            tip = $"Up to date (v{latest}).";
+        }
+        else
+        {
+            text = $"⬆ {latest}";
+            color = orange;
+            tip = $"Update available: v{e.Version} → v{latest}. Click to install.";
+        }
+
+        cell.Value = text;
+        cell.ToolTipText = tip;
+        cell.Style.ForeColor = color;
+        cell.Style.SelectionForeColor = color;
+        if (cell is DataGridViewLinkCell link)
+        {
+            link.LinkColor = color;
+            link.ActiveLinkColor = color;
+            link.VisitedLinkColor = color;
+        }
     }
 
     private void PopulateConflictsList(List<ConflictDetector.Conflict> conflicts)
