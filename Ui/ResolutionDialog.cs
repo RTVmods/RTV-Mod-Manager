@@ -29,7 +29,7 @@ public class ResolutionDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 9f);
+        Font = new Font("Segoe UI", 10f);
         MinimumSize = new Size(700, 400);
 
         var root = new TableLayoutPanel
@@ -80,7 +80,7 @@ public class ResolutionDialog : Form
             ForeColor = Color.FromArgb(245, 130, 120),
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 8),
-            Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
         };
         root.Controls.Add(errLabel, 0, 0);
 
@@ -101,7 +101,7 @@ public class ResolutionDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 9f),
+            Font = new Font("Consolas", 10f),
             Text = string.IsNullOrEmpty(v.RawText) ? "(no output captured)" : v.RawText,
         };
         root.Controls.Add(raw, 0, 2);
@@ -120,7 +120,7 @@ public class ResolutionDialog : Form
         var header = new Label
         {
             Text = $"{icon}  {v.Result}",
-            Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 20f, FontStyle.Bold),
             ForeColor = color,
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 8),
@@ -216,7 +216,7 @@ public class ResolutionDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 9f),
+            Font = new Font("Consolas", 10f),
         };
         root.Controls.Add(src, 0, 3);
     }
@@ -312,7 +312,7 @@ public class ResolutionDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 10f),
+            Font = new Font("Consolas", 11f),
             IntegralHeight = false,
         };
         for (var i = 0; i < v.LoadOrder.Count; i++)

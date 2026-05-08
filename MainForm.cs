@@ -80,7 +80,7 @@ public class MainForm : Form
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 9f);
+        Font = new Font("Segoe UI", 10f);
         // ExtractAssociatedIcon pulls the .exe's own embedded icon
         // (set via <ApplicationIcon> in the .csproj). Wrapped — older
         // Win10 builds occasionally throw IOException on this call.
@@ -111,7 +111,7 @@ public class MainForm : Form
         var title = new Label
         {
             Text = "Vostok Mod Manager",
-            Font = new Font(Font.FontFamily, 18f, FontStyle.Bold),
+            Font = new Font(Font.FontFamily, 20f, FontStyle.Bold),
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 8),
         };
@@ -163,10 +163,14 @@ public class MainForm : Form
         split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
         root.Controls.Add(split, 0, 8);
+        // Mods is the primary view — give it ~62% of the width and
+        // keep the conflicts panel at a fixed share so widening the
+        // window grows the mods grid (where the wide Mod-name column
+        // benefits) rather than the conflicts grid.
         split.Resize += (_, _) =>
         {
             if (split.Width > 100)
-                split.SplitterDistance = split.Width / 2;
+                split.SplitterDistance = (int)(split.Width * 0.62);
         };
     }
 
@@ -216,7 +220,7 @@ public class MainForm : Form
             AutoSize = true,
             ForeColor = Color.FromArgb(255, 240, 220),
             MaximumSize = new Size(1200, 0),
-            Font = new Font("Segoe UI", 9.5f),
+            Font = new Font("Segoe UI", 10.5f),
         };
         p.Controls.Add(_setupBannerLabel);
         return p;
@@ -296,7 +300,7 @@ public class MainForm : Form
             {
                 BackColor = Color.FromArgb(36, 42, 54),
                 ForeColor = Color.FromArgb(220, 225, 235),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 SelectionBackColor = Color.FromArgb(36, 42, 54),
                 SelectionForeColor = Color.FromArgb(220, 225, 235),
             },
@@ -306,11 +310,11 @@ public class MainForm : Form
                 ForeColor = Color.FromArgb(220, 225, 235),
                 SelectionBackColor = Color.FromArgb(40, 60, 90),
                 SelectionForeColor = Color.FromArgb(255, 255, 255),
-                Font = new Font("Consolas", 9f),
+                Font = new Font("Consolas", 10f),
             },
             GridColor = Color.FromArgb(40, 46, 58),
-            ColumnHeadersHeight = 28,
-            RowTemplate = { Height = 24 },
+            ColumnHeadersHeight = 32,
+            RowTemplate = { Height = 28 },
         };
 
         // Columns. AutoGenerateColumns = false so we control the layout.
@@ -507,7 +511,7 @@ public class MainForm : Form
             {
                 BackColor = Color.FromArgb(36, 42, 54),
                 ForeColor = Color.FromArgb(220, 225, 235),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 SelectionBackColor = Color.FromArgb(36, 42, 54),
                 SelectionForeColor = Color.FromArgb(220, 225, 235),
             },
@@ -517,12 +521,12 @@ public class MainForm : Form
                 ForeColor = Color.FromArgb(220, 225, 235),
                 SelectionBackColor = Color.FromArgb(40, 60, 90),
                 SelectionForeColor = Color.FromArgb(255, 255, 255),
-                Font = new Font("Consolas", 9f),
+                Font = new Font("Consolas", 10f),
                 WrapMode = DataGridViewTriState.True,
             },
             GridColor = Color.FromArgb(40, 46, 58),
-            ColumnHeadersHeight = 28,
-            RowTemplate = { Height = 24 },
+            ColumnHeadersHeight = 32,
+            RowTemplate = { Height = 28 },
         };
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -566,8 +570,8 @@ public class MainForm : Form
         {
             Text = headerText,
             Dock = DockStyle.Top,
-            Height = 24,
-            Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+            Height = 28,
+            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
             ForeColor = Color.FromArgb(220, 225, 235),
         };
         body.Dock = DockStyle.Fill;
