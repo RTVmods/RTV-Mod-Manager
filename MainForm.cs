@@ -343,17 +343,20 @@ public class MainForm : Form
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
         // Single icon-style Update column. Three cell states:
-        //   "⬆ {latest}" in orange — outdated, click to update
-        //   "✓"          in green  — current
-        //   "—"          muted     — no MW link / unknown
+        //   "⬆"  in orange — outdated, click to update
+        //   "✓"  in green  — current
+        //   "—"  muted     — no MW link / unknown
         // Using a LinkColumn gets the hand cursor + visited-color
         // semantics for free; non-link states are styled per-cell in
-        // PopulateModsGrid.
+        // PopulateModsGrid. Font is bumped so the single-char icons
+        // read at a glance even though the column itself is narrow;
+        // the version number lives in the tooltip rather than the
+        // cell to keep the column slim.
         grid.Columns.Add(new DataGridViewLinkColumn
         {
             Name = "Update",
-            HeaderText = "Update",
-            Width = 80,
+            HeaderText = "Upd",
+            Width = 50,
             ReadOnly = true,
             TrackVisitedState = false,
             LinkBehavior = LinkBehavior.HoverUnderline,
@@ -363,6 +366,7 @@ public class MainForm : Form
             DefaultCellStyle =
             {
                 Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Symbol", 14f, FontStyle.Bold),
             },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -852,7 +856,7 @@ public class MainForm : Form
         }
         else
         {
-            text = $"⬆ {latest}";
+            text = "⬆";
             color = orange;
             tip = $"Update available: v{e.Version} → v{latest}. Click to install.";
         }
