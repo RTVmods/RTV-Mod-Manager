@@ -389,6 +389,15 @@ public class MainForm : Form
         // ToolTipText (hover the Name cell) since it's rarely needed
         // visually and wastes space.
 
+        // Lock the order. The grid renders mods in load-order priority;
+        // letting the user click a column header to re-sort would
+        // silently reshuffle the list out of load order, which is the
+        // ONE invariant we never want broken. Toggling a mod also
+        // shouldn't move it, which the priority-only sort in
+        // PopulateModsGrid already takes care of.
+        foreach (DataGridViewColumn col in grid.Columns)
+            col.SortMode = DataGridViewColumnSortMode.NotSortable;
+
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
 
         // Checkbox-cell plumbing: by default DataGridView only fires
@@ -651,7 +660,12 @@ public class MainForm : Form
 
     private void PopulateModsGrid()
     {
-        // Sort: enabled first, by priority asc, then by filename.
+        // Sort: load order (priority asc) then filename. The same
+        // ordering applies regardless of IsEnabled — toggling a mod
+        // shouldn't shuffle its row, just flip its checkbox. The grid
+        // itself is locked (every column has SortMode = NotSortable in
+        // BuildModsGrid) so the user can't accidentally re-sort by
+        // clicking a header either.
         // Filter: case-insensitive substring on display name, mod_id,
         // or filename. Empty filter = no filtering.
         var filter = (_filterBox?.Text ?? "").Trim().ToLowerInvariant();
@@ -666,8 +680,7 @@ public class MainForm : Form
 
         _displayed = _registry.Entries
             .Where(Matches)
-            .OrderByDescending(e => e.IsEnabled)
-            .ThenBy(e => e.IsEnabled ? e.Priority : 0)
+            .OrderBy(e => e.Priority)
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
