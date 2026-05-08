@@ -326,8 +326,22 @@ public class MainForm : Form
             HeaderText = "",
             Width = 80,
             UseColumnTextForButtonValue = false,
-            FlatStyle = FlatStyle.System,
+            // FlatStyle.System inherits the OS light theme — looks like
+            // a white tile on every row against our dark grid. Flat +
+            // themed colors lets the column blend in, and the
+            // CellPainting hook below hides the button entirely on
+            // rows where there's nothing to update.
+            FlatStyle = FlatStyle.Flat,
             ReadOnly = true,
+            DefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(45, 55, 70),
+                ForeColor = Color.FromArgb(225, 230, 240),
+                SelectionBackColor = Color.FromArgb(65, 80, 105),
+                SelectionForeColor = Color.FromArgb(255, 255, 255),
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -376,6 +390,21 @@ public class MainForm : Form
         // visually and wastes space.
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
+
+        // Suppress the button chrome on Update cells with no value —
+        // by default a DataGridViewButtonCell paints its button frame
+        // even when the value is empty, which on this dark grid shows
+        // as a white tile on every non-outdated row.
+        grid.CellPainting += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name != "Update") return;
+            var s = e.Value as string;
+            if (!string.IsNullOrEmpty(s)) return;
+            // Paint just the row background — no button.
+            e.PaintBackground(e.ClipBounds, true);
+            e.Handled = true;
+        };
 
         // Checkbox-cell plumbing: by default DataGridView only fires
         // CellValueChanged after the cell loses focus. CommitEdit on
