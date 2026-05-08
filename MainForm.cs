@@ -47,6 +47,7 @@ public class MainForm : Form
     private Label _setupBannerLabel = null!;
     private TextBox _claudePathInput = null!;
     private TextBox _decompPathInput = null!;
+    private TextBox _filterBox = null!;
 
     /// <summary>Backing list for the conflicts grid, in display order.
     /// Click handlers look up by row index.</summary>
@@ -142,9 +143,10 @@ public class MainForm : Form
             SplitterWidth = 6,
         };
 
-        // Left: interactive mods grid.
+        // Left: interactive mods grid + toolbar (filter, bulk, refresh).
         _modsGrid = BuildModsGrid();
-        split.Panel1.Controls.Add(WrapInPanel("Installed mods", _modsGrid));
+        split.Panel1.Controls.Add(
+            WrapInPanel("Installed mods", _modsGrid, BuildModsToolbar()));
 
         // Right: interactive conflicts grid with Resolve button.
         _conflictsGrid = BuildConflictsGrid();
@@ -324,6 +326,10 @@ public class MainForm : Form
             HeaderText = "Mod",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 100,
+            // Don't let a narrow split-panel collapse this column —
+            // the user reported the Name being invisible when Fill
+            // had no minimum.
+            MinimumWidth = 220,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -342,7 +348,7 @@ public class MainForm : Form
         {
             Name = "UpdateBadge",
             HeaderText = "Update",
-            Width = 130,
+            Width = 110,
         });
         // Mod ID intentionally not a column — it lives on the row's
         // ToolTipText (hover the Name cell) since it's rarely needed
@@ -420,7 +426,12 @@ public class MainForm : Form
         return grid;
     }
 
-    private static Panel WrapInPanel(string headerText, Control body)
+    /// <summary>Wraps a content control in a panel with a bold header
+    /// label at the top and an optional toolbar between the header
+    /// and the content. WinForms docks children in reverse order, so
+    /// add: body (Fill) → toolbar (Top) → header (Top), and the
+    /// header lands at the very top with the toolbar just below it.</summary>
+    private static Panel WrapInPanel(string headerText, Control body, Control? toolbar = null)
     {
         var p = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         var hdr = new Label
@@ -433,8 +444,81 @@ public class MainForm : Form
         };
         body.Dock = DockStyle.Fill;
         p.Controls.Add(body);
+        if (toolbar != null)
+        {
+            toolbar.Dock = DockStyle.Top;
+            p.Controls.Add(toolbar);
+        }
         p.Controls.Add(hdr);
         return p;
+    }
+
+    private Control BuildModsToolbar()
+    {
+        var bar = new TableLayoutPanel
+        {
+            Height = 32,
+            Dock = DockStyle.Top,
+            ColumnCount = 5,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Padding = new Padding(0, 2, 0, 4),
+        };
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        bar.Controls.Add(new Label
+        {
+            Text = "Filter:",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            ForeColor = Color.FromArgb(180, 190, 210),
+            Margin = new Padding(0, 6, 4, 0),
+        }, 0, 0);
+
+        _filterBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(30, 36, 48),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            PlaceholderText = "filter by name, id, or filename",
+            Margin = new Padding(0, 4, 8, 4),
+        };
+        _filterBox.TextChanged += (_, _) => PopulateModsGrid();
+        bar.Controls.Add(_filterBox, 1, 0);
+
+        var enableAll = new Button
+        {
+            Text = "Enable all",
+            AutoSize = true,
+            Margin = new Padding(0, 2, 4, 2),
+        };
+        enableAll.Click += (_, _) => BulkToggle(enable: true);
+        bar.Controls.Add(enableAll, 2, 0);
+
+        var disableAll = new Button
+        {
+            Text = "Disable all",
+            AutoSize = true,
+            Margin = new Padding(0, 2, 4, 2),
+        };
+        disableAll.Click += (_, _) => BulkToggle(enable: false);
+        bar.Controls.Add(disableAll, 3, 0);
+
+        var refresh = new Button
+        {
+            Text = "Refresh",
+            AutoSize = true,
+            Margin = new Padding(0, 2, 0, 2),
+        };
+        refresh.Click += async (_, _) => await RefreshAllAsync();
+        bar.Controls.Add(refresh, 4, 0);
+
+        return bar;
     }
 
     private async Task RunStartupAsync()
@@ -443,6 +527,23 @@ public class MainForm : Form
         // and edit what's currently in effect.
         _claudePathInput.Text = _settings.ClaudePath;
         _decompPathInput.Text = _settings.GameSourcePath;
+
+        // First-run convenience: try to auto-detect the Decomp/ folder
+        // if the user hasn't set one yet. We only check known locations
+        // (next to the game install, repo Desktop layout, Documents)
+        // and only when the candidate looks like a real Decomp (Scripts/
+        // Loader.gd + Interface.gd present).
+        if (string.IsNullOrEmpty(_settings.GameSourcePath))
+        {
+            var detected = AutodetectDecomp();
+            if (!string.IsNullOrEmpty(detected))
+            {
+                _settings.GameSourcePath = detected;
+                _settings.Save();
+                _resolver.GameSourcePath = detected;
+                _decompPathInput.Text = detected;
+            }
+        }
 
         _claude.Detect();
         UpdateClaudeStatus();
@@ -516,7 +617,20 @@ public class MainForm : Form
     private void PopulateModsGrid()
     {
         // Sort: enabled first, by priority asc, then by filename.
+        // Filter: case-insensitive substring on display name, mod_id,
+        // or filename. Empty filter = no filtering.
+        var filter = (_filterBox?.Text ?? "").Trim().ToLowerInvariant();
+        bool Matches(ModEntry e)
+        {
+            if (filter.Length == 0) return true;
+            if (e.DisplayName.ToLowerInvariant().Contains(filter)) return true;
+            if (e.ModId.ToLowerInvariant().Contains(filter)) return true;
+            if (Path.GetFileName(e.Path).ToLowerInvariant().Contains(filter)) return true;
+            return false;
+        }
+
         _displayed = _registry.Entries
+            .Where(Matches)
             .OrderByDescending(e => e.IsEnabled)
             .ThenBy(e => e.IsEnabled ? e.Priority : 0)
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
@@ -616,8 +730,25 @@ public class MainForm : Form
 
     // --- async update check ---------------------------------------
 
-    private async Task CheckUpdatesAsync()
+    private async Task CheckUpdatesAsync(bool forceFresh = false)
     {
+        // Use the persisted cache if it's still inside the 1h TTL —
+        // saves a round-trip to ModWorkshop on every launch and
+        // respects their no-spam policy. The Refresh toolbar button
+        // forces a re-fetch.
+        if (!forceFresh && _settings.IsCacheFresh)
+        {
+            _latestVersions.Clear();
+            foreach (var (k, v) in _settings.CachedVersions)
+                if (int.TryParse(k, out var id))
+                    _latestVersions[id] = v;
+            var ageMin = (int)Math.Round(_settings.CacheAge.TotalMinutes);
+            _updatesLabel.Text =
+                $"Updates: {SummarizeUpdates()}  (cached ~{ageMin} min ago — Refresh to recheck)";
+            PopulateModsGrid();
+            return;
+        }
+
         var ids = _registry.Enabled()
             .Select(e => e.ModWorkshopId)
             .Where(i => i > 0)
@@ -633,24 +764,116 @@ public class MainForm : Form
             var versions = await _mw.CheckVersionsAsync(ids);
             _latestVersions.Clear();
             foreach (var (k, v) in versions) _latestVersions[k] = v;
-            int outdated = 0, current = 0, unknown = 0;
-            foreach (var e in _registry.Enabled())
-            {
-                var mw = e.ModWorkshopId;
-                if (mw <= 0) continue;
-                if (!_latestVersions.TryGetValue(mw, out var latest))
-                { unknown++; continue; }
-                if (latest == e.Version) current++;
-                else outdated++;
-            }
-            _updatesLabel.Text =
-                $"Updates: {outdated} outdated, {current} current, {unknown} unknown";
+            // Persist for the next launch.
+            _settings.CachedVersions = _latestVersions
+                .ToDictionary(kvp => kvp.Key.ToString(), kvp => kvp.Value);
+            _settings.CacheTimestamp = DateTime.UtcNow.ToString("o");
+            _settings.Save();
+            _updatesLabel.Text = $"Updates: {SummarizeUpdates()}";
             PopulateModsGrid();
         }
         catch (Exception ex)
         {
             _updatesLabel.Text = $"Updates: check failed — {ex.Message}";
         }
+    }
+
+    private string SummarizeUpdates()
+    {
+        int outdated = 0, current = 0, unknown = 0;
+        foreach (var e in _registry.Enabled())
+        {
+            var mw = e.ModWorkshopId;
+            if (mw <= 0) continue;
+            if (!_latestVersions.TryGetValue(mw, out var latest))
+            { unknown++; continue; }
+            if (latest == e.Version) current++;
+            else outdated++;
+        }
+        return $"{outdated} outdated, {current} current, {unknown} unknown";
+    }
+
+    // --- toolbar actions ------------------------------------------
+
+    private void BulkToggle(bool enable)
+    {
+        var targets = _registry.Entries.Where(e => e.IsEnabled != enable).ToList();
+        if (targets.Count == 0)
+        {
+            _modsLabel.Text = enable
+                ? "All mods are already enabled."
+                : "All mods are already disabled.";
+            return;
+        }
+        var verb = enable ? "Enable" : "Disable";
+        var dr = MessageBox.Show(this,
+            $"{verb} all {targets.Count} {(enable ? "disabled" : "enabled")} mods?\n\n"
+            + "Each mod's .vmz will be moved between <mods>/ and <mods>/Disabled/.",
+            $"{verb} all",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (dr != DialogResult.Yes) return;
+
+        var failed = 0;
+        foreach (var e in targets)
+        {
+            if (!ToggleModFiles(e)) failed++;
+        }
+        // One rescan + one redetect at the end — far cheaper than per-mod.
+        _registry.Scan(DefaultModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        if (failed > 0)
+        {
+            MessageBox.Show(this,
+                $"{failed} of {targets.Count} mods couldn't be moved. "
+                + "(Usually because the .vmz file is locked by something — "
+                + "Steam, antivirus, or a running game.)",
+                "Bulk toggle finished with errors",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        _registry.Scan(DefaultModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        await CheckUpdatesAsync(forceFresh: true);
+    }
+
+    // --- decomp auto-detect ---------------------------------------
+
+    private static string AutodetectDecomp()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var candidates = new List<string>();
+        if (!string.IsNullOrEmpty(home))
+        {
+            candidates.Add(Path.Combine(home, "Desktop", "RoadToVostok Dev", "Decomp"));
+            candidates.Add(Path.Combine(home, "Desktop", "Decomp"));
+        }
+        if (!string.IsNullOrEmpty(docs))
+            candidates.Add(Path.Combine(docs, "RoadToVostok_Decomp"));
+        foreach (var c in candidates)
+            if (LooksLikeDecomp(c)) return c;
+        return "";
+    }
+
+    /// <summary>True if `path` contains the landmark files we expect
+    /// in a real Decomp/ — Scripts/Loader.gd and Scripts/Interface.gd
+    /// are both shipped by Road to Vostok and not by anything else.</summary>
+    private static bool LooksLikeDecomp(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return false;
+        return File.Exists(Path.Combine(path, "Scripts", "Loader.gd"))
+            && File.Exists(Path.Combine(path, "Scripts", "Interface.gd"));
     }
 
     // --- per-row actions -------------------------------------------
@@ -675,31 +898,11 @@ public class MainForm : Form
 
     private void ToggleMod(ModEntry e)
     {
-        var fileName = Path.GetFileName(e.Path);
-        string dst;
-        if (e.IsEnabled)
+        if (!ToggleModFiles(e))
         {
-            var disabledDir = Path.Combine(DefaultModsDir, "Disabled");
-            try { Directory.CreateDirectory(disabledDir); }
-            catch (Exception ex)
-            {
-                ShowError("Couldn't create Disabled folder", ex);
-                return;
-            }
-            dst = Path.Combine(disabledDir, fileName);
-        }
-        else
-        {
-            dst = Path.Combine(DefaultModsDir, fileName);
-        }
-        try
-        {
-            if (e.IsArchive) File.Move(e.Path, dst);
-            else Directory.Move(e.Path, dst);
-        }
-        catch (Exception ex)
-        {
-            ShowError($"Couldn't move {fileName}", ex);
+            ShowError("Toggle failed",
+                new Exception($"Couldn't move {Path.GetFileName(e.Path)} — "
+                    + "see Output for details."));
             return;
         }
         // Rescan + redetect conflicts (different enabled set may have
@@ -710,6 +913,38 @@ public class MainForm : Form
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
+    }
+
+    /// <summary>Filesystem-only mod toggle — moves the .vmz / dir
+    /// between &lt;mods&gt;/ and &lt;mods&gt;/Disabled/ without rescanning the
+    /// registry. Used by both ToggleMod (single, with rescan) and
+    /// BulkToggle (many, single rescan at the end). Returns false on
+    /// failure so the caller can count errors.</summary>
+    private bool ToggleModFiles(ModEntry e)
+    {
+        var fileName = Path.GetFileName(e.Path);
+        string dst;
+        if (e.IsEnabled)
+        {
+            var disabledDir = Path.Combine(DefaultModsDir, "Disabled");
+            try { Directory.CreateDirectory(disabledDir); }
+            catch { return false; }
+            dst = Path.Combine(disabledDir, fileName);
+        }
+        else
+        {
+            dst = Path.Combine(DefaultModsDir, fileName);
+        }
+        try
+        {
+            if (e.IsArchive) File.Move(e.Path, dst);
+            else Directory.Move(e.Path, dst);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task UpdateModAsync(ModEntry e)
@@ -943,5 +1178,17 @@ public class MainForm : Form
 
         using var dlg = new ResolutionDialog(verdict);
         dlg.ShowDialog(this);
+        // If the user applied the merge inside the dialog, the .vmz
+        // contents changed — rescan + redetect so the conflict (and
+        // any related ones) drop off the list cleanly.
+        if (dlg.Applied)
+        {
+            _registry.Scan(DefaultModsDir);
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+        }
     }
 }

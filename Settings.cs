@@ -26,6 +26,33 @@ public class Settings
     /// Empty = use the hardcoded Steam default.</summary>
     public string ModsDir { get; set; } = "";
 
+    /// <summary>Snapshot of the most recent ModWorkshop /mods/versions
+    /// response. Keyed by mod_workshop_id (as string for JSON
+    /// compatibility), value is the latest version string.</summary>
+    public Dictionary<string, string> CachedVersions { get; set; } = new();
+
+    /// <summary>ISO-8601 (round-trip) timestamp of when CachedVersions
+    /// was last refreshed. Empty when no check has run yet.</summary>
+    public string CacheTimestamp { get; set; } = "";
+
+    [JsonIgnore]
+    public TimeSpan CacheAge
+    {
+        get
+        {
+            if (DateTime.TryParse(
+                    CacheTimestamp, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out var t))
+                return DateTime.UtcNow - t;
+            return TimeSpan.MaxValue;
+        }
+    }
+
+    [JsonIgnore]
+    public bool IsCacheFresh
+        => CachedVersions.Count > 0 && CacheAge < TimeSpan.FromHours(1);
+
     public static string Path
     {
         get

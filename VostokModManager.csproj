@@ -24,6 +24,11 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <PublishDir>publish/</PublishDir>
+    <!-- Strip debug symbols from the published .exe — no .pdb in the
+         publish/ output, smaller distribution. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

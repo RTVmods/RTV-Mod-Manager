@@ -48,6 +48,19 @@ public class ConflictResolver
         public double CostUsd { get; set; }
         public string RawText { get; set; } = "";
         public string Error { get; set; } = "";
+        /// <summary>Mods participating in the conflict. Carried through
+        /// from the source Conflict so the resolution UI can offer a
+        /// per-mod "Apply merged source" button without going back to
+        /// the registry.</summary>
+        public List<ConflictMod> Mods { get; set; } = new();
+    }
+
+    public class ConflictMod
+    {
+        public string ModId { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string ArchivePath { get; set; } = "";
+        public bool IsArchive { get; set; }
     }
 
     public async Task<Verdict> ResolveFileOverlapAsync(
@@ -82,6 +95,20 @@ public class ConflictResolver
         parsed.ConflictKey = conflict.Key;
         parsed.CostUsd = run.CostUsd;
         parsed.RawText = run.Text;
+        // Carry the involved mods through so the dialog can show
+        // per-mod Apply buttons without re-querying the registry.
+        foreach (var mid in conflict.ModIds)
+        {
+            var entry = _registry.FindById(mid);
+            if (entry == null) continue;
+            parsed.Mods.Add(new ConflictMod
+            {
+                ModId = entry.ModId,
+                DisplayName = entry.DisplayName,
+                ArchivePath = entry.Path,
+                IsArchive = entry.IsArchive,
+            });
+        }
         return parsed;
     }
 

@@ -5,13 +5,22 @@
 // we've validated the verdict shape across enough real conflicts.
 
 using VostokModManager.Ai;
+using VostokModManager.Domain;
 
 namespace VostokModManager.Ui;
 
 public class ResolutionDialog : Form
 {
+    /// <summary>True if the user clicked an Apply button and the
+    /// merge was written successfully. The caller (MainForm) reads
+    /// this after ShowDialog returns to decide whether to rescan.</summary>
+    public bool Applied { get; private set; }
+
+    private readonly ConflictResolver.Verdict _verdict;
+
     public ResolutionDialog(ConflictResolver.Verdict v)
     {
+        _verdict = v;
         Text = string.IsNullOrEmpty(v.ConflictKey)
             ? "Conflict resolution"
             : $"Conflict resolution: {v.ConflictKey}";
@@ -100,7 +109,7 @@ public class ResolutionDialog : Form
         root.Controls.Add(raw, 0, 2);
     }
 
-    private static void BuildVerdictView(TableLayoutPanel root, ConflictResolver.Verdict v)
+    private void BuildVerdictView(TableLayoutPanel root, ConflictResolver.Verdict v)
     {
         // Layout: verdict header + reason + (conditional body) + cost.
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // verdict
@@ -154,15 +163,53 @@ public class ResolutionDialog : Form
         root.Controls.Add(cost, 0, 4);
     }
 
-    private static void BuildMergeSafeBody(TableLayoutPanel root, ConflictResolver.Verdict v)
+    private void BuildMergeSafeBody(TableLayoutPanel root, ConflictResolver.Verdict v)
     {
-        var hdr = new Label
+        // The body cell at row 3 is the Fill row — we put the source
+        // editor there. Apply buttons go in the row above (row 2)
+        // alongside the "Proposed merged source" header.
+        var headerRow = new TableLayoutPanel
         {
-            Text = "Proposed merged source (read-only — copy and review before applying):",
+            ColumnCount = 2,
+            RowCount = 1,
+            Dock = DockStyle.Top,
             AutoSize = true,
+            BackColor = Color.Transparent,
             Margin = new Padding(0, 4, 0, 4),
         };
-        root.Controls.Add(hdr, 0, 2);
+        headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        headerRow.Controls.Add(new Label
+        {
+            Text = "Proposed merged source (review, then Apply to a mod or copy out manually):",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 6, 0, 0),
+        }, 0, 0);
+
+        // Per-mod Apply buttons. v.Mods carries display name + archive
+        // path so we don't have to ferry the registry through.
+        var btnRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Anchor = AnchorStyles.Right,
+        };
+        foreach (var m in v.Mods)
+        {
+            var btn = new Button
+            {
+                Text = $"Apply to {m.DisplayName}…",
+                AutoSize = true,
+                Margin = new Padding(4, 0, 0, 0),
+            };
+            btn.Click += (_, _) => ApplyMergeToMod(m);
+            btnRow.Controls.Add(btn);
+        }
+        headerRow.Controls.Add(btnRow, 1, 0);
+        root.Controls.Add(headerRow, 0, 2);
 
         var src = new TextBox
         {
@@ -180,7 +227,82 @@ public class ResolutionDialog : Form
         root.Controls.Add(src, 0, 3);
     }
 
-    private static void BuildOrderResolvesBody(TableLayoutPanel root, ConflictResolver.Verdict v)
+    /// <summary>Confirms with the user, backs up the .vmz, replaces
+    /// the contested entry with the merged source. On success sets
+    /// `Applied = true` so the caller knows to rescan.</summary>
+    private void ApplyMergeToMod(ConflictResolver.ConflictMod m)
+    {
+        if (!m.IsArchive)
+        {
+            MessageBox.Show(this,
+                $"Apply only supports .vmz archive mods at the moment. "
+                + $"`{m.ModId}` is a directory mod — edit it manually for now.",
+                "Not supported",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (string.IsNullOrEmpty(_verdict.ConflictKey)
+            || string.IsNullOrEmpty(_verdict.MergedSource))
+        {
+            MessageBox.Show(this,
+                "Verdict is missing the conflict path or the merged "
+                + "source — can't apply.",
+                "Not enough data",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var entryName = _verdict.ConflictKey;
+        var fileName = Path.GetFileName(m.ArchivePath);
+        var dr = MessageBox.Show(this,
+            $"Replace `{entryName}` inside `{fileName}` with Claude's merged source?\n\n"
+            + "A timestamped .bak backup of the .vmz will be saved alongside the "
+            + "original first, so you can roll back if anything goes wrong.\n\n"
+            + "Tip: quit Road to Vostok before applying — running games sometimes "
+            + "hold .vmz files open and the write will fail.",
+            $"Apply to {m.DisplayName}",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (dr != DialogResult.Yes) return;
+
+        string backup;
+        try
+        {
+            backup = ZipPatcher.CreateBackup(m.ArchivePath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                $"Backup failed: {ex.Message}\n\nNothing was changed.",
+                "Apply failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        try
+        {
+            ZipPatcher.ReplaceEntry(m.ArchivePath, entryName, _verdict.MergedSource);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                $"Patch failed: {ex.Message}\n\n"
+                + $"Backup at: {Path.GetFileName(backup)}\n"
+                + "The original may be partially modified — restore from the "
+                + ".bak file if the mod misbehaves.",
+                "Apply failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        Applied = true;
+        MessageBox.Show(this,
+            $"Applied to `{m.DisplayName}`.\n\n"
+            + $"Backup saved as `{Path.GetFileName(backup)}` (delete it once "
+            + "you've confirmed the mod still works).",
+            "Apply succeeded",
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void BuildOrderResolvesBody(TableLayoutPanel root, ConflictResolver.Verdict v)
     {
         var hdr = new Label
         {
