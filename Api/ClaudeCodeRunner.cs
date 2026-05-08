@@ -8,6 +8,7 @@
 // returns its result as JSON via --output-format json; we parse it.
 
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 
 namespace VostokModManager.Api;
@@ -154,6 +155,15 @@ public class ClaudeCodeRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            // claude prints UTF-8 (em-dashes, ✓/⚠/✗ etc.). Windows
+            // console default is the system codepage (1252 for most
+            // en-US installs), which would silently mojibake those
+            // bytes — we already saw "â€\"" in place of an em dash.
+            // Force UTF-8 on both streams so what we read matches
+            // what claude wrote.
+            StandardInputEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
         psi.ArgumentList.Add("-p");
         psi.ArgumentList.Add("--output-format");

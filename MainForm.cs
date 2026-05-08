@@ -43,6 +43,10 @@ public class MainForm : Form
     private Label _conflictsLabel = null!;
     private DataGridView _modsGrid = null!;
     private DataGridView _conflictsGrid = null!;
+    private Panel _setupBanner = null!;
+    private Label _setupBannerLabel = null!;
+    private TextBox _claudePathInput = null!;
+    private TextBox _decompPathInput = null!;
 
     /// <summary>Backing list for the conflicts grid, in display order.
     /// Click handlers look up by row index.</summary>
@@ -84,11 +88,11 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 9,
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 8; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
@@ -102,17 +106,33 @@ public class MainForm : Form
         };
         root.Controls.Add(title, 0, 0);
 
+        _setupBanner = BuildSetupBanner();
+        root.Controls.Add(_setupBanner, 0, 1);
+
         _claudeLabel = NewStatus("Claude Code: detecting ...");
-        root.Controls.Add(_claudeLabel, 0, 1);
+        root.Controls.Add(_claudeLabel, 0, 2);
 
         _modsLabel = NewStatus("Mods: scanning ...");
-        root.Controls.Add(_modsLabel, 0, 2);
+        root.Controls.Add(_modsLabel, 0, 3);
 
         _updatesLabel = NewStatus("Updates: —");
-        root.Controls.Add(_updatesLabel, 0, 3);
+        root.Controls.Add(_updatesLabel, 0, 4);
 
         _conflictsLabel = NewStatus("Conflicts: —");
-        root.Controls.Add(_conflictsLabel, 0, 4);
+        root.Controls.Add(_conflictsLabel, 0, 5);
+
+        // Inline settings rows — Claude path + Decomp path with
+        // Browse / Save buttons.
+        _claudePathInput = BuildPathRow(
+            root, 6, "Claude Code path:",
+            placeholder: "(auto-detect — fill if not found above)",
+            onBrowse: BrowseClaude,
+            onSave: SaveClaudePath);
+        _decompPathInput = BuildPathRow(
+            root, 7, "Game source (Decomp/):",
+            placeholder: "path to the decompiled game source folder",
+            onBrowse: BrowseDecomp,
+            onSave: SaveDecompPath);
 
         var split = new SplitContainer
         {
@@ -130,7 +150,7 @@ public class MainForm : Form
         _conflictsGrid = BuildConflictsGrid();
         split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
-        root.Controls.Add(split, 0, 5);
+        root.Controls.Add(split, 0, 8);
         split.Resize += (_, _) =>
         {
             if (split.Width > 100)
@@ -145,6 +165,90 @@ public class MainForm : Form
         Margin = new Padding(0, 2, 0, 2),
         ForeColor = Color.FromArgb(180, 190, 210),
     };
+
+    private Panel BuildSetupBanner()
+    {
+        var p = new Panel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Visible = false,
+            BackColor = Color.FromArgb(140, 100, 30),
+            Padding = new Padding(12, 8, 12, 8),
+            Margin = new Padding(0, 4, 0, 8),
+        };
+        _setupBannerLabel = new Label
+        {
+            AutoSize = true,
+            ForeColor = Color.FromArgb(255, 240, 220),
+            MaximumSize = new Size(1200, 0),
+            Font = new Font("Segoe UI", 9.5f),
+        };
+        p.Controls.Add(_setupBannerLabel);
+        return p;
+    }
+
+    private TextBox BuildPathRow(
+        TableLayoutPanel root, int rowIdx,
+        string labelText, string placeholder,
+        Action onBrowse, Action onSave)
+    {
+        var row = new TableLayoutPanel
+        {
+            ColumnCount = 4,
+            RowCount = 1,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 2, 0, 2),
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200f));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        row.Controls.Add(new Label
+        {
+            Text = labelText,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.FromArgb(180, 190, 210),
+            Margin = new Padding(0, 6, 0, 0),
+        }, 0, 0);
+
+        var input = new TextBox
+        {
+            PlaceholderText = placeholder,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            BackColor = Color.FromArgb(30, 36, 48),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            Margin = new Padding(0, 4, 0, 4),
+        };
+        row.Controls.Add(input, 1, 0);
+
+        var browseBtn = new Button
+        {
+            Text = "Browse...",
+            AutoSize = true,
+            Margin = new Padding(4, 2, 0, 2),
+        };
+        browseBtn.Click += (_, _) => onBrowse();
+        row.Controls.Add(browseBtn, 2, 0);
+
+        var saveBtn = new Button
+        {
+            Text = "Save",
+            AutoSize = true,
+            Margin = new Padding(4, 2, 0, 2),
+        };
+        saveBtn.Click += (_, _) => onSave();
+        row.Controls.Add(saveBtn, 3, 0);
+
+        root.Controls.Add(row, 0, rowIdx);
+        return input;
+    }
 
     private DataGridView BuildModsGrid()
     {
@@ -335,8 +439,14 @@ public class MainForm : Form
 
     private async Task RunStartupAsync()
     {
+        // Hydrate the path inputs from saved settings so users can see
+        // and edit what's currently in effect.
+        _claudePathInput.Text = _settings.ClaudePath;
+        _decompPathInput.Text = _settings.GameSourcePath;
+
         _claude.Detect();
         UpdateClaudeStatus();
+        RefreshSetupBanner();
 
         _modsLabel.Text = $"Mods: scanning {DefaultModsDir} ...";
         if (!_registry.Scan(DefaultModsDir))
@@ -666,6 +776,109 @@ public class MainForm : Form
         MessageBox.Show(this, ex.Message, title,
             MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
+
+    // --- settings + setup banner ----------------------------------
+
+    private void BrowseClaude()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Locate claude.exe / claude.cmd",
+            Filter = "Claude Code (*.exe;*.cmd;*.bat)|*.exe;*.cmd;*.bat|All files (*.*)|*.*",
+        };
+        // Default-open in %APPDATA%/npm where the npm-global install lives.
+        var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrEmpty(appdata))
+            dlg.InitialDirectory = Path.Combine(appdata, "npm");
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+        {
+            _claudePathInput.Text = dlg.FileName;
+            SaveClaudePath();
+        }
+    }
+
+    private void BrowseDecomp()
+    {
+        using var dlg = new FolderBrowserDialog
+        {
+            Description = "Locate the decompiled game source folder",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+        if (Directory.Exists(_decompPathInput.Text))
+            dlg.SelectedPath = _decompPathInput.Text;
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+        {
+            _decompPathInput.Text = dlg.SelectedPath;
+            SaveDecompPath();
+        }
+    }
+
+    private void SaveClaudePath()
+    {
+        _settings.ClaudePath = _claudePathInput.Text.Trim();
+        _settings.Save();
+        _claude.OverridePath = _settings.ClaudePath;
+        _claude.Detect();
+        UpdateClaudeStatus();
+        // Re-render conflicts grid so Resolve buttons reflect the new
+        // Claude availability state.
+        PopulateConflictsList(_lastConflicts);
+        RefreshSetupBanner();
+    }
+
+    private void SaveDecompPath()
+    {
+        _settings.GameSourcePath = _decompPathInput.Text.Trim();
+        _settings.Save();
+        _resolver.GameSourcePath = _settings.GameSourcePath;
+        RefreshSetupBanner();
+    }
+
+    private void RefreshSetupBanner()
+    {
+        var msgs = new List<string>();
+        if (!_claude.IsAvailable)
+        {
+            if (ClaudeCodeRunner.HasMsixInstall())
+            {
+                msgs.Add(
+                    "• Claude Desktop (Microsoft Store) detected — that " +
+                    "install is sandboxed and unreachable from outside the " +
+                    "package. Install the standalone CLI: install Node.js " +
+                    "from nodejs.org, then in a NEW terminal run " +
+                    "`npm install -g @anthropic-ai/claude-code`. Restart " +
+                    "the Manager when done.");
+            }
+            else
+            {
+                msgs.Add(
+                    "• Claude Code not detected. Install Node.js from " +
+                    "nodejs.org, then in a NEW terminal run " +
+                    "`npm install -g @anthropic-ai/claude-code`. Or paste " +
+                    "a known claude.exe path into the input below and " +
+                    "click Save.");
+            }
+        }
+        if (string.IsNullOrEmpty(_settings.GameSourcePath)
+            || !Directory.Exists(_settings.GameSourcePath))
+        {
+            msgs.Add(
+                "• Game source (Decomp/) not configured. AI conflict " +
+                "resolution still works without it, but produces better " +
+                "merges when given the original game script as context. " +
+                "Paste your Decomp/ path into the input below or click " +
+                "Browse... to pick the folder.");
+        }
+        if (msgs.Count == 0)
+        {
+            _setupBanner.Visible = false;
+            return;
+        }
+        _setupBannerLabel.Text = "⚙ Setup needed:\n\n" + string.Join("\n\n", msgs);
+        _setupBanner.Visible = true;
+    }
+
 
     // --- conflict resolve ----------------------------------------
 
