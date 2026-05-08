@@ -400,6 +400,23 @@ public class MainForm : Form
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
 
+        // Right-click on a row → select that row + show the context
+        // menu with Open page / Set ID. Header right-clicks (RowIndex
+        // < 0) get no menu.
+        grid.CellMouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right) return;
+            if (e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
+            grid.ClearSelection();
+            grid.Rows[e.RowIndex].Selected = true;
+            grid.CurrentCell = grid.Rows[e.RowIndex].Cells["Name"];
+        };
+        grid.CellContextMenuStripNeeded += (_, e) =>
+        {
+            if (e.RowIndex < 0) return;
+            e.ContextMenuStrip = BuildModsContextMenu(e.RowIndex);
+        };
+
         // Checkbox-cell plumbing: by default DataGridView only fires
         // CellValueChanged after the cell loses focus. CommitEdit on
         // dirty-state-change makes it fire immediately on click,
@@ -412,6 +429,61 @@ public class MainForm : Form
         };
         grid.CellValueChanged += (_, e) => OnGridCellValueChanged(e);
         return grid;
+    }
+
+    /// <summary>Builds a row-specific context menu for the mods grid.
+    /// Item enable-state and labels depend on whether the mod has a
+    /// ModWorkshop ID — Open is greyed when there's nothing to open;
+    /// Set toggles between "Set…" and "Change…" based on presence.</summary>
+    private ContextMenuStrip BuildModsContextMenu(int rowIndex)
+    {
+        var menu = new ContextMenuStrip
+        {
+            BackColor = Color.FromArgb(36, 42, 54),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            ShowImageMargin = false,
+            Renderer = new ToolStripProfessionalRenderer(new DarkMenuColors()),
+        };
+        if (rowIndex < 0 || rowIndex >= _displayed.Count) return menu;
+        var entry = _displayed[rowIndex];
+        var hasMw = entry.ModWorkshopId > 0;
+
+        var open = new ToolStripMenuItem("Open ModWorkshop page")
+        {
+            Enabled = hasMw,
+            ToolTipText = hasMw
+                ? $"Open https://modworkshop.net/mod/{entry.ModWorkshopId} in your browser."
+                : "No ModWorkshop ID linked — use Set ModWorkshop ID first.",
+        };
+        open.Click += (_, _) => OpenModPage(entry);
+        menu.Items.Add(open);
+
+        var setLabel = hasMw ? "Change ModWorkshop ID…" : "Set ModWorkshop ID…";
+        var setItem = new ToolStripMenuItem(setLabel)
+        {
+            ToolTipText = "Edit mod.txt to add or update the [updates] modworkshop = N "
+                + "field. Lets the manager track this mod for updates.",
+        };
+        setItem.Click += async (_, _) => await SetModWorkshopIdAsync(entry);
+        menu.Items.Add(setItem);
+
+        return menu;
+    }
+
+    /// <summary>Custom palette for the context menu so the dropdown
+    /// doesn't pop up as a bright Windows-Aero white-on-blue strip
+    /// against the rest of the dark form.</summary>
+    private class DarkMenuColors : ProfessionalColorTable
+    {
+        public override Color MenuItemSelected => Color.FromArgb(65, 80, 105);
+        public override Color MenuItemSelectedGradientBegin => Color.FromArgb(65, 80, 105);
+        public override Color MenuItemSelectedGradientEnd => Color.FromArgb(65, 80, 105);
+        public override Color MenuItemBorder => Color.FromArgb(85, 100, 120);
+        public override Color MenuBorder => Color.FromArgb(85, 100, 120);
+        public override Color ToolStripDropDownBackground => Color.FromArgb(36, 42, 54);
+        public override Color ImageMarginGradientBegin => Color.FromArgb(36, 42, 54);
+        public override Color ImageMarginGradientMiddle => Color.FromArgb(36, 42, 54);
+        public override Color ImageMarginGradientEnd => Color.FromArgb(36, 42, 54);
     }
 
 
@@ -1005,6 +1077,12 @@ public class MainForm : Form
             case "Update":
                 if (IsOutdated(entry))
                     await UpdateModAsync(entry);
+                // The muted "—" state means we have no ModWorkshop ID
+                // for this mod. Repurpose the click to "tell me the
+                // ID" — most discoverable place to fix the missing
+                // link.
+                else if (entry.ModWorkshopId <= 0)
+                    await SetModWorkshopIdAsync(entry);
                 break;
         }
     }
@@ -1077,6 +1155,123 @@ public class MainForm : Form
         {
             return false;
         }
+    }
+
+    /// <summary>Open the mod's ModWorkshop page in the user's default
+    /// browser. No-op (with a status message) if the mod has no MW ID
+    /// linked — the context menu's Open item is greyed in that case,
+    /// so this only triggers if something else called it.</summary>
+    private void OpenModPage(ModEntry e)
+    {
+        if (e.ModWorkshopId <= 0)
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` has no ModWorkshop ID linked.";
+            return;
+        }
+        var url = $"https://modworkshop.net/mod/{e.ModWorkshopId}";
+        try
+        {
+            // UseShellExecute = true so the OS resolves the default
+            // browser. ProcessStartInfo with a bare URL would fail on
+            // .NET Core without this flag.
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't open browser", ex);
+        }
+    }
+
+    /// <summary>Prompts for a ModWorkshop ID (or URL — we parse either)
+    /// and rewrites the mod's mod.txt to set [updates] modworkshop = N.
+    /// Backs up archive mods to a .bak first; for directory mods we
+    /// just overwrite mod.txt in place. Refreshes the registry on
+    /// success so the Update column re-renders with the new state.</summary>
+    private async Task SetModWorkshopIdAsync(ModEntry e)
+    {
+        var current = e.ModWorkshopId > 0 ? e.ModWorkshopId.ToString() : "";
+        var prompt =
+            $"Enter the ModWorkshop ID for `{e.DisplayName}`.\n\n"
+            + "Accepts either a numeric ID (e.g. 56398) or the full mod URL "
+            + "(e.g. https://modworkshop.net/mod/56398/optional-slug).\n\n"
+            + "This rewrites the mod's mod.txt to add or update its "
+            + "[updates] modworkshop = N field.";
+        var input = TextInputDialog.Prompt(this, "Set ModWorkshop ID", prompt, current);
+        if (input == null) return;
+        var newId = ManifestEditor.ParseModWorkshopIdInput(input);
+        if (newId <= 0)
+        {
+            MessageBox.Show(this,
+                $"Couldn't parse a ModWorkshop ID from:\n  {input}\n\n"
+                + "Expected a positive integer or a URL like "
+                + "https://modworkshop.net/mod/56398.",
+                "Invalid input",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (newId == e.ModWorkshopId)
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` already linked to ModWorkshop {newId}.";
+            return;
+        }
+
+        try
+        {
+            if (e.IsArchive)
+            {
+                // Read existing mod.txt from inside the .vmz, splice
+                // the new ID, back up the archive, then write the
+                // updated entry.
+                string oldText;
+                using (var arch = new ModArchive())
+                {
+                    if (!arch.Open(e.Path))
+                        throw new IOException("Failed to open the .vmz archive for reading.");
+                    oldText = arch.ReadText("mod.txt");
+                    if (string.IsNullOrEmpty(oldText))
+                        throw new InvalidDataException("mod.txt is missing or empty inside the archive.");
+                }
+                var newText = ManifestEditor.SetUpdatesModworkshop(oldText, newId);
+                var backup = ZipPatcher.CreateBackup(e.Path);
+                ZipPatcher.ReplaceEntry(e.Path, "mod.txt", newText);
+                _modsLabel.Text =
+                    $"Linked `{e.DisplayName}` → ModWorkshop {newId}. "
+                    + $"Backup: {Path.GetFileName(backup)}";
+            }
+            else
+            {
+                // Directory mod — mod.txt is on disk. Backup the file,
+                // then overwrite.
+                var modTxtPath = Path.Combine(e.Path, "mod.txt");
+                if (!File.Exists(modTxtPath))
+                    throw new FileNotFoundException("mod.txt not found in the mod folder.", modTxtPath);
+                var stamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+                var bakPath = $"{modTxtPath}.{stamp}.bak";
+                File.Copy(modTxtPath, bakPath, overwrite: false);
+                var newText = ManifestEditor.SetUpdatesModworkshop(
+                    await File.ReadAllTextAsync(modTxtPath),
+                    newId);
+                await File.WriteAllTextAsync(modTxtPath, newText);
+                _modsLabel.Text =
+                    $"Linked `{e.DisplayName}` → ModWorkshop {newId}. "
+                    + $"Backup: {Path.GetFileName(bakPath)}";
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't update mod.txt", ex);
+            return;
+        }
+
+        // Re-scan + re-check updates so the new link kicks in.
+        _registry.Scan(DefaultModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        await CheckUpdatesAsync(forceFresh: true);
     }
 
     private async Task UpdateModAsync(ModEntry e)
