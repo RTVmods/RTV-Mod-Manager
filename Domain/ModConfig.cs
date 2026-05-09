@@ -147,6 +147,21 @@ public class ModConfig
             || SectionContains($"profile.{ActiveProfile}.priority", key);
     }
 
+    /// <summary>Drops both the enabled and priority entries for a
+    /// `modId@version` from the active profile. Used by the update
+    /// flow to clean up stale keys after a version bump — the
+    /// installed mod is now at @newVersion, and @oldVersion's
+    /// cfg state is dead weight nobody can address anymore.</summary>
+    public void RemoveEntry(string modId, string version)
+    {
+        if (string.IsNullOrEmpty(modId)) return;
+        var key = MakeKey(modId, version);
+        if (_sections.TryGetValue($"profile.{ActiveProfile}.enabled", out var en))
+            en.Remove(key);
+        if (_sections.TryGetValue($"profile.{ActiveProfile}.priority", out var pr))
+            pr.Remove(key);
+    }
+
     private bool SectionContains(string section, string key)
         => _sections.TryGetValue(section, out var sec) && sec.ContainsKey(key);
 

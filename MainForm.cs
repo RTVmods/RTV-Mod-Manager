@@ -2066,6 +2066,17 @@ public class MainForm : Form
         var label = string.IsNullOrEmpty(e.DisplayName)
             ? Path.GetFileName(e.Path)
             : e.DisplayName;
+        var modId = e.ModId;
+        var oldVersion = e.Version;
+        // Capture pre-update cfg state so we can carry the user's
+        // enable + priority customisations forward when the new mod
+        // version's mod.txt declares a different version string —
+        // cfg is keyed by mod-id@version, so the new version starts
+        // with no cfg entries unless we migrate.
+        var oldEnabled = _modConfig.IsEnabled(modId, oldVersion, fallback: true);
+        var hadCfgPriority = _modConfig.HasEntry(modId, oldVersion);
+        var oldCfgPriority = _modConfig.Priority(modId, oldVersion, e.DeclaredPriority);
+
         var finalPath = e.Path;
         var tempPath = finalPath + ".download";
 
@@ -2097,13 +2108,54 @@ public class MainForm : Form
             }
             File.Move(tempPath, finalPath);
 
-            _updatesLabel.Text =
-                $"Updated {label}. (Mod's internal version may still " +
-                "lag the ModWorkshop reported version — that's a mod-author quirk.)";
-
+            // First rescan so we can see the new mod.txt's version.
             Rescan();
+
+            // Migrate cfg state if the mod.txt-declared version
+            // changed. Without this, the user's previous priority
+            // override would silently revert to the declared default
+            // and the new key would default to enabled — close to
+            // right but losing customisations.
+            var migrated = false;
+            var newEntry = _registry.FindById(modId);
+            var newVersion = newEntry?.Version ?? oldVersion;
+            if (!string.IsNullOrEmpty(modId)
+                && !string.Equals(newVersion, oldVersion, StringComparison.Ordinal))
+            {
+                _modConfig.SetEnabled(modId, newVersion, oldEnabled);
+                if (hadCfgPriority)
+                    _modConfig.SetPriority(modId, newVersion, oldCfgPriority);
+                _modConfig.RemoveEntry(modId, oldVersion);
+                SaveModConfigSafely();
+                Rescan();
+                migrated = true;
+            }
+
             UpdateModsStatus();
             PopulateModsGrid();
+
+            // Status message tells the truth: did the version field
+            // in mod.txt actually update, and does it match the
+            // ModWorkshop API's reported version?
+            var apiVersion = _latestVersions.TryGetValue(mw, out var av) ? av : "";
+            if (string.IsNullOrEmpty(apiVersion))
+            {
+                _updatesLabel.Text = $"Updated {label} → v{newVersion}.";
+            }
+            else if (string.Equals(newVersion, apiVersion, StringComparison.Ordinal))
+            {
+                _updatesLabel.Text =
+                    $"Updated {label} → v{newVersion}"
+                    + (migrated ? " (cfg state carried over)." : ".");
+            }
+            else
+            {
+                _updatesLabel.Text =
+                    $"Updated {label} (file replaced; mod.txt version is "
+                    + $"v{newVersion} but ModWorkshop API reports v{apiVersion}"
+                    + " — the mod author hasn't bumped their mod.txt version "
+                    + "field, so the Update column may still show ⬆ here).";
+            }
         }
         catch (Exception ex)
         {
