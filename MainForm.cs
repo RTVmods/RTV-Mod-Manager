@@ -638,6 +638,23 @@ public class MainForm : Form
         depsItem.Click += (_, _) => ShowDependenciesDialog(entry);
         menu.Items.Add(depsItem);
 
+        var editDepsItem = new ToolStripMenuItem("Edit required dependencies…")
+        {
+            ToolTipText = "Rewrite [dependencies] required = ... in mod.txt. "
+                + "Comma-separated list of mod IDs; leave empty to clear.",
+        };
+        editDepsItem.Click += async (_, _) => await SetModDependenciesAsync(entry);
+        menu.Items.Add(editDepsItem);
+
+        var setPrioItem = new ToolStripMenuItem(
+            $"Set priority… (current: {entry.Priority})")
+        {
+            ToolTipText = "Rewrite [mod] priority = N in mod.txt. Lower "
+                + "numbers load earlier; default is 0; negatives are fine.",
+        };
+        setPrioItem.Click += async (_, _) => await SetModPriorityAsync(entry);
+        menu.Items.Add(setPrioItem);
+
         menu.Items.Add(new ToolStripSeparator());
         var locked = IsLocked(entry);
         var lockItem = new ToolStripMenuItem(locked ? "Unlock mod" : "Lock mod")
@@ -1476,6 +1493,51 @@ public class MainForm : Form
     /// Backs up archive mods to a .bak first; for directory mods we
     /// just overwrite mod.txt in place. Refreshes the registry on
     /// success so the Update column re-renders with the new state.</summary>
+    /// <summary>Reads the mod's mod.txt, applies `transform` to the
+    /// content, and writes it back — handling the archive vs
+    /// directory-mod split, .bak backups, and error reporting in one
+    /// place. Returns the success message line on success (so the
+    /// caller can decide what to do with it) or null on failure.</summary>
+    private async Task<string?> EditModTxtAsync(ModEntry e, Func<string, string> transform)
+    {
+        try
+        {
+            if (e.IsArchive)
+            {
+                string oldText;
+                using (var arch = new ModArchive())
+                {
+                    if (!arch.Open(e.Path))
+                        throw new IOException("Failed to open the .vmz archive for reading.");
+                    oldText = arch.ReadText("mod.txt");
+                    if (string.IsNullOrEmpty(oldText))
+                        throw new InvalidDataException("mod.txt is missing or empty inside the archive.");
+                }
+                var newText = transform(oldText);
+                var backup = ZipPatcher.CreateBackup(e.Path);
+                ZipPatcher.ReplaceEntry(e.Path, "mod.txt", newText);
+                return $"Backup: {Path.GetFileName(backup)}";
+            }
+            else
+            {
+                var modTxtPath = Path.Combine(e.Path, "mod.txt");
+                if (!File.Exists(modTxtPath))
+                    throw new FileNotFoundException("mod.txt not found in the mod folder.", modTxtPath);
+                var stamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+                var bakPath = $"{modTxtPath}.{stamp}.bak";
+                File.Copy(modTxtPath, bakPath, overwrite: false);
+                var newText = transform(await File.ReadAllTextAsync(modTxtPath));
+                await File.WriteAllTextAsync(modTxtPath, newText);
+                return $"Backup: {Path.GetFileName(bakPath)}";
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't update mod.txt", ex);
+            return null;
+        }
+    }
+
     private async Task SetModWorkshopIdAsync(ModEntry e)
     {
         var current = e.ModWorkshopId > 0 ? e.ModWorkshopId.ToString() : "";
@@ -1503,60 +1565,103 @@ public class MainForm : Form
             _modsLabel.Text = $"`{e.DisplayName}` already linked to ModWorkshop {newId}.";
             return;
         }
-
-        try
-        {
-            if (e.IsArchive)
-            {
-                // Read existing mod.txt from inside the .vmz, splice
-                // the new ID, back up the archive, then write the
-                // updated entry.
-                string oldText;
-                using (var arch = new ModArchive())
-                {
-                    if (!arch.Open(e.Path))
-                        throw new IOException("Failed to open the .vmz archive for reading.");
-                    oldText = arch.ReadText("mod.txt");
-                    if (string.IsNullOrEmpty(oldText))
-                        throw new InvalidDataException("mod.txt is missing or empty inside the archive.");
-                }
-                var newText = ManifestEditor.SetUpdatesModworkshop(oldText, newId);
-                var backup = ZipPatcher.CreateBackup(e.Path);
-                ZipPatcher.ReplaceEntry(e.Path, "mod.txt", newText);
-                _modsLabel.Text =
-                    $"Linked `{e.DisplayName}` → ModWorkshop {newId}. "
-                    + $"Backup: {Path.GetFileName(backup)}";
-            }
-            else
-            {
-                // Directory mod — mod.txt is on disk. Backup the file,
-                // then overwrite.
-                var modTxtPath = Path.Combine(e.Path, "mod.txt");
-                if (!File.Exists(modTxtPath))
-                    throw new FileNotFoundException("mod.txt not found in the mod folder.", modTxtPath);
-                var stamp = DateTime.Now.ToString("yyyyMMddHHmmss");
-                var bakPath = $"{modTxtPath}.{stamp}.bak";
-                File.Copy(modTxtPath, bakPath, overwrite: false);
-                var newText = ManifestEditor.SetUpdatesModworkshop(
-                    await File.ReadAllTextAsync(modTxtPath),
-                    newId);
-                await File.WriteAllTextAsync(modTxtPath, newText);
-                _modsLabel.Text =
-                    $"Linked `{e.DisplayName}` → ModWorkshop {newId}. "
-                    + $"Backup: {Path.GetFileName(bakPath)}";
-            }
-        }
-        catch (Exception ex)
-        {
-            ShowError("Couldn't update mod.txt", ex);
-            return;
-        }
+        var bak = await EditModTxtAsync(e, txt => ManifestEditor.SetUpdatesModworkshop(txt, newId));
+        if (bak == null) return;
+        _modsLabel.Text = $"Linked `{e.DisplayName}` → ModWorkshop {newId}. {bak}";
 
         // Re-scan + re-check updates so the new link kicks in.
         _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         await CheckUpdatesAsync(forceFresh: true);
+    }
+
+    /// <summary>Prompts for a new load-order priority and rewrites
+    /// `[mod] priority = N` in mod.txt. Lower numbers load earlier.
+    /// Negative values are allowed — useful for pinning a mod above
+    /// the default-0 priority of stock mods.</summary>
+    private async Task SetModPriorityAsync(ModEntry e)
+    {
+        var current = e.Priority.ToString();
+        var prompt =
+            $"Enter the load-order priority for `{e.DisplayName}`.\n\n"
+            + "Lower numbers load earlier; the default for mods that "
+            + "don't declare a priority is 0. Negative values are fine "
+            + "(e.g. -100 to pin above everything else).\n\n"
+            + "This rewrites the mod's mod.txt to set [mod] priority = N.";
+        var input = TextInputDialog.Prompt(this, "Set priority", prompt, current);
+        if (input == null) return;
+        if (!int.TryParse(input.Trim(), out var newPriority))
+        {
+            MessageBox.Show(this,
+                $"Couldn't parse `{input}` as an integer. Priority must "
+                + "be a whole number (positive, negative, or zero).",
+                "Invalid input",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (newPriority == e.Priority)
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` priority is already {newPriority}.";
+            return;
+        }
+        var bak = await EditModTxtAsync(e, txt => ManifestEditor.SetModPriority(txt, newPriority));
+        if (bak == null) return;
+        _modsLabel.Text = $"`{e.DisplayName}` priority {e.Priority} → {newPriority}. {bak}";
+
+        _registry.Scan(ModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+    }
+
+    /// <summary>Prompts for a comma-separated list of mod IDs and
+    /// rewrites `[dependencies] required = ...` in mod.txt. Pass an
+    /// empty list to clear the field. Optional deps aren't editable
+    /// here yet — the use case for "user wants to declare a hard
+    /// dependency" is much more common than "user wants to mark
+    /// something soft."</summary>
+    private async Task SetModDependenciesAsync(ModEntry e)
+    {
+        var current = string.Join(", ", e.RequiredDependencies);
+        var prompt =
+            $"Enter the required dependencies for `{e.DisplayName}` "
+            + "as a comma-separated list of mod_ids.\n\n"
+            + "Example: mod_a, mod_b, mod_c\n"
+            + "Leave empty to clear all required dependencies.\n\n"
+            + "This rewrites the mod's mod.txt to set [dependencies] "
+            + "required = ...";
+        var input = TextInputDialog.Prompt(this, "Edit required dependencies", prompt, current);
+        if (input == null) return;
+        var newDeps = ModEntry.ParseCsvOrArray(input);
+        // Compare order-preserved + case-insensitive — order matters
+        // because we write the list back in user-given order, and a
+        // pure set comparison would misreport "no change" if the user
+        // reordered.
+        var sameAsBefore = newDeps.Count == e.RequiredDependencies.Count
+            && newDeps.Zip(e.RequiredDependencies,
+                (a, b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+                .All(x => x);
+        if (sameAsBefore)
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` dependencies unchanged.";
+            return;
+        }
+        var bak = await EditModTxtAsync(e, txt =>
+            ManifestEditor.SetDependencyList(txt, "required", newDeps));
+        if (bak == null) return;
+        _modsLabel.Text = newDeps.Count == 0
+            ? $"Cleared `{e.DisplayName}` required dependencies. {bak}"
+            : $"Set `{e.DisplayName}` required dependencies "
+              + $"({newDeps.Count}). {bak}";
+
+        _registry.Scan(ModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        // Re-detect since dependency edits can satisfy or break
+        // missing_dependency conflicts elsewhere.
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
     }
 
     private async Task UpdateModAsync(ModEntry e)
