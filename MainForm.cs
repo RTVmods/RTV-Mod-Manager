@@ -937,7 +937,21 @@ public class MainForm : Form
             Name = "Resolve",
             HeaderText = "",
             Width = 80,
-            FlatStyle = FlatStyle.System,
+            // FlatStyle.System → Windows light-theme button chrome,
+            // which against our dark grid renders as bright white
+            // tiles on every row (including the inert non-Resolve
+            // ones). Flat + dark cell colors blend in; empty rows
+            // get suppressed entirely via CellPainting below.
+            FlatStyle = FlatStyle.Flat,
+            DefaultCellStyle =
+            {
+                BackColor = Color.FromArgb(45, 55, 70),
+                ForeColor = Color.FromArgb(225, 230, 240),
+                SelectionBackColor = Color.FromArgb(65, 80, 105),
+                SelectionForeColor = Color.FromArgb(255, 255, 255),
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -958,6 +972,19 @@ public class MainForm : Form
             HeaderText = "Mods",
             Width = 220,
         });
+        // Suppress the button chrome on empty Resolve cells so
+        // non-resolvable conflict rows (everything except
+        // file_overlap) don't render as a column of empty white
+        // tiles against the dark grid.
+        grid.CellPainting += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name != "Resolve") return;
+            var s = e.Value as string;
+            if (!string.IsNullOrEmpty(s)) return;
+            e.PaintBackground(e.ClipBounds, true);
+            e.Handled = true;
+        };
         grid.CellContentClick += async (_, e) => await OnConflictsCellClickedAsync(e);
         return grid;
     }
