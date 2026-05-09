@@ -302,6 +302,13 @@ public class MainForm : Form
         var ratio = _settings.SplitterRatio > 0
             ? Math.Clamp(_settings.SplitterRatio, 0.05, 0.95)
             : 0.62;
+        // Layout-time SplitterMoved events fire DURING the form's
+        // initial layout pass, with whatever transient sizes the
+        // SplitContainer happens to be in (default SplitterDistance
+        // 50, intermediate parent widths, etc.). Those events
+        // shouldn't be persisted — they don't represent user intent.
+        // Only honor SplitterMoved after Form.Shown completes.
+        var formShown = false;
         void ApplySplit()
         {
             if (split.Width > 100)
@@ -317,31 +324,28 @@ public class MainForm : Form
             }
         }
         split.Resize += (_, _) => ApplySplit();
-        // Only USER drags update the persisted ratio. We previously
-        // gated this with a closure flag set/cleared around our
-        // programmatic SplitterDistance writes, but WinForms can
-        // defer SplitterMoved past the try/finally that clears the
-        // flag — leaving the closure flag false when the deferred
-        // event fires, and the slightly-clamped post-Resize ratio
-        // gets persisted and slowly drifts the saved value over
-        // time. Tolerance check against the in-memory ratio is
-        // race-free: programmatic Resize → ratio matches what we
-        // just set → don't persist; user drag → ratio different
-        // beyond float drift → persist.
         split.SplitterMoved += (_, _) =>
         {
+            if (!formShown) return;
             if (split.Width <= 100) return;
             var observed = (double)split.SplitterDistance / split.Width;
-            // 0.005 = half a percent — well above float drift and
-            // int-truncation noise, well below any deliberate user
-            // drag. Anything inside this band is treated as "us
-            // re-applying the same ratio."
+            // 0.005 = half a percent — well above float drift /
+            // int-truncation noise, well below any deliberate drag.
             if (Math.Abs(observed - ratio) < 0.005) return;
             ratio = observed;
             _settings.SplitterRatio = ratio;
         };
         root.Controls.Add(split, 0, 9);
-        Shown += (_, _) => ApplySplit();
+        Shown += (_, _) =>
+        {
+            ApplySplit();
+            // Flip the flag AFTER ApplySplit so its own induced
+            // SplitterMoved (still mid-Shown handler) is also
+            // ignored. The first event we treat as user-intent is
+            // whatever fires after Shown returns — i.e. an actual
+            // drag from the user.
+            BeginInvoke(() => formShown = true);
+        };
     }
 
     private static Label NewStatus(string text) => new()
