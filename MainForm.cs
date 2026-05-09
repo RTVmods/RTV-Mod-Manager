@@ -542,14 +542,19 @@ public class MainForm : Form
         {
             Name = "Name",
             HeaderText = "Mod",
-            // Used to be AutoSizeMode = Fill, but Fill columns can't
-            // be drag-resized in any meaningful way — dragging the
-            // boundary just resizes the adjacent fixed column. Now
-            // it's a regular sized column so the user can drag it
-            // and the width persists across launches like every
-            // other column. Width is generous by default so a fresh
-            // install still shows long mod names without truncation.
-            Width = 600,
+            // Fill mode: this column auto-grows to fill any leftover
+            // grid width after the fixed columns and any user-dragged
+            // overrides on Version/Prio. Window-resize / splitter-
+            // drag → Mod stretches to match. The trade-off is that
+            // dragging Mod's own boundary is meaningless (single
+            // Fill column → FillWeight is moot), but dragging the
+            // adjacent fixed columns (Version) re-sizes them and
+            // Mod recomputes accordingly. ApplyColumnWidths +
+            // SaveColumnWidths both skip Fill columns, so Mod isn't
+            // persisted and resizing across launches reverts to the
+            // fill-leftover behaviour every time.
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 100,
             ReadOnly = true,
             MinimumWidth = 220,
         });
