@@ -15,8 +15,6 @@ public class TextInputDialog : Form
     public TextInputDialog(string title, string prompt, string initial = "")
     {
         Text = title;
-        Width = 520;
-        Height = 200;
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
@@ -25,45 +23,48 @@ public class TextInputDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
+        // AutoSize so the dialog grows to fit the prompt label
+        // (which can be several wrapped lines). MinimumSize keeps a
+        // sensible width so the input box doesn't render as a tiny
+        // strip when the prompt is short.
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        MinimumSize = new Size(560, 0);
+        Padding = new Padding(16, 14, 16, 14);
 
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            Padding = new Padding(16, 14, 16, 14),
-            BackColor = Color.Transparent,
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        Controls.Add(root);
-
+        // Stack: prompt → input → button row, all docked Top so the
+        // form's AutoSize sums their heights. Add in REVERSE order
+        // because Dock.Top stacks newcomers on top of earlier ones —
+        // ending order from top to bottom is buttons-row added last
+        // ... no wait. Dock.Top stacks first-added at top. So order:
+        // promptLabel (Top, added first → at top), input (Top, added
+        // second → just below), btnRow (Top, added third → bottom).
         var promptLabel = new Label
         {
             Text = prompt,
             AutoSize = true,
-            MaximumSize = new Size(480, 0),
+            MaximumSize = new Size(520, 0),
+            Dock = DockStyle.Top,
             Margin = new Padding(0, 0, 0, 10),
         };
-        root.Controls.Add(promptLabel, 0, 0);
 
         var input = new TextBox
         {
             Text = initial,
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
             Font = new Font("Consolas", 11f),
+            Margin = new Padding(0, 12, 0, 12),
         };
-        root.Controls.Add(input, 0, 1);
 
         var btnRow = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.RightToLeft,
             AutoSize = true,
-            Anchor = AnchorStyles.Right,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 12, 0, 0),
         };
@@ -81,7 +82,13 @@ public class TextInputDialog : Form
         // OK ends up on the right, which matches Windows convention.
         btnRow.Controls.Add(ok);
         btnRow.Controls.Add(cancel);
-        root.Controls.Add(btnRow, 0, 3);
+
+        // Add controls in reverse stacking order — Dock.Top puts the
+        // FIRST-added at the top, but we want prompt at top so add
+        // it first. Subsequent Top-dock children sit below.
+        Controls.Add(btnRow);    // becomes bottommost when packed below
+        Controls.Add(input);
+        Controls.Add(promptLabel);
 
         AcceptButton = ok;
         CancelButton = cancel;

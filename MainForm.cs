@@ -521,19 +521,30 @@ public class MainForm : Form
 
         // Right-click on a row → select that row + show the context
         // menu with Open page / Set ID. Header right-clicks (RowIndex
-        // < 0) get no menu.
+        // < 0) get no menu. We deliberately don't reassign CurrentCell
+        // here — letting the DataGridView's own click handling do
+        // that avoids cancelling the in-flight context-menu request.
         grid.CellMouseDown += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
             if (e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
             grid.ClearSelection();
             grid.Rows[e.RowIndex].Selected = true;
-            grid.CurrentCell = grid.Rows[e.RowIndex].Cells["Name"];
         };
         grid.CellContextMenuStripNeeded += (_, e) =>
         {
             if (e.RowIndex < 0) return;
             e.ContextMenuStrip = BuildModsContextMenu(e.RowIndex);
+        };
+        // Bonus discoverability — double-click a row's Name cell to
+        // open the mod page directly (skip the right-click menu).
+        // No-op for mods without a ModWorkshop ID.
+        grid.CellDoubleClick += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+            if (grid.Columns[e.ColumnIndex].Name != "Name") return;
+            var entry = _displayed[e.RowIndex];
+            if (entry.ModWorkshopId > 0) OpenModPage(entry);
         };
 
         // Checkbox-cell plumbing: by default DataGridView only fires
@@ -556,12 +567,19 @@ public class MainForm : Form
     /// Set toggles between "Set…" and "Change…" based on presence.</summary>
     private ContextMenuStrip BuildModsContextMenu(int rowIndex)
     {
+        // Plain ContextMenuStrip with just BackColor/ForeColor — no
+        // custom Renderer. The previous custom ProfessionalColorTable
+        // override was incomplete (left several "MenuStrip*" gradient
+        // properties at their light-theme defaults), which on some
+        // Win11 builds rendered the dropdown as essentially invisible
+        // and ate the right-click click. Falling back to system
+        // rendering means the menu shows up reliably even if it
+        // isn't perfectly themed against the dark form.
         var menu = new ContextMenuStrip
         {
             BackColor = Color.FromArgb(36, 42, 54),
             ForeColor = Color.FromArgb(220, 225, 235),
             ShowImageMargin = false,
-            Renderer = new ToolStripProfessionalRenderer(new DarkMenuColors()),
         };
         if (rowIndex < 0 || rowIndex >= _displayed.Count) return menu;
         var entry = _displayed[rowIndex];
@@ -587,22 +605,6 @@ public class MainForm : Form
         menu.Items.Add(setItem);
 
         return menu;
-    }
-
-    /// <summary>Custom palette for the context menu so the dropdown
-    /// doesn't pop up as a bright Windows-Aero white-on-blue strip
-    /// against the rest of the dark form.</summary>
-    private class DarkMenuColors : ProfessionalColorTable
-    {
-        public override Color MenuItemSelected => Color.FromArgb(65, 80, 105);
-        public override Color MenuItemSelectedGradientBegin => Color.FromArgb(65, 80, 105);
-        public override Color MenuItemSelectedGradientEnd => Color.FromArgb(65, 80, 105);
-        public override Color MenuItemBorder => Color.FromArgb(85, 100, 120);
-        public override Color MenuBorder => Color.FromArgb(85, 100, 120);
-        public override Color ToolStripDropDownBackground => Color.FromArgb(36, 42, 54);
-        public override Color ImageMarginGradientBegin => Color.FromArgb(36, 42, 54);
-        public override Color ImageMarginGradientMiddle => Color.FromArgb(36, 42, 54);
-        public override Color ImageMarginGradientEnd => Color.FromArgb(36, 42, 54);
     }
 
 
