@@ -1161,6 +1161,14 @@ public class MainForm : Form
                 + "disabled or not installed. The Mods column lists the "
                 + "dependent and the missing one — enable / install the "
                 + "required mod, or disable the dependent.";
+        if (c.Type == ConflictDetector.TYPE_DEPENDENCY_ORDER)
+        {
+            var min = c.Details.TryGetValue("suggested_dependent_min", out var v)
+                ? v?.ToString() ?? "?" : "?";
+            return $"A mod loads before its declared dependency. Raise the "
+                + $"dependent's priority to at least {min} (right-click → "
+                + "Set priority…) so it loads after the dependency.";
+        }
         if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP)
             return "AI resolve only handles file_overlap conflicts in v1.";
         if (!_claude.IsAvailable)

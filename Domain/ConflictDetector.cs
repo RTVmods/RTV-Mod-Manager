@@ -26,6 +26,7 @@ public static class ConflictDetector
     public const string TYPE_SUPER_CHAIN_CONSTRAINT = "super_chain_constraint";
     public const string TYPE_MISSING_DEPENDENCY = "missing_dependency";
     public const string TYPE_DUPLICATE_MOD_ID = "duplicate_mod_id";
+    public const string TYPE_DEPENDENCY_ORDER = "dependency_order";
 
     public class Conflict
     {
@@ -64,6 +65,11 @@ public static class ConflictDetector
         // alongside the live copy are the most common cause and the
         // user definitely wants to know about them.
         result.AddRange(DuplicateModIds(all));
+        // Dependency order: dependent must load AFTER its
+        // dependency, i.e. its priority must be strictly higher.
+        // Only meaningful between enabled mods (a disabled dep
+        // already shows up as missing_dependency).
+        result.AddRange(DependencyOrderViolations(live));
         return result;
     }
 
@@ -199,6 +205,51 @@ public static class ConflictDetector
                     ["enabled_count"] = instances.Count(e => e.IsEnabled),
                 },
             });
+        }
+        return result;
+    }
+
+    /// <summary>One conflict per (dependent, dependency) pair where
+    /// the dependent's load-order priority isn't strictly greater
+    /// than the dependency's. We require strictly-greater (not &gt;=)
+    /// because equal-priority load order is implementation-defined
+    /// (currently broken by filename), so a tie would still be a
+    /// risk. Fix is "raise dependent.priority above dependency.priority"
+    /// — the Details carry the suggested minimum so the UI can show
+    /// it.</summary>
+    private static List<Conflict> DependencyOrderViolations(List<ModEntry> live)
+    {
+        var byId = new Dictionary<string, ModEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in live)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            byId.TryAdd(e.ModId, e);
+        }
+        var result = new List<Conflict>();
+        foreach (var dependent in live)
+        {
+            if (string.IsNullOrEmpty(dependent.ModId)) continue;
+            foreach (var depId in dependent.RequiredDependencies)
+            {
+                if (string.IsNullOrEmpty(depId)) continue;
+                if (!byId.TryGetValue(depId, out var dep)) continue;
+                if (dependent.Priority > dep.Priority) continue;
+                // dependent.Priority <= dep.Priority — order violation.
+                result.Add(new Conflict
+                {
+                    Type = TYPE_DEPENDENCY_ORDER,
+                    Key = $"{dependent.ModId} after {dep.ModId}",
+                    ModIds = new List<string> { dependent.ModId, dep.ModId },
+                    Details = new Dictionary<string, object>
+                    {
+                        ["dependent"] = dependent.ModId,
+                        ["dependency"] = dep.ModId,
+                        ["dependent_priority"] = dependent.Priority,
+                        ["dependency_priority"] = dep.Priority,
+                        ["suggested_dependent_min"] = dep.Priority + 1,
+                    },
+                });
+            }
         }
         return result;
     }
