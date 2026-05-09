@@ -32,9 +32,23 @@ public class ModEntry
     public string ModId => GetSection("mod", "id");
     public string DisplayName => GetSection("mod", "name");
     public string Version => GetSection("mod", "version");
-    public int Priority
-        => int.TryParse(GetSection("mod", "priority"), out var p) ? p : 0;
     public string Description => GetSection("mod", "description");
+
+    /// <summary>The mod.txt-declared priority. Used as the fallback
+    /// when mod_config.cfg has no override for this mod. Stays
+    /// constant for the lifetime of the entry — the *effective*
+    /// priority that consumers actually want is `Priority`.</summary>
+    public int DeclaredPriority
+        => int.TryParse(GetSection("mod", "priority"), out var p) ? p : 0;
+
+    /// <summary>The effective load-order priority. Defaults to
+    /// DeclaredPriority but is overwritten by ModRegistry.Scan when
+    /// mod_config.cfg has an explicit value for this mod's
+    /// `mod-id@version` key — which it usually does, because the
+    /// in-game loader uses cfg as the source of truth.
+    /// Settable so ModRegistry / cfg edits can update it without
+    /// reaching into the manifest dictionary.</summary>
+    public int Priority { get; set; }
 
     public int ModWorkshopId
         => int.TryParse(GetSection("updates", "modworkshop"), out var i) ? i : 0;

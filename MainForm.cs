@@ -32,6 +32,12 @@ public class MainForm : Form
     private readonly ClaudeCodeRunner _claude = new();
     private readonly ModWorkshopClient _mw = new();
     private readonly ConflictResolver _resolver;
+    /// <summary>The in-game mod loader's mod_config.cfg state under
+    /// %APPDATA%\Road to Vostok\. Reloaded on every Rescan so we
+    /// pick up any changes the loader made between our scans;
+    /// written back via SaveModConfigSafely whenever the user
+    /// toggles or re-prioritises a mod.</summary>
+    private ModConfig _modConfig = new();
 
     /// <summary>mod_workshop_id → latest version (populated after the
     /// /mods/versions call).</summary>
@@ -78,6 +84,7 @@ public class MainForm : Form
     public MainForm()
     {
         _settings = Settings.Load();
+        _modConfig = ModConfig.Load(ModConfig.DefaultPath);
         _claude.OverridePath = _settings.ClaudePath;
         _resolver = new ConflictResolver(_claude, _registry)
         {
@@ -86,6 +93,34 @@ public class MainForm : Form
         InitializeWindow();
         BuildLayout();
         Shown += async (_, _) => await RunStartupAsync();
+    }
+
+    /// <summary>Reloads mod_config.cfg from disk and rescans the
+    /// mods folder, applying cfg as the source of truth for
+    /// per-mod enabled state and priority. Wraps `_registry.Scan`
+    /// so every refresh path (RefreshAllAsync, after-toggle, etc.)
+    /// picks up cfg changes the in-game loader may have written
+    /// since our last scan.</summary>
+    private bool Rescan()
+    {
+        _modConfig = ModConfig.Load(ModConfig.DefaultPath);
+        return _registry.Scan(ModsDir, _modConfig);
+    }
+
+    /// <summary>Saves mod_config.cfg, surfacing failures in a
+    /// dialog. Returns true on success so callers can short-circuit
+    /// (revert UI state, abort batched flows). Save-failure is rare
+    /// — APPDATA is user-writable — but file-locking by the in-game
+    /// loader during simultaneous use is the most likely real
+    /// cause.</summary>
+    private bool SaveModConfigSafely()
+    {
+        try { _modConfig.Save(); return true; }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't save mod_config.cfg", ex);
+            return false;
+        }
     }
 
     private void InitializeWindow()
@@ -963,7 +998,7 @@ public class MainForm : Form
         RefreshSetupBanner();
 
         _modsLabel.Text = $"Mods: scanning {ModsDir} ...";
-        if (!_registry.Scan(ModsDir))
+        if (!Rescan())
         {
             _modsLabel.Text = $"Mods: cannot read {ModsDir}. " +
                 "Is the game installed at the default Steam path?";
@@ -1347,8 +1382,10 @@ public class MainForm : Form
         {
             if (!ToggleModFiles(e)) failed++;
         }
-        // One rescan + one redetect at the end — far cheaper than per-mod.
-        _registry.Scan(ModsDir);
+        // Single cfg save for the whole batch — one .bak rotation,
+        // one disk hit even for 50+ toggles.
+        SaveModConfigSafely();
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1357,9 +1394,9 @@ public class MainForm : Form
         if (failed > 0)
         {
             MessageBox.Show(this,
-                $"{failed} of {targets.Count} mods couldn't be moved. "
-                + "(Usually because the .vmz file is locked by something — "
-                + "Steam, antivirus, or a running game.)",
+                $"{failed} of {targets.Count} mods couldn't be toggled. "
+                + "(Likely because the .vmz file in mods/Disabled/ is "
+                + "locked, or a mod has no mod_id in its mod.txt.)",
                 "Bulk toggle finished with errors",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -1367,7 +1404,7 @@ public class MainForm : Form
 
     private async Task RefreshAllAsync()
     {
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1482,7 +1519,7 @@ public class MainForm : Form
             }
         }
 
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1569,10 +1606,10 @@ public class MainForm : Form
     }
 
     /// <summary>Fires when the user edits a cell in-place. Two
-    /// columns are editable: the Enabled checkbox (existing
-    /// toggle-mod flow) and the Priority text cell (writes [mod]
-    /// priority = N to mod.txt).</summary>
-    private async void OnGridCellValueChanged(DataGridViewCellEventArgs e)
+    /// columns are editable: the Enabled checkbox (toggle-mod flow,
+    /// writes mod_config.cfg) and the Priority text cell (writes
+    /// the cfg's [profile.&lt;active&gt;.priority] block).</summary>
+    private void OnGridCellValueChanged(DataGridViewCellEventArgs e)
     {
         if (_populatingMods) return;
         if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
@@ -1608,20 +1645,37 @@ public class MainForm : Form
                 return;
             }
             if (newPriority == entry.Priority) return;
-            var bak = await EditModTxtAsync(entry,
-                txt => ManifestEditor.SetModPriority(txt, newPriority));
-            if (bak == null)
+            // Priority lives in mod_config.cfg now — the in-game
+            // loader's [profile.<active>.priority] section overrides
+            // any [mod] priority in mod.txt. Editing mod.txt would
+            // be a no-op against the running game.
+            if (string.IsNullOrEmpty(entry.ModId))
             {
-                // Edit failed — revert the cell to the on-disk value.
+                MessageBox.Show(this,
+                    $"`{Path.GetFileName(entry.Path)}` has no mod_id in "
+                    + "its mod.txt — can't write a priority entry without "
+                    + "an ID to key off.",
+                    "Can't set priority",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _populatingMods = true;
                 try { _modsGrid.Rows[e.RowIndex].Cells["Priority"].Value
                     = entry.Priority.ToString(); }
                 finally { _populatingMods = false; }
                 return;
             }
+            var oldPriority = entry.Priority;
+            _modConfig.SetPriority(entry.ModId, entry.Version, newPriority);
+            if (!SaveModConfigSafely())
+            {
+                _populatingMods = true;
+                try { _modsGrid.Rows[e.RowIndex].Cells["Priority"].Value
+                    = oldPriority.ToString(); }
+                finally { _populatingMods = false; }
+                return;
+            }
             _modsLabel.Text =
-                $"`{entry.DisplayName}` priority {entry.Priority} → {newPriority}. {bak}";
-            _registry.Scan(ModsDir);
+                $"`{entry.DisplayName}` priority {oldPriority} → {newPriority}.";
+            Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
             return;
@@ -1633,13 +1687,16 @@ public class MainForm : Form
         if (!ToggleModFiles(e))
         {
             ShowError("Toggle failed",
-                new Exception($"Couldn't move {Path.GetFileName(e.Path)} — "
-                    + "see Output for details."));
+                new Exception($"Couldn't toggle `{e.DisplayName}` — "
+                    + "the file is locked or the mod has no mod_id. "
+                    + "Quit Road to Vostok and any antivirus scan, "
+                    + "then try again."));
             return;
         }
+        if (!SaveModConfigSafely()) return;
         // Rescan + redetect conflicts (different enabled set may have
         // a different conflict set).
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1647,36 +1704,73 @@ public class MainForm : Form
         PopulateConflictsList(_lastConflicts);
     }
 
-    /// <summary>Filesystem-only mod toggle — moves the .vmz / dir
-    /// between &lt;mods&gt;/ and &lt;mods&gt;/Disabled/ without rescanning the
-    /// registry. Used by both ToggleMod (single, with rescan) and
-    /// BulkToggle (many, single rescan at the end). Returns false on
-    /// failure so the caller can count errors.</summary>
+    /// <summary>Toggles a mod's enabled state via mod_config.cfg
+    /// (the in-game loader's source of truth) — and, when enabling
+    /// a mod that's currently sitting in &lt;mods&gt;/Disabled/, also
+    /// moves the file back to &lt;mods&gt;/ so the loader can discover
+    /// it. Disabling never moves files anymore: cfg=false is enough,
+    /// and leaving the file in &lt;mods&gt;/ matches what the in-game
+    /// loader UI does. mods/Disabled/ shrinks naturally as the
+    /// user re-enables legacy disables.
+    ///
+    /// Doesn't save the cfg here — caller batches that via
+    /// SaveModConfigSafely so a 50-file BulkToggle is one rotation,
+    /// not 50. Returns false when the move fails so the caller can
+    /// count errors.</summary>
     private bool ToggleModFiles(ModEntry e)
     {
-        var fileName = Path.GetFileName(e.Path);
-        string dst;
-        if (e.IsEnabled)
+        if (string.IsNullOrEmpty(e.ModId))
         {
-            var disabledDir = Path.Combine(ModsDir, "Disabled");
-            try { Directory.CreateDirectory(disabledDir); }
-            catch { return false; }
-            dst = Path.Combine(disabledDir, fileName);
+            // No mod_id → can't key cfg state. Surface the issue
+            // instead of silently doing nothing.
+            return false;
+        }
+        var enabling = !e.IsEnabled;
+        if (enabling)
+        {
+            // Move out of Disabled/ if necessary so the loader can
+            // discover it. Files already in mods/ stay put.
+            if (IsUnderDisabledFolder(e.Path))
+            {
+                var fileName = Path.GetFileName(e.Path);
+                var dst = Path.Combine(ModsDir, fileName);
+                try
+                {
+                    if (e.IsArchive) File.Move(e.Path, dst);
+                    else Directory.Move(e.Path, dst);
+                    e.Path = dst;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+            _modConfig.SetEnabled(e.ModId, e.Version, true);
+            // Refresh priority entry too if missing — declared
+            // priority becomes the cfg priority on first enable so
+            // future cfg-only flows see a stable value.
+            if (!_modConfig.HasEntry(e.ModId, e.Version))
+                _modConfig.SetPriority(e.ModId, e.Version, e.DeclaredPriority);
         }
         else
         {
-            dst = Path.Combine(ModsDir, fileName);
+            _modConfig.SetEnabled(e.ModId, e.Version, false);
         }
+        return true;
+    }
+
+    private bool IsUnderDisabledFolder(string entryPath)
+    {
+        var disabled = Path.Combine(ModsDir, "Disabled");
         try
         {
-            if (e.IsArchive) File.Move(e.Path, dst);
-            else Directory.Move(e.Path, dst);
-            return true;
+            var entryFull = Path.GetFullPath(entryPath);
+            var disabledFull = Path.GetFullPath(disabled);
+            return entryFull.StartsWith(
+                disabledFull + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
     /// <summary>Open the mod's ModWorkshop page in the user's default
@@ -1790,7 +1884,7 @@ public class MainForm : Form
         _modsLabel.Text = $"Linked `{e.DisplayName}` → ModWorkshop {newId}. {bak}";
 
         // Re-scan + re-check updates so the new link kicks in.
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         await CheckUpdatesAsync(forceFresh: true);
@@ -1800,17 +1894,26 @@ public class MainForm : Form
     /// `[mod] priority = N` in mod.txt. Lower numbers load earlier.
     /// Negative values are allowed — useful for pinning a mod above
     /// the default-0 priority of stock mods.</summary>
-    private async Task SetModPriorityAsync(ModEntry e)
+    /// <summary>Writes a new load-order priority for the mod into
+    /// mod_config.cfg's [profile.&lt;active&gt;.priority] section. We
+    /// do NOT write to mod.txt here — the in-game loader's cfg
+    /// overrides any [mod] priority in mod.txt, so a mod.txt edit
+    /// would be silent against the running game. The mod-author's
+    /// declared priority remains as a fallback when the cfg has
+    /// no entry.</summary>
+    private Task SetModPriorityAsync(ModEntry e)
     {
         var current = e.Priority.ToString();
         var prompt =
             $"Enter the load-order priority for `{e.DisplayName}`.\n\n"
-            + "Lower numbers load earlier; the default for mods that "
-            + "don't declare a priority is 0. Negative values are fine "
-            + "(e.g. -100 to pin above everything else).\n\n"
-            + "This rewrites the mod's mod.txt to set [mod] priority = N.";
+            + "Lower numbers load earlier; default is 0. Negative "
+            + "values are fine (e.g. -100 to pin above everything "
+            + "else).\n\n"
+            + "Writes to mod_config.cfg's "
+            + $"[profile.{_modConfig.ActiveProfile}.priority] block — "
+            + "the same key the in-game loader UI edits.";
         var input = TextInputDialog.Prompt(this, "Set priority", prompt, current);
-        if (input == null) return;
+        if (input == null) return Task.CompletedTask;
         if (!int.TryParse(input.Trim(), out var newPriority))
         {
             MessageBox.Show(this,
@@ -1818,20 +1921,37 @@ public class MainForm : Form
                 + "be a whole number (positive, negative, or zero).",
                 "Invalid input",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            return Task.CompletedTask;
         }
         if (newPriority == e.Priority)
         {
             _modsLabel.Text = $"`{e.DisplayName}` priority is already {newPriority}.";
-            return;
+            return Task.CompletedTask;
         }
-        var bak = await EditModTxtAsync(e, txt => ManifestEditor.SetModPriority(txt, newPriority));
-        if (bak == null) return;
-        _modsLabel.Text = $"`{e.DisplayName}` priority {e.Priority} → {newPriority}. {bak}";
+        if (string.IsNullOrEmpty(e.ModId))
+        {
+            MessageBox.Show(this,
+                $"`{Path.GetFileName(e.Path)}` has no mod_id in mod.txt — "
+                + "can't write a priority entry without an ID to key off.",
+                "Can't set priority",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return Task.CompletedTask;
+        }
+        var oldPriority = e.Priority;
+        _modConfig.SetPriority(e.ModId, e.Version, newPriority);
+        if (!SaveModConfigSafely()) return Task.CompletedTask;
+        _modsLabel.Text =
+            $"`{e.DisplayName}` priority {oldPriority} → {newPriority}.";
 
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
+        // Re-detect — priority changes can resolve dependency_order
+        // conflicts.
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        return Task.CompletedTask;
     }
 
     /// <summary>Picks required dependencies from a checklist of
@@ -1909,16 +2029,17 @@ public class MainForm : Form
             }
         }
 
-        // Single mod.txt rewrite carrying both edits — one .bak, one
-        // rescan, atomic from the user's perspective.
+        // Deps still live in mod.txt (no cfg equivalent), but
+        // priority moved to mod_config.cfg. So we do TWO writes:
+        // mod.txt for the new dep list, cfg for the optional bump.
         var bak = await EditModTxtAsync(e, txt =>
-        {
-            var t = ManifestEditor.SetDependencyList(txt, "required", newDeps);
-            if (bumpTo.HasValue)
-                t = ManifestEditor.SetModPriority(t, bumpTo.Value);
-            return t;
-        });
+            ManifestEditor.SetDependencyList(txt, "required", newDeps));
         if (bak == null) return;
+        if (bumpTo.HasValue && !string.IsNullOrEmpty(e.ModId))
+        {
+            _modConfig.SetPriority(e.ModId, e.Version, bumpTo.Value);
+            SaveModConfigSafely();
+        }
         var depsMsg = newDeps.Count == 0
             ? $"Cleared `{e.DisplayName}` required dependencies."
             : $"Set `{e.DisplayName}` required dependencies "
@@ -1928,7 +2049,7 @@ public class MainForm : Form
             : "";
         _modsLabel.Text = $"{depsMsg}{prioMsg} {bak}";
 
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         // Re-detect since dependency edits can satisfy or break
@@ -1980,7 +2101,7 @@ public class MainForm : Form
                 $"Updated {label}. (Mod's internal version may still " +
                 "lag the ModWorkshop reported version — that's a mod-author quirk.)";
 
-            _registry.Scan(ModsDir);
+            Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
         }
@@ -2048,7 +2169,7 @@ public class MainForm : Form
         _settings.ModsDir = path;
         _settings.Save();
         // Re-scan from the new path immediately so the grid refreshes.
-        _registry.Scan(ModsDir);
+        Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -2233,7 +2354,7 @@ public class MainForm : Form
         // any related ones) drop off the list cleanly.
         if (dlg.Applied)
         {
-            _registry.Scan(ModsDir);
+            Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
             _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);

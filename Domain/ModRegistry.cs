@@ -14,18 +14,70 @@ public class ModRegistry
     public string ModsDir { get; private set; } = "";
     public List<ModEntry> Entries { get; } = new();
 
-    /// <summary>Scans `modsDir` and `modsDir/Disabled/`. Returns true if
-    /// the top-level folder existed and was readable.</summary>
-    public bool Scan(string modsDir)
+    /// <summary>Scans `modsDir` and `modsDir/Disabled/`. Returns true
+    /// if the top-level folder existed and was readable.
+    /// When `cfg` is provided, each entry's IsEnabled and Priority
+    /// are overridden from mod_config.cfg's active-profile sections —
+    /// the in-game loader uses cfg as its source of truth, so a
+    /// mod showing "enabled" in our grid only matches reality when
+    /// we read cfg too. Files in `mods/Disabled/` stay forced-off
+    /// regardless of cfg (the loader can't see them anyway).</summary>
+    public bool Scan(string modsDir, ModConfig? cfg = null)
     {
         ModsDir = modsDir;
         Entries.Clear();
         if (!Directory.Exists(modsDir)) return false;
-        ScanDir(modsDir, isEnabled: true);
+        ScanDir(modsDir, locationEnabled: true);
         var disabled = Path.Combine(modsDir, "Disabled");
         if (Directory.Exists(disabled))
-            ScanDir(disabled, isEnabled: false);
+            ScanDir(disabled, locationEnabled: false);
+        ApplyCfg(cfg);
         return true;
+    }
+
+    /// <summary>Overlays mod_config.cfg's active-profile state onto
+    /// the freshly-scanned entries: cfg-driven IsEnabled, cfg-driven
+    /// Priority. Files in `mods/Disabled/` keep IsEnabled = false
+    /// regardless — the loader doesn't see them, so their cfg state
+    /// (if any) is irrelevant.</summary>
+    private void ApplyCfg(ModConfig? cfg)
+    {
+        foreach (var e in Entries)
+        {
+            // Default Priority = DeclaredPriority (mod.txt) before
+            // cfg overlay; cfg.Priority falls back to DeclaredPriority
+            // when the cfg has no entry for this mod.
+            e.Priority = cfg != null
+                ? cfg.Priority(e.ModId, e.Version, e.DeclaredPriority)
+                : e.DeclaredPriority;
+
+            var inDisabled = IsUnderDisabled(e.Path);
+            if (inDisabled)
+            {
+                e.IsEnabled = false;
+            }
+            else if (cfg != null)
+            {
+                // fallback=true so a freshly-installed mod the user
+                // hasn't toggled yet defaults to enabled (matches
+                // the in-game loader — newly-discovered mods are on
+                // until explicitly disabled).
+                e.IsEnabled = cfg.IsEnabled(e.ModId, e.Version, fallback: true);
+            }
+            // No cfg given: leave IsEnabled at the location-based
+            // value the scan code already set (true for mods/, false
+            // for mods/Disabled/).
+        }
+    }
+
+    private bool IsUnderDisabled(string entryPath)
+    {
+        var disabled = Path.Combine(ModsDir, "Disabled");
+        var entryFull = Path.GetFullPath(entryPath);
+        var disabledFull = Path.GetFullPath(disabled);
+        return entryFull.StartsWith(
+            disabledFull + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public ModEntry? FindById(string modId)
@@ -34,7 +86,7 @@ public class ModRegistry
     public List<ModEntry> Enabled()
         => Entries.Where(e => e.IsEnabled).ToList();
 
-    private void ScanDir(string dirPath, bool isEnabled)
+    private void ScanDir(string dirPath, bool locationEnabled)
     {
         DirectoryInfo dir;
         try { dir = new DirectoryInfo(dirPath); }
@@ -46,7 +98,7 @@ public class ModRegistry
         catch { return; }
         foreach (var file in archives)
         {
-            var entry = LoadArchiveEntry(file.FullName, isEnabled);
+            var entry = LoadArchiveEntry(file.FullName, locationEnabled);
             if (entry != null) Entries.Add(entry);
         }
 
@@ -58,16 +110,16 @@ public class ModRegistry
         {
             if (sub.Name.StartsWith(".")) continue;
             // Skip Disabled when scanning the top-level — caller handles
-            // it as a separate pass with isEnabled=false.
-            if (isEnabled && sub.Name == "Disabled") continue;
+            // it as a separate pass with locationEnabled=false.
+            if (locationEnabled && sub.Name == "Disabled") continue;
             var manifestPath = Path.Combine(sub.FullName, "mod.txt");
             if (!File.Exists(manifestPath)) continue;
-            var entry = LoadDirEntry(sub.FullName, isEnabled);
+            var entry = LoadDirEntry(sub.FullName, locationEnabled);
             if (entry != null) Entries.Add(entry);
         }
     }
 
-    private static ModEntry? LoadArchiveEntry(string path, bool isEnabled)
+    private static ModEntry? LoadArchiveEntry(string path, bool locationEnabled)
     {
         using var arch = new ModArchive();
         if (!arch.Open(path)) return null;
@@ -75,13 +127,13 @@ public class ModRegistry
         {
             Path = path,
             IsArchive = true,
-            IsEnabled = isEnabled,
+            IsEnabled = locationEnabled,
             Manifest = arch.GetManifest(),
             Files = arch.FileList().ToList(),
         };
     }
 
-    private static ModEntry? LoadDirEntry(string path, bool isEnabled)
+    private static ModEntry? LoadDirEntry(string path, bool locationEnabled)
     {
         var manifestPath = Path.Combine(path, "mod.txt");
         string text;
@@ -92,7 +144,7 @@ public class ModRegistry
         {
             Path = path,
             IsArchive = false,
-            IsEnabled = isEnabled,
+            IsEnabled = locationEnabled,
             Manifest = ModArchive.ParseConfigFile(text),
             Files = new List<string>(),
         };
