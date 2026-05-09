@@ -540,26 +540,6 @@ public class MainForm : Form
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "Name",
-            HeaderText = "Mod",
-            // Fill mode: this column auto-grows to fill any leftover
-            // grid width after the fixed columns and any user-dragged
-            // overrides on Version/Prio. Window-resize / splitter-
-            // drag → Mod stretches to match. The trade-off is that
-            // dragging Mod's own boundary is meaningless (single
-            // Fill column → FillWeight is moot), but dragging the
-            // adjacent fixed columns (Version) re-sizes them and
-            // Mod recomputes accordingly. ApplyColumnWidths +
-            // SaveColumnWidths both skip Fill columns, so Mod isn't
-            // persisted and resizing across launches reverts to the
-            // fill-leftover behaviour every time.
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 100,
-            ReadOnly = true,
-            MinimumWidth = 220,
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
             Name = "Version",
             HeaderText = "Version",
             Width = 80,
@@ -570,13 +550,28 @@ public class MainForm : Form
             Name = "Priority",
             HeaderText = "Prio",
             Width = 50,
-            // Editable in-place — commits write [mod] priority = N
-            // back to the mod's mod.txt. Other text columns stay
-            // read-only because their values either come from
-            // mod.txt and aren't user-controlled (Version) or are
-            // computed from registry state (Pos, Mod name).
+            // Editable in-place — commits write the new value to
+            // mod_config.cfg's [profile.<active>.priority] block.
             ReadOnly = false,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
+        });
+        // Mod (Fill) goes LAST so every other column has a draggable
+        // right edge. With Mod in the middle, Prio (last) had no
+        // right boundary to drag, and dragging "Mod's right edge"
+        // actually resized the next fixed column (Version) — the
+        // Fill column auto-recomputes, so what looks like resizing
+        // Mod is really resizing its neighbour. Putting Mod at the
+        // end inverts that: Prio gets a right boundary, every fixed
+        // column is drag-resizable, and Mod absorbs leftover width
+        // without needing a drag handle of its own.
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Name",
+            HeaderText = "Mod",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 100,
+            ReadOnly = true,
+            MinimumWidth = 220,
         });
         // (Update + version status now collapse into the single
         // "Update" link column at the start of the row.)
@@ -961,16 +956,19 @@ public class MainForm : Form
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
+            Name = "Mods",
+            HeaderText = "Mods",
+            Width = 220,
+        });
+        // Key (Fill) goes last for the same reason Mod is last in
+        // the mods grid: gives Mods a draggable right edge and lets
+        // Key absorb leftover width without needing a drag handle.
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
             Name = "Key",
             HeaderText = "Key",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 100,
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "Mods",
-            HeaderText = "Mods",
-            Width = 220,
         });
         // Suppress the button chrome on empty Resolve cells so
         // non-resolvable conflict rows (everything except
