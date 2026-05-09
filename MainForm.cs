@@ -619,6 +619,52 @@ public class MainForm : Form
         };
         setItem.Click += async (_, _) => await SetModWorkshopIdAsync(entry);
         menu.Items.Add(setItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+        var locked = IsLocked(entry);
+        var lockItem = new ToolStripMenuItem(locked ? "Unlock mod" : "Lock mod")
+        {
+            Checked = locked,
+            ToolTipText = locked
+                ? "Currently locked — Enable all / Disable all skip this mod. "
+                + "Click to unlock so bulk toggles include it again."
+                : "Lock this mod so Enable all / Disable all skip it. The "
+                + "checkbox still works for individual toggling.",
+        };
+        lockItem.Click += (_, _) => ToggleLock(entry);
+        menu.Items.Add(lockItem);
+    }
+
+    /// <summary>Whether this mod is currently in the user's lock list.
+    /// Locked mods are skipped by BulkToggle but can still be toggled
+    /// individually via the checkbox.</summary>
+    private bool IsLocked(ModEntry e)
+        => !string.IsNullOrEmpty(e.ModId)
+            && _settings.LockedMods.Contains(e.ModId);
+
+    /// <summary>Adds or removes the mod from the lock list and
+    /// persists. Triggers a grid repopulate so the 🔒 indicator on
+    /// the Mod column updates.</summary>
+    private void ToggleLock(ModEntry e)
+    {
+        if (string.IsNullOrEmpty(e.ModId))
+        {
+            // No mod_id in mod.txt — we'd have nothing to key the
+            // lock state on. Surface the issue rather than silently
+            // doing nothing.
+            MessageBox.Show(this,
+                $"`{Path.GetFileName(e.Path)}` has no mod_id in its "
+                + "mod.txt — can't lock without an ID to key off.",
+                "Can't lock",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (_settings.LockedMods.Contains(e.ModId))
+            _settings.LockedMods.Remove(e.ModId);
+        else
+            _settings.LockedMods.Add(e.ModId);
+        _settings.Save();
+        PopulateModsGrid();
     }
 
 
@@ -941,8 +987,15 @@ public class MainForm : Form
                 var name = !string.IsNullOrEmpty(e.DisplayName)
                     ? e.DisplayName
                     : Path.GetFileName(e.Path);
-                row.Cells["Name"].Value = name;
-                row.Cells["Name"].ToolTipText = $"id: {e.ModId}\npath: {e.Path}";
+                var locked = IsLocked(e);
+                // 🔒 prefix on the cell text gives an at-a-glance
+                // signal — same as the Lock/Unlock context-menu state,
+                // but visible without right-clicking each row.
+                row.Cells["Name"].Value = locked ? $"🔒 {name}" : name;
+                row.Cells["Name"].ToolTipText = locked
+                    ? $"id: {e.ModId}\npath: {e.Path}\n"
+                      + "🔒 Locked — Enable all / Disable all skip this mod."
+                    : $"id: {e.ModId}\npath: {e.Path}";
                 row.Cells["Version"].Value = e.Version;
                 row.Cells["Priority"].Value = e.Priority.ToString();
             }
@@ -1134,12 +1187,25 @@ public class MainForm : Form
 
     private void BulkToggle(bool enable)
     {
-        var targets = _registry.Entries.Where(e => e.IsEnabled != enable).ToList();
+        // Mods that need toggling, partitioned into "free" (will be
+        // toggled) and "locked" (skipped). Locked mods are surfaced
+        // in the confirmation prompt so the user knows the bulk
+        // action isn't fully comprehensive.
+        var candidates = _registry.Entries.Where(e => e.IsEnabled != enable).ToList();
+        var targets = candidates.Where(e => !IsLocked(e)).ToList();
+        var skipped = candidates.Where(e => IsLocked(e)).ToList();
         if (targets.Count == 0)
         {
-            _modsLabel.Text = enable
-                ? "All mods are already enabled."
-                : "All mods are already disabled.";
+            if (skipped.Count > 0)
+                _modsLabel.Text = enable
+                    ? $"All non-locked mods are already enabled "
+                      + $"({skipped.Count} locked, skipped)."
+                    : $"All non-locked mods are already disabled "
+                      + $"({skipped.Count} locked, skipped).";
+            else
+                _modsLabel.Text = enable
+                    ? "All mods are already enabled."
+                    : "All mods are already disabled.";
             return;
         }
         var verb = enable ? "Enable" : "Disable";
@@ -1154,9 +1220,14 @@ public class MainForm : Form
                        : e.DisplayName)));
         if (targets.Count > previewCount)
             preview += $"\n  …and {targets.Count - previewCount} more";
+        var skippedNote = skipped.Count > 0
+            ? $"\n\n🔒 Skipping {skipped.Count} locked mod"
+              + (skipped.Count == 1 ? "" : "s")
+              + " — they'll keep their current state."
+            : "";
         var dr = MessageBox.Show(this,
             $"{verb} all {targets.Count} {(enable ? "disabled" : "enabled")} mods?\n\n"
-            + preview + "\n\n"
+            + preview + skippedNote + "\n\n"
             + "Each mod's .vmz will be moved between <mods>/ and <mods>/Disabled/. "
             + "You can undo with the opposite bulk action.",
             $"{verb} all — confirm",

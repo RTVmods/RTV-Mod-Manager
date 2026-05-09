@@ -53,6 +53,14 @@ public class Settings
     /// pixels so the ratio is preserved when the window resizes.</summary>
     public double SplitterRatio { get; set; }
 
+    /// <summary>Mod IDs the user has explicitly locked. Locked mods
+    /// are skipped by Enable all / Disable all bulk toggles — useful
+    /// when a single mod (e.g. Mod Configuration Menu) should always
+    /// stay in its current state regardless of mass actions.
+    /// Stored as a list rather than a set for JSON compatibility;
+    /// callers should treat it as a set.</summary>
+    public List<string> LockedMods { get; set; } = new();
+
     /// <summary>Per-column widths the user dragged to. Keyed by
     /// "&lt;grid&gt;.&lt;column-name&gt;" — e.g. "mods.Update",
     /// "conflicts.Type". Fill-mode columns (the Mod-name column,
