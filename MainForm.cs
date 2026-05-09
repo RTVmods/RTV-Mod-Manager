@@ -738,6 +738,109 @@ public class MainForm : Form
         };
         lockItem.Click += (_, _) => ToggleLock(entry);
         menu.Items.Add(lockItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+        var deleteItem = new ToolStripMenuItem("Delete mod…")
+        {
+            ToolTipText = "Send the .vmz file (or directory mod's folder) "
+                + "to the Recycle Bin and remove its entries from "
+                + "mod_config.cfg. Recoverable — restore from the Recycle "
+                + "Bin if you change your mind.",
+            ForeColor = Color.FromArgb(245, 130, 120),
+        };
+        deleteItem.Click += (_, _) => DeleteMod(entry);
+        menu.Items.Add(deleteItem);
+    }
+
+    /// <summary>Sends the mod's .vmz / directory to the Recycle Bin
+    /// (NOT hard-deleted — recoverable) and clears its
+    /// mod-id@version entries from mod_config.cfg's active profile.
+    /// Strong confirmation dialog with No as default. Lock state is
+    /// also cleared from settings since the mod no longer exists.</summary>
+    private void DeleteMod(ModEntry e)
+    {
+        var fileName = Path.GetFileName(e.Path);
+        var sizeNote = "";
+        try
+        {
+            if (e.IsArchive && File.Exists(e.Path))
+            {
+                var bytes = new FileInfo(e.Path).Length;
+                sizeNote = $" ({bytes / 1024} KiB)";
+            }
+        }
+        catch { /* size is decorative */ }
+
+        var dr = MessageBox.Show(this,
+            $"Delete `{e.DisplayName}`{sizeNote}?\n\n"
+            + $"  • Sends `{fileName}` to the Recycle Bin\n"
+            + "  • Removes its entries from mod_config.cfg\n"
+            + (IsLocked(e) ? "  • Removes its lock\n" : "")
+            + "\nRecoverable from the Recycle Bin if you change your mind. "
+            + "The .bak files (if any) are NOT deleted.",
+            "Delete mod — confirm",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            // Default to No so a stray Enter cancels.
+            MessageBoxDefaultButton.Button2);
+        if (dr != DialogResult.Yes) return;
+
+        try
+        {
+            // Microsoft.VisualBasic ships in the .NET Windows Forms
+            // SDK; FileSystem.DeleteFile/Directory with the
+            // SendToRecycleBin option is the simplest reliable way
+            // to recycle-bin from .NET. Avoids P/Invoke.
+            if (File.Exists(e.Path))
+            {
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                    e.Path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            }
+            else if (Directory.Exists(e.Path))
+            {
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                    e.Path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            }
+            else
+            {
+                MessageBox.Show(this,
+                    $"Couldn't find `{e.Path}` on disk — nothing to "
+                    + "recycle. Refreshing the registry to clean up "
+                    + "the stale grid entry.",
+                    "File missing",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't delete mod", ex);
+            return;
+        }
+
+        // Clear cfg + lock state for this mod so we don't leave
+        // orphaned entries behind.
+        if (!string.IsNullOrEmpty(e.ModId))
+        {
+            _modConfig.RemoveEntry(e.ModId, e.Version);
+            SaveModConfigSafely();
+            if (_settings.LockedMods.Remove(e.ModId))
+            {
+                try { _settings.Save(); }
+                catch { /* lock-list cleanup is best-effort */ }
+            }
+        }
+
+        _modsLabel.Text = $"Deleted `{e.DisplayName}` (sent to Recycle Bin).";
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
     }
 
     /// <summary>Opens the read-only dependencies dialog for a mod.
