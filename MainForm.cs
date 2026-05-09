@@ -1692,19 +1692,81 @@ public class MainForm : Form
             _modsLabel.Text = $"`{e.DisplayName}` dependencies unchanged.";
             return;
         }
+
+        // Order check — among the deps the user JUST added, find any
+        // installed dep whose priority is >= the subject's. If found,
+        // offer to bump the subject above the highest-priority new
+        // dep so the load order will satisfy the new declaration.
+        // Only newly-added deps matter here: pre-existing violations
+        // would already be flagged in the conflicts panel.
+        int? bumpTo = null;
+        var added = picked.Except(existing, StringComparer.OrdinalIgnoreCase).ToList();
+        if (added.Count > 0)
+        {
+            var registryById = new Dictionary<string, ModEntry>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in _registry.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.ModId)) continue;
+                registryById.TryAdd(entry.ModId, entry);
+            }
+            var blockers = added
+                .Where(id => registryById.ContainsKey(id))
+                .Select(id => registryById[id])
+                .Where(d => d.Priority >= e.Priority)
+                .ToList();
+            if (blockers.Count > 0)
+            {
+                var maxBlocker = blockers.OrderByDescending(d => d.Priority).First();
+                var newPrio = maxBlocker.Priority + 1;
+                var blockerNames = string.Join(", ",
+                    blockers
+                        .OrderByDescending(d => d.Priority)
+                        .Select(d => $"{d.ModId} (prio {d.Priority})"));
+                var dr = MessageBox.Show(this,
+                    $"`{e.DisplayName}` is at priority {e.Priority}, but "
+                    + $"now requires:\n  {blockerNames}\n\n"
+                    + "Dependents must load AFTER their dependencies, so "
+                    + $"`{e.DisplayName}`'s priority needs to be > "
+                    + $"{maxBlocker.Priority}.\n\n"
+                    + $"Bump `{e.DisplayName}`'s priority "
+                    + $"{e.Priority} → {newPrio} as part of this edit?",
+                    "Bump priority?",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+                if (dr == DialogResult.Cancel) return;
+                if (dr == DialogResult.Yes) bumpTo = newPrio;
+                // No → write deps only; the conflicts panel will
+                // surface the dependency_order violation so the user
+                // can fix it later.
+            }
+        }
+
+        // Single mod.txt rewrite carrying both edits — one .bak, one
+        // rescan, atomic from the user's perspective.
         var bak = await EditModTxtAsync(e, txt =>
-            ManifestEditor.SetDependencyList(txt, "required", newDeps));
+        {
+            var t = ManifestEditor.SetDependencyList(txt, "required", newDeps);
+            if (bumpTo.HasValue)
+                t = ManifestEditor.SetModPriority(t, bumpTo.Value);
+            return t;
+        });
         if (bak == null) return;
-        _modsLabel.Text = newDeps.Count == 0
-            ? $"Cleared `{e.DisplayName}` required dependencies. {bak}"
+        var depsMsg = newDeps.Count == 0
+            ? $"Cleared `{e.DisplayName}` required dependencies."
             : $"Set `{e.DisplayName}` required dependencies "
-              + $"({newDeps.Count}). {bak}";
+              + $"({newDeps.Count}).";
+        var prioMsg = bumpTo.HasValue
+            ? $" Priority {e.Priority} → {bumpTo.Value}."
+            : "";
+        _modsLabel.Text = $"{depsMsg}{prioMsg} {bak}";
 
         _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         // Re-detect since dependency edits can satisfy or break
-        // missing_dependency conflicts elsewhere.
+        // missing_dependency / dependency_order conflicts elsewhere.
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
