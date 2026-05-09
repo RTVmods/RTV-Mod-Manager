@@ -25,6 +25,7 @@ public static class ConflictDetector
     public const string TYPE_TAKE_OVER_COLLISION = "take_over_collision";
     public const string TYPE_SUPER_CHAIN_CONSTRAINT = "super_chain_constraint";
     public const string TYPE_MISSING_DEPENDENCY = "missing_dependency";
+    public const string TYPE_DUPLICATE_MOD_ID = "duplicate_mod_id";
 
     public class Conflict
     {
@@ -58,6 +59,11 @@ public static class ConflictDetector
         // mods) so we can distinguish "installed but disabled" from
         // "not installed at all" in the conflict detail.
         result.AddRange(MissingDependencies(live, all));
+        // Duplicate-mod-id is a registry-wide check (count includes
+        // disabled copies) — leftover .vmz files in mods/Disabled/
+        // alongside the live copy are the most common cause and the
+        // user definitely wants to know about them.
+        result.AddRange(DuplicateModIds(all));
         return result;
     }
 
@@ -149,6 +155,48 @@ public static class ConflictDetector
                 Details = new Dictionary<string, object>
                 {
                     ["is_gdscript"] = path.EndsWith(".gd"),
+                },
+            });
+        }
+        return result;
+    }
+
+    /// <summary>One conflict per mod_id that appears more than once
+    /// in the registry. ModIds carries the file basenames of each
+    /// duplicate so the user can identify which .vmz files to clean
+    /// up; Details["paths"] has the full paths.</summary>
+    private static List<Conflict> DuplicateModIds(List<ModEntry> all)
+    {
+        var byId = new Dictionary<string, List<ModEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in all)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            if (!byId.TryGetValue(e.ModId, out var list))
+            {
+                list = new List<ModEntry>();
+                byId[e.ModId] = list;
+            }
+            list.Add(e);
+        }
+        var result = new List<Conflict>();
+        foreach (var (modId, instances) in byId)
+        {
+            if (instances.Count <= 1) continue;
+            result.Add(new Conflict
+            {
+                Type = TYPE_DUPLICATE_MOD_ID,
+                Key = modId,
+                // Use basenames here rather than the (identical) mod_id
+                // so the Mods column actually distinguishes the
+                // colliding files. Full paths in Details for rich UI.
+                ModIds = instances
+                    .Select(e => Path.GetFileName(e.Path))
+                    .ToList(),
+                Details = new Dictionary<string, object>
+                {
+                    ["mod_id"] = modId,
+                    ["paths"] = instances.Select(e => e.Path).ToList(),
+                    ["enabled_count"] = instances.Count(e => e.IsEnabled),
                 },
             });
         }

@@ -1128,6 +1128,17 @@ public class MainForm : Form
 
     private string ResolveButtonTooltip(ConflictDetector.Conflict c)
     {
+        if (c.Type == ConflictDetector.TYPE_DUPLICATE_MOD_ID)
+            return "Two installed mods declare the same mod_id. The Mods "
+                + "column lists the colliding files — delete or move one "
+                + "out of the mods folder (and its Disabled subfolder) so "
+                + "only one remains. Often this is a leftover .vmz from a "
+                + "previous version sitting alongside the current copy.";
+        if (c.Type == ConflictDetector.TYPE_MISSING_DEPENDENCY)
+            return "An enabled mod requires another mod that's either "
+                + "disabled or not installed. The Mods column lists the "
+                + "dependent and the missing one — enable / install the "
+                + "required mod, or disable the dependent.";
         if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP)
             return "AI resolve only handles file_overlap conflicts in v1.";
         if (!_claude.IsAvailable)
