@@ -164,7 +164,19 @@ public static class ConflictDetector
         List<ModEntry> live,
         List<ModEntry> all)
     {
-        var byId = all.ToDictionary(e => e.ModId, e => e, StringComparer.OrdinalIgnoreCase);
+        // First-wins on duplicate mod_ids — TryAdd avoids the
+        // ArgumentException ToDictionary throws when two installed
+        // mods declare the same id (legitimate-but-ugly state, e.g.
+        // a leftover .vmz from a prior version still in mods/Disabled
+        // alongside the current copy in mods/). Duplicates are their
+        // own bug worth surfacing separately, but it shouldn't crash
+        // dependency detection.
+        var byId = new Dictionary<string, ModEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in all)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            byId.TryAdd(e.ModId, e);
+        }
         var result = new List<Conflict>();
         foreach (var e in live)
         {
