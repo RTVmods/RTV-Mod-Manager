@@ -886,6 +886,13 @@ public class MainForm : Form
             GridColor = Color.FromArgb(40, 46, 58),
             ColumnHeadersHeight = 36,
             RowTemplate = { Height = 32 },
+            // WrapMode = True alone doesn't grow rows — without
+            // AutoSizeRowsMode the cells try to wrap inside the
+            // 32px row template and clip. DisplayedCells lets each
+            // visible row grow to fit its tallest wrapped cell;
+            // it's bounded so very long Mods lists don't blow up
+            // the grid height.
+            AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.DisplayedCells,
         };
         grid.Columns.Add(new DataGridViewButtonColumn
         {

@@ -32,9 +32,16 @@ public class SettingsDialog : Form
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 13f);
         FormBorderStyle = FormBorderStyle.Sizable;
-        MinimumSize = new Size(720, 380);
-        Width = 820;
-        Height = 420;
+        // Sized for the +2pt-bumped fonts. Path sections grew taller
+        // (label/explainer wrap higher) and the button row is bigger
+        // too, so the prior 380/420 sizes clipped Save/Cancel and
+        // the row panels squashed the Browse buttons. Pinned the
+        // minimum a bit larger than what fits today so subsequent
+        // small layout tweaks don't immediately re-introduce
+        // clipping.
+        MinimumSize = new Size(840, 580);
+        Width = 920;
+        Height = 620;
         ShowInTaskbar = false;
         Padding = new Padding(18, 16, 18, 16);
 
@@ -110,7 +117,11 @@ public class SettingsDialog : Form
         var rowPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 32,
+            // 44px gives the bumped-font Browse button room to
+            // render without clipping its top/bottom borders. 32
+            // (the prior value) was sized for 10pt and squashed
+            // the button after the font bump.
+            Height = 44,
             BackColor = Color.Transparent,
         };
         var box = new TextBox
