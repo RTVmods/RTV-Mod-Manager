@@ -74,9 +74,6 @@ public class MainForm : Form
     private void InitializeWindow()
     {
         Text = "Vostok Mod Manager";
-        Width = 1280;
-        Height = 800;
-        StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
@@ -90,6 +87,43 @@ public class MainForm : Form
         KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Escape) Close();
+        };
+
+        // Restore last-session size + position if we have one. Validate
+        // the saved bounds intersect a current screen so a multi-monitor
+        // disconnect can't park us offscreen.
+        var saved = new Rectangle(
+            _settings.WindowLeft, _settings.WindowTop,
+            _settings.WindowWidth, _settings.WindowHeight);
+        if (saved.Width >= 600 && saved.Height >= 400
+            && Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(saved)))
+        {
+            StartPosition = FormStartPosition.Manual;
+            Location = saved.Location;
+            Size = saved.Size;
+        }
+        else
+        {
+            StartPosition = FormStartPosition.CenterScreen;
+            Width = 1280;
+            Height = 800;
+        }
+        if (_settings.WindowMaximized)
+            WindowState = FormWindowState.Maximized;
+
+        // Persist the new bounds on close. Skip the save when
+        // minimised — RestoreBounds gives us the un-minimised values
+        // so we don't get stuck restoring a tiny "minimised" rect.
+        FormClosing += (_, _) =>
+        {
+            var b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            _settings.WindowLeft = b.Left;
+            _settings.WindowTop = b.Top;
+            _settings.WindowWidth = b.Width;
+            _settings.WindowHeight = b.Height;
+            _settings.WindowMaximized = WindowState == FormWindowState.Maximized;
+            try { _settings.Save(); }
+            catch { /* best-effort; don't block app close on a write error */ }
         };
     }
 
@@ -162,18 +196,22 @@ public class MainForm : Form
         _conflictsGrid = BuildConflictsGrid();
         split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
-        // Mods is the primary view — give it ~62% of the width.
-        // Subscribe to Resize BEFORE adding the container to its
-        // parent — the Add triggers the initial layout pass, and a
-        // later subscription would miss that first event entirely.
+        // Mods is the primary view — give it ~62% of the width by
+        // default, or whatever ratio the user dragged it to last
+        // session. Subscribe to Resize BEFORE adding the container to
+        // its parent — the Add triggers the initial layout pass, and
+        // a later subscription would miss that first event entirely.
         // Shown fires after the form has its real client size, so it
         // also guarantees a correct distance regardless of when the
         // SplitContainer first landed at its final width.
+        var ratio = _settings.SplitterRatio is > 0.1 and < 0.9
+            ? _settings.SplitterRatio
+            : 0.62;
         void ApplySplit()
         {
             if (split.Width > 100)
             {
-                var dist = (int)(split.Width * 0.62);
+                var dist = (int)(split.Width * ratio);
                 // Clamp inside the SplitContainer's allowed range so
                 // a small window can't crash with an out-of-range
                 // SplitterDistance.
@@ -183,6 +221,16 @@ public class MainForm : Form
             }
         }
         split.Resize += (_, _) => ApplySplit();
+        // User drags update the persisted ratio so it survives across
+        // launches. SplitterMoved fires after the drag completes.
+        split.SplitterMoved += (_, _) =>
+        {
+            if (split.Width > 100)
+            {
+                ratio = (double)split.SplitterDistance / split.Width;
+                _settings.SplitterRatio = ratio;
+            }
+        };
         root.Controls.Add(split, 0, 8);
         Shown += (_, _) => ApplySplit();
     }

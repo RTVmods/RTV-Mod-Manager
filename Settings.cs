@@ -35,6 +35,24 @@ public class Settings
     /// was last refreshed. Empty when no check has run yet.</summary>
     public string CacheTimestamp { get; set; } = "";
 
+    /// <summary>Last-known window bounds and state, restored on
+    /// startup. 0/0/0/0 = "no saved state, use the form's coded
+    /// defaults". Position is validated against current screens at
+    /// load time so a multi-monitor change doesn't park us offscreen.
+    /// WindowMaximized: when true, ignore Width/Height/Left/Top and
+    /// just maximize on the screen the saved bounds intersect.</summary>
+    public int WindowLeft { get; set; }
+    public int WindowTop { get; set; }
+    public int WindowWidth { get; set; }
+    public int WindowHeight { get; set; }
+    public bool WindowMaximized { get; set; }
+
+    /// <summary>Splitter ratio between the mods grid (Panel1) and the
+    /// conflicts grid (Panel2) — 0 means "no saved value, use the
+    /// 0.62 default". Stored as a fraction rather than absolute
+    /// pixels so the ratio is preserved when the window resizes.</summary>
+    public double SplitterRatio { get; set; }
+
     [JsonIgnore]
     public TimeSpan CacheAge
     {
