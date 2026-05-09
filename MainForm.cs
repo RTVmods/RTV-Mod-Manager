@@ -242,7 +242,11 @@ public class MainForm : Form
         };
         titleRow.Controls.Add(title, 0, 0);
         var settingsBtn = ThemedButton("⚙ Settings…");
-        settingsBtn.Width = 130;
+        settingsBtn.Width = 140;
+        // Explicit Height — without this, the button keeps the
+        // WinForms default 23px and clips its text (especially with
+        // the +2pt-bumped 12pt body font).
+        settingsBtn.Height = 40;
         settingsBtn.AutoSize = false;
         settingsBtn.Anchor = AnchorStyles.Right;
         settingsBtn.Margin = new Padding(0, 8, 0, 0);
@@ -1314,12 +1318,12 @@ public class MainForm : Form
             else if (cmp > 0)
             {
                 // Local is newer than ModWorkshop's reported version
-                // — could be a dev build, a manually-bumped mod.txt
-                // ahead of the latest release, or the API cache lagging
-                // behind a fresh upload. Show as ✓ so the user isn't
-                // nagged with a phantom ⬆.
-                text = "✓";
-                color = green;
+                // — dev build, manually-bumped mod.txt ahead of the
+                // latest release, or the API cache lagging. Distinct
+                // glyph + colour so it doesn't get conflated with
+                // "up to date" or with "outdated".
+                text = "↑";
+                color = Color.FromArgb(110, 190, 240); // cool blue
                 tip = $"Local v{e.Version} is newer than ModWorkshop's "
                     + $"reported v{latest}. Likely a dev build, a "
                     + "manual bump, or the API cache catching up.";
