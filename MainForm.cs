@@ -65,6 +65,12 @@ public class MainForm : Form
     private TextBox _decompPathInput = null!;
     private TextBox _filterBox = null!;
 
+    /// <summary>Single ContextMenuStrip instance assigned to the
+    /// mods grid. Items are rebuilt each time it opens, based on
+    /// the row index captured by MouseDown.</summary>
+    private ContextMenuStrip _modsContextMenu = null!;
+    private int _modsContextRow = -1;
+
     /// <summary>Backing list for the conflicts grid, in display order.
     /// Click handlers look up by row index.</summary>
     private List<ConflictDetector.Conflict> _displayedConflicts = new();
@@ -519,24 +525,42 @@ public class MainForm : Form
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
 
-        // Right-click on a row → select that row + show the context
-        // menu with Open page / Set ID. Header right-clicks (RowIndex
-        // < 0) get no menu. We deliberately don't reassign CurrentCell
-        // here — letting the DataGridView's own click handling do
-        // that avoids cancelling the in-flight context-menu request.
-        grid.CellMouseDown += (_, e) =>
+        // Right-click → context menu. Use the standard pattern of
+        // attaching a ContextMenuStrip directly to the grid + capturing
+        // the row in MouseDown, instead of CellContextMenuStripNeeded.
+        // The latter doesn't fire reliably for every DataGridView cell
+        // type — link cells and checkbox cells in particular swallow
+        // right-clicks before the event reaches our handler.
+        _modsContextMenu = new ContextMenuStrip
+        {
+            BackColor = Color.FromArgb(36, 42, 54),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            ShowImageMargin = false,
+        };
+        _modsContextMenu.Opening += (_, e) =>
+        {
+            if (_modsContextRow < 0 || _modsContextRow >= _displayed.Count)
+            {
+                e.Cancel = true;
+                return;
+            }
+            PopulateModsContextMenu(_modsContextMenu, _modsContextRow);
+        };
+        grid.ContextMenuStrip = _modsContextMenu;
+        // MouseDown on the grid surface (NOT CellMouseDown) so we
+        // capture even when the click lands in a checkbox/link cell.
+        grid.MouseDown += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
-            if (e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
-            grid.ClearSelection();
-            grid.Rows[e.RowIndex].Selected = true;
+            var hit = grid.HitTest(e.X, e.Y);
+            _modsContextRow = hit.RowIndex;
+            if (hit.RowIndex >= 0 && hit.RowIndex < grid.Rows.Count)
+            {
+                grid.ClearSelection();
+                grid.Rows[hit.RowIndex].Selected = true;
+            }
         };
-        grid.CellContextMenuStripNeeded += (_, e) =>
-        {
-            if (e.RowIndex < 0) return;
-            e.ContextMenuStrip = BuildModsContextMenu(e.RowIndex);
-        };
-        // Bonus discoverability — double-click a row's Name cell to
+        // Bonus discoverability — double-click a row's Mod cell to
         // open the mod page directly (skip the right-click menu).
         // No-op for mods without a ModWorkshop ID.
         grid.CellDoubleClick += (_, e) =>
@@ -565,23 +589,15 @@ public class MainForm : Form
     /// Item enable-state and labels depend on whether the mod has a
     /// ModWorkshop ID — Open is greyed when there's nothing to open;
     /// Set toggles between "Set…" and "Change…" based on presence.</summary>
-    private ContextMenuStrip BuildModsContextMenu(int rowIndex)
+    /// <summary>Rebuilds the mods context menu's items for the given
+    /// row index. Called from the menu's Opening event so the items
+    /// always reflect the right-clicked row's current state (which
+    /// could differ from a stale captured row if the grid was
+    /// repopulated between the right-click and the menu open).</summary>
+    private void PopulateModsContextMenu(ContextMenuStrip menu, int rowIndex)
     {
-        // Plain ContextMenuStrip with just BackColor/ForeColor — no
-        // custom Renderer. The previous custom ProfessionalColorTable
-        // override was incomplete (left several "MenuStrip*" gradient
-        // properties at their light-theme defaults), which on some
-        // Win11 builds rendered the dropdown as essentially invisible
-        // and ate the right-click click. Falling back to system
-        // rendering means the menu shows up reliably even if it
-        // isn't perfectly themed against the dark form.
-        var menu = new ContextMenuStrip
-        {
-            BackColor = Color.FromArgb(36, 42, 54),
-            ForeColor = Color.FromArgb(220, 225, 235),
-            ShowImageMargin = false,
-        };
-        if (rowIndex < 0 || rowIndex >= _displayed.Count) return menu;
+        menu.Items.Clear();
+        if (rowIndex < 0 || rowIndex >= _displayed.Count) return;
         var entry = _displayed[rowIndex];
         var hasMw = entry.ModWorkshopId > 0;
 
@@ -603,8 +619,6 @@ public class MainForm : Form
         };
         setItem.Click += async (_, _) => await SetModWorkshopIdAsync(entry);
         menu.Items.Add(setItem);
-
-        return menu;
     }
 
 
