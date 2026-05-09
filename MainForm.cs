@@ -505,7 +505,12 @@ public class MainForm : Form
             Name = "Priority",
             HeaderText = "Prio",
             Width = 50,
-            ReadOnly = true,
+            // Editable in-place — commits write [mod] priority = N
+            // back to the mod's mod.txt. Other text columns stay
+            // read-only because their values either come from
+            // mod.txt and aren't user-controlled (Version) or are
+            // computed from registry state (Pos, Mod name).
+            ReadOnly = false,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
         });
         // (Update + version status now collapse into the single
@@ -1389,23 +1394,64 @@ public class MainForm : Form
         }
     }
 
-    /// <summary>Fires when the user toggles the Enabled checkbox.
-    /// CommitEdit on dirty-state-change makes this fire immediately
-    /// rather than on focus-loss. We diff the new bool against the
-    /// entry's current state so we don't double-toggle if the value is
-    /// already in sync (e.g. just after a programmatic populate).</summary>
-    private void OnGridCellValueChanged(DataGridViewCellEventArgs e)
+    /// <summary>Fires when the user edits a cell in-place. Two
+    /// columns are editable: the Enabled checkbox (existing
+    /// toggle-mod flow) and the Priority text cell (writes [mod]
+    /// priority = N to mod.txt).</summary>
+    private async void OnGridCellValueChanged(DataGridViewCellEventArgs e)
     {
         if (_populatingMods) return;
         if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
         if (e.ColumnIndex < 0 || e.ColumnIndex >= _modsGrid.Columns.Count) return;
-        if (_modsGrid.Columns[e.ColumnIndex].Name != "Enabled") return;
         if (_busy) return;
+        var col = _modsGrid.Columns[e.ColumnIndex].Name;
         var entry = _displayed[e.RowIndex];
-        var cellValue = _modsGrid.Rows[e.RowIndex].Cells["Enabled"].Value;
-        var nowChecked = cellValue is bool b && b;
-        if (nowChecked == entry.IsEnabled) return;
-        ToggleMod(entry);
+
+        if (col == "Enabled")
+        {
+            var cellValue = _modsGrid.Rows[e.RowIndex].Cells["Enabled"].Value;
+            var nowChecked = cellValue is bool b && b;
+            if (nowChecked == entry.IsEnabled) return;
+            ToggleMod(entry);
+            return;
+        }
+
+        if (col == "Priority")
+        {
+            var raw = _modsGrid.Rows[e.RowIndex].Cells["Priority"]
+                .Value?.ToString()?.Trim() ?? "";
+            if (!int.TryParse(raw, out var newPriority))
+            {
+                MessageBox.Show(this,
+                    $"`{raw}` isn't a valid priority. Must be a whole "
+                    + "integer (negative is fine). Reverting.",
+                    "Invalid priority",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _populatingMods = true;
+                try { _modsGrid.Rows[e.RowIndex].Cells["Priority"].Value
+                    = entry.Priority.ToString(); }
+                finally { _populatingMods = false; }
+                return;
+            }
+            if (newPriority == entry.Priority) return;
+            var bak = await EditModTxtAsync(entry,
+                txt => ManifestEditor.SetModPriority(txt, newPriority));
+            if (bak == null)
+            {
+                // Edit failed — revert the cell to the on-disk value.
+                _populatingMods = true;
+                try { _modsGrid.Rows[e.RowIndex].Cells["Priority"].Value
+                    = entry.Priority.ToString(); }
+                finally { _populatingMods = false; }
+                return;
+            }
+            _modsLabel.Text =
+                $"`{entry.DisplayName}` priority {entry.Priority} → {newPriority}. {bak}";
+            _registry.Scan(ModsDir);
+            UpdateModsStatus();
+            PopulateModsGrid();
+            return;
+        }
     }
 
     private void ToggleMod(ModEntry e)
@@ -1614,34 +1660,26 @@ public class MainForm : Form
         PopulateModsGrid();
     }
 
-    /// <summary>Prompts for a comma-separated list of mod IDs and
-    /// rewrites `[dependencies] required = ...` in mod.txt. Pass an
-    /// empty list to clear the field. Optional deps aren't editable
-    /// here yet — the use case for "user wants to declare a hard
-    /// dependency" is much more common than "user wants to mark
-    /// something soft."</summary>
+    /// <summary>Picks required dependencies from a checklist of
+    /// installed mods (with a manual-add box for not-yet-installed
+    /// mod IDs), then rewrites `[dependencies] required = ...` in
+    /// mod.txt. An empty selection clears the field. Optional deps
+    /// aren't editable here yet — the "user wants to declare a hard
+    /// dependency" use case is much more common.</summary>
     private async Task SetModDependenciesAsync(ModEntry e)
     {
-        var current = string.Join(", ", e.RequiredDependencies);
-        var prompt =
-            $"Enter the required dependencies for `{e.DisplayName}` "
-            + "as a comma-separated list of mod_ids.\n\n"
-            + "Example: mod_a, mod_b, mod_c\n"
-            + "Leave empty to clear all required dependencies.\n\n"
-            + "This rewrites the mod's mod.txt to set [dependencies] "
-            + "required = ...";
-        var input = TextInputDialog.Prompt(this, "Edit required dependencies", prompt, current);
-        if (input == null) return;
-        var newDeps = ModEntry.ParseCsvOrArray(input);
-        // Compare order-preserved + case-insensitive — order matters
-        // because we write the list back in user-given order, and a
-        // pure set comparison would misreport "no change" if the user
-        // reordered.
-        var sameAsBefore = newDeps.Count == e.RequiredDependencies.Count
-            && newDeps.Zip(e.RequiredDependencies,
-                (a, b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
-                .All(x => x);
-        if (sameAsBefore)
+        var newDeps = DependencyPickerDialog.Pick(
+            this, e, _registry.Entries, e.RequiredDependencies);
+        if (newDeps == null) return;
+        // Set comparison — the picker returns ticks in click order,
+        // not the order they were declared in mod.txt, so positional
+        // diff would falsely report a change after every dialog
+        // close. Order doesn't matter semantically for deps anyway.
+        var existing = new HashSet<string>(
+            e.RequiredDependencies, StringComparer.OrdinalIgnoreCase);
+        var picked = new HashSet<string>(
+            newDeps, StringComparer.OrdinalIgnoreCase);
+        if (existing.SetEquals(picked))
         {
             _modsLabel.Text = $"`{e.DisplayName}` dependencies unchanged.";
             return;
