@@ -1231,7 +1231,45 @@ public class MainForm : Form
         if (mw <= 0) return false;
         if (!_latestVersions.TryGetValue(mw, out var latest)) return false;
         if (string.IsNullOrEmpty(latest)) return false;
-        return latest != e.Version;
+        // Numeric-aware compare: only flag as outdated when LOCAL
+        // is strictly older than REMOTE. String inequality fired
+        // false positives when local was newer (e.g. local "1.14"
+        // ≠ remote "1.13" but local is newer, not outdated).
+        return CompareVersions(e.Version, latest) < 0;
+    }
+
+    /// <summary>Numeric-aware version comparison.
+    /// Returns &lt;0 when a is older, 0 when equal, &gt;0 when a is
+    /// newer. Strips a leading "v", splits on dots, compares each
+    /// component as int when both are numeric (so "1.14" &gt; "1.13"),
+    /// fallback to ordinal string compare otherwise. Missing
+    /// components are treated as 0 (so "1.2" == "1.2.0").</summary>
+    internal static int CompareVersions(string? a, string? b)
+    {
+        a = (a ?? "").Trim().TrimStart('v', 'V');
+        b = (b ?? "").Trim().TrimStart('v', 'V');
+        if (a == b) return 0;
+        var aParts = a.Split('.');
+        var bParts = b.Split('.');
+        var n = Math.Max(aParts.Length, bParts.Length);
+        for (var i = 0; i < n; i++)
+        {
+            var ap = i < aParts.Length ? aParts[i] : "0";
+            var bp = i < bParts.Length ? bParts[i] : "0";
+            var aIsInt = int.TryParse(ap, out var ai);
+            var bIsInt = int.TryParse(bp, out var bi);
+            if (aIsInt && bIsInt)
+            {
+                var cmp = ai.CompareTo(bi);
+                if (cmp != 0) return cmp;
+            }
+            else
+            {
+                var cmp = string.CompareOrdinal(ap, bp);
+                if (cmp != 0) return cmp;
+            }
+        }
+        return 0;
     }
 
     /// <summary>Writes the Update column's text + per-cell style for a
@@ -1264,17 +1302,34 @@ public class MainForm : Form
             color = muted;
             tip = "Update status unknown (cache miss). Click Refresh to check.";
         }
-        else if (latest == e.Version)
-        {
-            text = "✓";
-            color = green;
-            tip = $"Up to date (v{latest}).";
-        }
         else
         {
-            text = "⬆";
-            color = orange;
-            tip = $"Update available: v{e.Version} → v{latest}. Click to install.";
+            var cmp = CompareVersions(e.Version, latest);
+            if (cmp == 0)
+            {
+                text = "✓";
+                color = green;
+                tip = $"Up to date (v{latest}).";
+            }
+            else if (cmp > 0)
+            {
+                // Local is newer than ModWorkshop's reported version
+                // — could be a dev build, a manually-bumped mod.txt
+                // ahead of the latest release, or the API cache lagging
+                // behind a fresh upload. Show as ✓ so the user isn't
+                // nagged with a phantom ⬆.
+                text = "✓";
+                color = green;
+                tip = $"Local v{e.Version} is newer than ModWorkshop's "
+                    + $"reported v{latest}. Likely a dev build, a "
+                    + "manual bump, or the API cache catching up.";
+            }
+            else
+            {
+                text = "⬆";
+                color = orange;
+                tip = $"Update available: v{e.Version} → v{latest}. Click to install.";
+            }
         }
 
         cell.Value = text;

@@ -98,10 +98,15 @@ public class ModWorkshopClient
         {
             Id = modId,
             Name = TryString(root, "name") ?? "",
-            Description = TryString(root, "description")
-                       ?? TryString(root, "summary")
-                       ?? TryString(root, "body")
+            // ModWorkshop's actual field is `desc` (verified by
+            // hitting the live endpoint). The other names are
+            // defensive fallbacks in case the schema shifts.
+            Description = TryString(root, "desc")
+                       ?? TryString(root, "description")
                        ?? TryString(root, "long_description")
+                       ?? TryString(root, "body")
+                       ?? TryString(root, "short_desc")
+                       ?? TryString(root, "summary")
                        ?? "",
             Author = TryString(root, "author")
                   ?? TryString(root, "user_name")

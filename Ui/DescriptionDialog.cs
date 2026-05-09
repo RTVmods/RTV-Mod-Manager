@@ -37,9 +37,11 @@ public class DescriptionDialog : Form
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 13f);
         FormBorderStyle = FormBorderStyle.Sizable;
-        MinimumSize = new Size(620, 440);
-        Width = 760;
-        Height = 560;
+        // Re-sized for the +2pt-bumped fonts. Old 560 height clipped
+        // the bottom button row.
+        MinimumSize = new Size(720, 540);
+        Width = 860;
+        Height = 660;
         ShowInTaskbar = false;
         Padding = new Padding(16, 14, 16, 14);
 
@@ -99,7 +101,9 @@ public class DescriptionDialog : Form
         {
             FlowDirection = FlowDirection.RightToLeft,
             Dock = DockStyle.Bottom,
-            Height = 44,
+            // 56 fits the bumped-font buttons without clipping
+            // their top/bottom borders.
+            Height = 56,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 8, 0, 0),
         };
