@@ -621,6 +621,24 @@ public class MainForm : Form
         menu.Items.Add(setItem);
 
         menu.Items.Add(new ToolStripSeparator());
+
+        var depsCount = entry.RequiredDependencies.Count
+            + entry.OptionalDependencies.Count;
+        var depsLabel = depsCount > 0
+            ? $"Show dependencies ({depsCount})…"
+            : "Show dependencies…";
+        var depsItem = new ToolStripMenuItem(depsLabel)
+        {
+            ToolTipText = depsCount > 0
+                ? $"List the {depsCount} declared dependencies and their "
+                  + "current state (enabled / disabled / not installed)."
+                : "This mod doesn't declare any dependencies. The dialog "
+                  + "will explain how mod authors can add them.",
+        };
+        depsItem.Click += (_, _) => ShowDependenciesDialog(entry);
+        menu.Items.Add(depsItem);
+
+        menu.Items.Add(new ToolStripSeparator());
         var locked = IsLocked(entry);
         var lockItem = new ToolStripMenuItem(locked ? "Unlock mod" : "Lock mod")
         {
@@ -633,6 +651,25 @@ public class MainForm : Form
         };
         lockItem.Click += (_, _) => ToggleLock(entry);
         menu.Items.Add(lockItem);
+    }
+
+    /// <summary>Opens the read-only dependencies dialog for a mod.
+    /// Builds an id-keyed view of the registry so the dialog can
+    /// classify each dep as enabled / disabled / not installed
+    /// without re-querying.</summary>
+    private void ShowDependenciesDialog(ModEntry e)
+    {
+        var byId = new Dictionary<string, ModEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _registry.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.ModId)) continue;
+            // First-wins on duplicate IDs — registry shouldn't have
+            // any, but if a user manually copied a .vmz to two
+            // places we don't want a TryAdd-style throw here.
+            byId.TryAdd(entry.ModId, entry);
+        }
+        using var dlg = new DependenciesDialog(e, byId);
+        dlg.ShowDialog(this);
     }
 
     /// <summary>Whether this mod is currently in the user's lock list.

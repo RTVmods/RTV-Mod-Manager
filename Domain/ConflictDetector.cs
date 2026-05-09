@@ -24,6 +24,7 @@ public static class ConflictDetector
     public const string TYPE_CLASS_NAME_COLLISION = "class_name_collision";
     public const string TYPE_TAKE_OVER_COLLISION = "take_over_collision";
     public const string TYPE_SUPER_CHAIN_CONSTRAINT = "super_chain_constraint";
+    public const string TYPE_MISSING_DEPENDENCY = "missing_dependency";
 
     public class Conflict
     {
@@ -46,12 +47,17 @@ public static class ConflictDetector
     /// already did during scan().</summary>
     public static List<Conflict> DetectManifestConflicts(IEnumerable<ModEntry> entries)
     {
-        var live = entries.Where(e => e.IsEnabled).ToList();
+        var all = entries.ToList();
+        var live = all.Where(e => e.IsEnabled).ToList();
         var result = new List<Conflict>();
         result.AddRange(OverlapByFiles(live));
         result.AddRange(OverlapBySection(live, "autoload", TYPE_AUTOLOAD_COLLISION));
         result.AddRange(OverlapBySection(live, "hooks", TYPE_HOOK_COLLISION));
         result.AddRange(OverlapBySection(live, "script_extend", TYPE_SCRIPT_EXTEND_COLLISION));
+        // Dependency check needs the FULL registry (not just enabled
+        // mods) so we can distinguish "installed but disabled" from
+        // "not installed at all" in the conflict detail.
+        result.AddRange(MissingDependencies(live, all));
         return result;
     }
 
@@ -145,6 +151,44 @@ public static class ConflictDetector
                     ["is_gdscript"] = path.EndsWith(".gd"),
                 },
             });
+        }
+        return result;
+    }
+
+    /// <summary>One conflict per (enabled mod, missing required dep)
+    /// pair. The detail differentiates "installed but disabled" from
+    /// "not installed at all" so the UI can suggest the right fix —
+    /// the former is a one-click toggle; the latter needs a download
+    /// or a manual install.</summary>
+    private static List<Conflict> MissingDependencies(
+        List<ModEntry> live,
+        List<ModEntry> all)
+    {
+        var byId = all.ToDictionary(e => e.ModId, e => e, StringComparer.OrdinalIgnoreCase);
+        var result = new List<Conflict>();
+        foreach (var e in live)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            foreach (var depId in e.RequiredDependencies)
+            {
+                if (string.IsNullOrEmpty(depId)) continue;
+                var status = "not_installed";
+                if (byId.TryGetValue(depId, out var dep))
+                    status = dep.IsEnabled ? "satisfied" : "disabled";
+                if (status == "satisfied") continue;
+                result.Add(new Conflict
+                {
+                    Type = TYPE_MISSING_DEPENDENCY,
+                    Key = $"{e.ModId} → {depId}",
+                    ModIds = new List<string> { e.ModId, depId },
+                    Details = new Dictionary<string, object>
+                    {
+                        ["dependent"] = e.ModId,
+                        ["required"] = depId,
+                        ["status"] = status,
+                    },
+                });
+            }
         }
         return result;
     }

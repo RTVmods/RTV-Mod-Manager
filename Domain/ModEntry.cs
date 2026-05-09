@@ -43,6 +43,37 @@ public class ModEntry
     public Dictionary<string, string> Hooks => GetSectionDict("hooks");
     public Dictionary<string, string> ScriptExtends => GetSectionDict("script_extend");
 
+    /// <summary>Mod IDs this mod declares as required dependencies in
+    /// `[dependencies] required = ...`. Accepts either CSV form
+    /// (a, b, c) or Godot-style array form (["a", "b", "c"]). Empty
+    /// when the section is absent.</summary>
+    public List<string> RequiredDependencies => ParseDepList("required");
+
+    /// <summary>Mod IDs this mod declares as optional / soft
+    /// dependencies in `[dependencies] optional = ...`. Same parsing
+    /// rules as RequiredDependencies.</summary>
+    public List<string> OptionalDependencies => ParseDepList("optional");
+
+    private List<string> ParseDepList(string key)
+        => ParseCsvOrArray(GetSection("dependencies", key));
+
+    /// <summary>Parses a value like `a, b, c` or `["a", "b", "c"]`
+    /// into a list of trimmed, dequoted, non-empty mod IDs. The
+    /// surrounding-quote stripping in ModArchive's parser already
+    /// handles `"a, b, c"` (whole value quoted) before we see it,
+    /// so we only need to handle the array brackets here.</summary>
+    internal static List<string> ParseCsvOrArray(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new();
+        raw = raw.Trim();
+        if (raw.StartsWith("[") && raw.EndsWith("]") && raw.Length >= 2)
+            raw = raw.Substring(1, raw.Length - 2);
+        return raw.Split(',')
+            .Select(s => s.Trim().Trim('"').Trim('\''))
+            .Where(s => s.Length > 0)
+            .ToList();
+    }
+
     /// <summary>Returns the text content of `filePath` inside this mod,
     /// or "" if absent. Re-opens the archive each call; small mods make
     /// this cheap, but tight loops should batch reads via a freshly
