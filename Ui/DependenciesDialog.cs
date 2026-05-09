@@ -19,7 +19,7 @@ public class DependenciesDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 10f);
+        Font = new Font("Segoe UI", 12f);
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
         ShowInTaskbar = false;
 
@@ -67,7 +67,7 @@ public class DependenciesDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 10f),
+            Font = new Font("Consolas", 12f),
             OwnerDraw = false,
         };
         list.Columns.Add("State", 70);

@@ -31,7 +31,7 @@ public class DependencyPickerDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 10f);
+        Font = new Font("Segoe UI", 12f);
         FormBorderStyle = FormBorderStyle.Sizable;
         MinimumSize = new Size(560, 480);
         Width = 600;
@@ -108,7 +108,7 @@ public class DependencyPickerDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 10f),
+            Font = new Font("Consolas", 12f),
         };
         p.Controls.Add(lbl);
         p.Controls.Add(filter);
@@ -124,7 +124,7 @@ public class DependencyPickerDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 10f),
+            Font = new Font("Consolas", 12f),
             CheckOnClick = true,
             IntegralHeight = false,
         };
@@ -148,7 +148,7 @@ public class DependencyPickerDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 10f),
+            Font = new Font("Consolas", 12f),
             PlaceholderText = "mod_id_not_installed_yet",
         };
         var add = MainForm.ThemedButton("Add");

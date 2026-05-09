@@ -1,0 +1,226 @@
+// Modal dialog hosting the three configurable paths (Mods folder,
+// Claude Code, Game source / Decomp). Replaces the inline rows
+// that used to sit above the mods/conflicts split — moving them
+// here reclaims ~100px of vertical space on the main form.
+//
+// Design: read-modify-write on the Settings instance the caller
+// passes in. Save commits + persists; Cancel discards. Caller
+// handles any post-save side effects (Claude detect, registry
+// rescan, banner refresh) since those need fields the dialog
+// doesn't have access to (ClaudeCodeRunner, ModRegistry, etc.).
+
+namespace VostokModManager.Ui;
+
+public class SettingsDialog : Form
+{
+    private readonly Settings _settings;
+    private readonly TextBox _modsBox;
+    private readonly TextBox _claudeBox;
+    private readonly TextBox _decompBox;
+
+    /// <summary>Pre-fills inputs from `current` and writes back to
+    /// it on Save. The dialog never calls `current.Save()` — the
+    /// caller does that after applying any runtime side effects
+    /// (Detect, Rescan, etc.).</summary>
+    public SettingsDialog(Settings current)
+    {
+        _settings = current;
+
+        Text = "Settings";
+        StartPosition = FormStartPosition.CenterParent;
+        BackColor = Color.FromArgb(26, 30, 40);
+        ForeColor = Color.FromArgb(220, 225, 235);
+        Font = new Font("Segoe UI", 13f);
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MinimumSize = new Size(720, 380);
+        Width = 820;
+        Height = 420;
+        ShowInTaskbar = false;
+        Padding = new Padding(18, 16, 18, 16);
+
+        // Stack: 3 path rows + a help blurb + button row, in
+        // reverse-add order so DockStyle.Top puts the prompt at
+        // the top and buttons at the bottom.
+        var btnRow = BuildButtonRow();
+        var help = BuildHelpLabel();
+        _decompBox = AddPathSection(out var decompPanel,
+            "Game source (Decomp/):",
+            "Path to the decompiled game source folder. Optional, but "
+            + "AI conflict resolution gives better merges when it has "
+            + "the original game script as context.",
+            current.GameSourcePath,
+            isFolder: true);
+        _claudeBox = AddPathSection(out var claudePanel,
+            "Claude Code path:",
+            "Override path to claude.exe / claude.cmd. Leave empty to "
+            + "auto-detect (npm-global install at "
+            + "%APPDATA%/npm/claude.cmd usually wins).",
+            current.ClaudePath,
+            isFolder: false);
+        _modsBox = AddPathSection(out var modsPanel,
+            "Mods folder:",
+            "Where Road to Vostok looks for installed mods. Leave "
+            + "empty to use the default Steam path; set this if you "
+            + "moved the game to another drive.",
+            current.ModsDir,
+            isFolder: true);
+
+        // Add in reverse so Top-dock children stack with the first-
+        // added at the bottom (closest to the docked edge processed
+        // last by WinForms).
+        Controls.Add(btnRow);
+        Controls.Add(help);
+        Controls.Add(decompPanel);
+        Controls.Add(claudePanel);
+        Controls.Add(modsPanel);
+    }
+
+    private TextBox AddPathSection(
+        out Panel panel,
+        string label,
+        string explainer,
+        string initial,
+        bool isFolder)
+    {
+        var p = new Panel
+        {
+            Dock = DockStyle.Top,
+            BackColor = Color.Transparent,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 0, 14),
+        };
+        var lbl = new Label
+        {
+            Text = label,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 4),
+        };
+        var explain = new Label
+        {
+            Text = explainer,
+            AutoSize = true,
+            MaximumSize = new Size(740, 0),
+            Dock = DockStyle.Top,
+            ForeColor = Color.FromArgb(160, 170, 190),
+            Margin = new Padding(0, 0, 0, 6),
+        };
+        var rowPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 32,
+            BackColor = Color.Transparent,
+        };
+        var box = new TextBox
+        {
+            Text = initial,
+            BackColor = Color.FromArgb(30, 36, 48),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Consolas", 13f),
+            Top = 4, Left = 0, Width = 600,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+        };
+        var browse = MainForm.ThemedButton("Browse…");
+        browse.Top = 2;
+        browse.Width = 110;
+        browse.AutoSize = false;
+        browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        browse.Click += (_, _) => DoBrowse(box, isFolder);
+        // Position browse to the right of box; resize handler keeps
+        // the gap fixed when the dialog grows.
+        rowPanel.Resize += (_, _) =>
+        {
+            browse.Left = rowPanel.Width - browse.Width;
+            box.Width = rowPanel.Width - browse.Width - 8;
+        };
+        rowPanel.Controls.Add(box);
+        rowPanel.Controls.Add(browse);
+
+        // Reverse-add for Dock.Top stacking.
+        p.Controls.Add(rowPanel);
+        p.Controls.Add(explain);
+        p.Controls.Add(lbl);
+        panel = p;
+        return box;
+    }
+
+    private static void DoBrowse(TextBox box, bool isFolder)
+    {
+        if (isFolder)
+        {
+            using var dlg = new FolderBrowserDialog
+            {
+                Description = "Select folder",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = false,
+            };
+            if (Directory.Exists(box.Text)) dlg.SelectedPath = box.Text;
+            if (dlg.ShowDialog() == DialogResult.OK)
+                box.Text = dlg.SelectedPath;
+        }
+        else
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Select file",
+                Filter = "Executable / script (*.exe;*.cmd;*.bat)|*.exe;*.cmd;*.bat|All files (*.*)|*.*",
+            };
+            if (File.Exists(box.Text))
+                dlg.InitialDirectory = Path.GetDirectoryName(box.Text);
+            if (dlg.ShowDialog() == DialogResult.OK)
+                box.Text = dlg.FileName;
+        }
+    }
+
+    private Label BuildHelpLabel()
+    {
+        return new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            MaximumSize = new Size(740, 0),
+            ForeColor = Color.FromArgb(140, 150, 170),
+            Margin = new Padding(0, 6, 0, 0),
+            Text = "Save writes %APPDATA%/VostokModManager/settings.json "
+                + "and re-applies paths immediately — no restart needed.",
+        };
+    }
+
+    private FlowLayoutPanel BuildButtonRow()
+    {
+        var btnRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.RightToLeft,
+            Dock = DockStyle.Bottom,
+            Height = 48,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 12, 0, 0),
+        };
+        var save = MainForm.ThemedButton("Save");
+        save.Width = 100;
+        save.AutoSize = false;
+        save.DialogResult = DialogResult.OK;
+        save.Click += (_, _) => CommitAndClose();
+        var cancel = MainForm.ThemedButton("Cancel");
+        cancel.Width = 100;
+        cancel.AutoSize = false;
+        cancel.DialogResult = DialogResult.Cancel;
+        cancel.Click += (_, _) => Close();
+        btnRow.Controls.Add(save);
+        btnRow.Controls.Add(cancel);
+        AcceptButton = save;
+        CancelButton = cancel;
+        return btnRow;
+    }
+
+    private void CommitAndClose()
+    {
+        _settings.ModsDir = _modsBox.Text.Trim();
+        _settings.ClaudePath = _claudeBox.Text.Trim();
+        _settings.GameSourcePath = _decompBox.Text.Trim();
+        Close();
+    }
+}

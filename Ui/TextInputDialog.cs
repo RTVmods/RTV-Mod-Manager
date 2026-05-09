@@ -18,7 +18,7 @@ public class TextInputDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 10f);
+        Font = new Font("Segoe UI", 12f);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -55,7 +55,7 @@ public class TextInputDialog : Form
             BackColor = Color.FromArgb(18, 22, 30),
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 11f),
+            Font = new Font("Consolas", 13f),
             Margin = new Padding(0, 12, 0, 12),
         };
 

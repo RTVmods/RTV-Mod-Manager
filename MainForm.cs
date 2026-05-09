@@ -66,9 +66,6 @@ public class MainForm : Form
     private DataGridView _conflictsGrid = null!;
     private Panel _setupBanner = null!;
     private Label _setupBannerLabel = null!;
-    private TextBox _modsPathInput = null!;
-    private TextBox _claudePathInput = null!;
-    private TextBox _decompPathInput = null!;
     private TextBox _filterBox = null!;
 
     /// <summary>Single ContextMenuStrip instance assigned to the
@@ -129,7 +126,7 @@ public class MainForm : Form
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
-        Font = new Font("Segoe UI", 10f);
+        Font = new Font("Segoe UI", 12f);
         // ExtractAssociatedIcon pulls the .exe's own embedded icon
         // (set via <ApplicationIcon> in the .csproj). Wrapped — older
         // Win10 builds occasionally throw IOException on this call.
@@ -211,23 +208,47 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 10,
+            // 7 rows: title (0), banner (1), Claude/Mods/Updates/
+            // Conflicts status labels (2-5), split (6, fills).
+            // Path rows moved to a Settings dialog — frees ~120px
+            // of vertical space at the top of the main form.
+            RowCount = 7,
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
-        for (var i = 0; i < 9; i++)
+        for (var i = 0; i < 6; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
 
+        // Title row hosts the title + a Settings button on the right.
+        var titleRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var title = new Label
         {
             Text = "Vostok Mod Manager",
-            Font = new Font(Font.FontFamily, 20f, FontStyle.Bold),
+            Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
             AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8),
+            Anchor = AnchorStyles.Left,
         };
-        root.Controls.Add(title, 0, 0);
+        titleRow.Controls.Add(title, 0, 0);
+        var settingsBtn = ThemedButton("⚙ Settings…");
+        settingsBtn.Width = 130;
+        settingsBtn.AutoSize = false;
+        settingsBtn.Anchor = AnchorStyles.Right;
+        settingsBtn.Margin = new Padding(0, 8, 0, 0);
+        settingsBtn.Click += (_, _) => OpenSettingsDialog();
+        titleRow.Controls.Add(settingsBtn, 1, 0);
+        root.Controls.Add(titleRow, 0, 0);
 
         _setupBanner = BuildSetupBanner();
         root.Controls.Add(_setupBanner, 0, 1);
@@ -243,27 +264,6 @@ public class MainForm : Form
 
         _conflictsLabel = NewStatus("Conflicts: —");
         root.Controls.Add(_conflictsLabel, 0, 5);
-
-        // Inline settings rows — Mods folder + Claude path + Decomp
-        // path, each with Browse / Save buttons. Mods folder is
-        // first because it's the most fundamental path: empty
-        // settings + missing default Steam folder = nothing else
-        // works.
-        _modsPathInput = BuildPathRow(
-            root, 6, "Mods folder:",
-            placeholder: "(default Steam install — change if you moved the game)",
-            onBrowse: BrowseMods,
-            onSave: SaveModsPath);
-        _claudePathInput = BuildPathRow(
-            root, 7, "Claude Code path:",
-            placeholder: "(auto-detect — fill if not found above)",
-            onBrowse: BrowseClaude,
-            onSave: SaveClaudePath);
-        _decompPathInput = BuildPathRow(
-            root, 8, "Game source (Decomp/):",
-            placeholder: "path to the decompiled game source folder",
-            onBrowse: BrowseDecomp,
-            onSave: SaveDecompPath);
 
         var split = new SplitContainer
         {
@@ -335,7 +335,7 @@ public class MainForm : Form
             ratio = observed;
             _settings.SplitterRatio = ratio;
         };
-        root.Controls.Add(split, 0, 9);
+        root.Controls.Add(split, 0, 6);
         Shown += (_, _) =>
         {
             ApplySplit();
@@ -394,64 +394,10 @@ public class MainForm : Form
             AutoSize = true,
             ForeColor = Color.FromArgb(255, 240, 220),
             MaximumSize = new Size(1200, 0),
-            Font = new Font("Segoe UI", 10.5f),
+            Font = new Font("Segoe UI", 12.5f),
         };
         p.Controls.Add(_setupBannerLabel);
         return p;
-    }
-
-    private TextBox BuildPathRow(
-        TableLayoutPanel root, int rowIdx,
-        string labelText, string placeholder,
-        Action onBrowse, Action onSave)
-    {
-        var row = new TableLayoutPanel
-        {
-            ColumnCount = 4,
-            RowCount = 1,
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            BackColor = Color.Transparent,
-            Margin = new Padding(0, 2, 0, 2),
-        };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200f));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        row.Controls.Add(new Label
-        {
-            Text = labelText,
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = Color.FromArgb(180, 190, 210),
-            Margin = new Padding(0, 6, 0, 0),
-        }, 0, 0);
-
-        var input = new TextBox
-        {
-            PlaceholderText = placeholder,
-            Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            BackColor = Color.FromArgb(30, 36, 48),
-            ForeColor = Color.FromArgb(220, 225, 235),
-            BorderStyle = BorderStyle.FixedSingle,
-            Margin = new Padding(0, 4, 0, 4),
-        };
-        row.Controls.Add(input, 1, 0);
-
-        var browseBtn = ThemedButton("Browse...");
-        browseBtn.Margin = new Padding(4, 2, 0, 2);
-        browseBtn.Click += (_, _) => onBrowse();
-        row.Controls.Add(browseBtn, 2, 0);
-
-        var saveBtn = ThemedButton("Save");
-        saveBtn.Margin = new Padding(4, 2, 0, 2);
-        saveBtn.Click += (_, _) => onSave();
-        row.Controls.Add(saveBtn, 3, 0);
-
-        root.Controls.Add(row, 0, rowIdx);
-        return input;
     }
 
     private DataGridView BuildModsGrid()
@@ -474,7 +420,7 @@ public class MainForm : Form
             {
                 BackColor = Color.FromArgb(36, 42, 54),
                 ForeColor = Color.FromArgb(220, 225, 235),
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 SelectionBackColor = Color.FromArgb(36, 42, 54),
                 SelectionForeColor = Color.FromArgb(220, 225, 235),
             },
@@ -484,11 +430,11 @@ public class MainForm : Form
                 ForeColor = Color.FromArgb(220, 225, 235),
                 SelectionBackColor = Color.FromArgb(40, 60, 90),
                 SelectionForeColor = Color.FromArgb(255, 255, 255),
-                Font = new Font("Consolas", 10f),
+                Font = new Font("Consolas", 12f),
             },
             GridColor = Color.FromArgb(40, 46, 58),
-            ColumnHeadersHeight = 32,
-            RowTemplate = { Height = 28 },
+            ColumnHeadersHeight = 36,
+            RowTemplate = { Height = 32 },
         };
 
         // Columns. AutoGenerateColumns = false so we control the layout.
@@ -527,7 +473,7 @@ public class MainForm : Form
             DefaultCellStyle =
             {
                 Alignment = DataGridViewContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI Symbol", 14f, FontStyle.Bold),
+                Font = new Font("Segoe UI Symbol", 16f, FontStyle.Bold),
             },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -675,6 +621,20 @@ public class MainForm : Form
         };
         open.Click += (_, _) => OpenModPage(entry);
         menu.Items.Add(open);
+
+        var showDescItem = new ToolStripMenuItem("Show description…")
+        {
+            Enabled = hasMw,
+            ToolTipText = hasMw
+                ? "Fetches and displays the mod's description from "
+                  + $"https://api.modworkshop.net/mods/{entry.ModWorkshopId}. "
+                  + "Cached locally on first view; click Refresh in the "
+                  + "dialog to re-fetch."
+                : "No ModWorkshop ID linked — set one to enable description "
+                  + "lookup.",
+        };
+        showDescItem.Click += (_, _) => ShowDescription(entry);
+        menu.Items.Add(showDescItem);
 
         var setLabel = hasMw ? "Change ModWorkshop ID…" : "Set ModWorkshop ID…";
         var setItem = new ToolStripMenuItem(setLabel)
@@ -910,7 +870,7 @@ public class MainForm : Form
             {
                 BackColor = Color.FromArgb(36, 42, 54),
                 ForeColor = Color.FromArgb(220, 225, 235),
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 SelectionBackColor = Color.FromArgb(36, 42, 54),
                 SelectionForeColor = Color.FromArgb(220, 225, 235),
             },
@@ -920,12 +880,12 @@ public class MainForm : Form
                 ForeColor = Color.FromArgb(220, 225, 235),
                 SelectionBackColor = Color.FromArgb(40, 60, 90),
                 SelectionForeColor = Color.FromArgb(255, 255, 255),
-                Font = new Font("Consolas", 10f),
+                Font = new Font("Consolas", 12f),
                 WrapMode = DataGridViewTriState.True,
             },
             GridColor = Color.FromArgb(40, 46, 58),
-            ColumnHeadersHeight = 32,
-            RowTemplate = { Height = 28 },
+            ColumnHeadersHeight = 36,
+            RowTemplate = { Height = 32 },
         };
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -945,7 +905,7 @@ public class MainForm : Form
                 SelectionBackColor = Color.FromArgb(65, 80, 105),
                 SelectionForeColor = Color.FromArgb(255, 255, 255),
                 Alignment = DataGridViewContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
             },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -1029,8 +989,8 @@ public class MainForm : Form
         {
             Text = headerText,
             Dock = DockStyle.Top,
-            Height = 28,
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+            Height = 32,
+            Font = new Font("Segoe UI", 14f, FontStyle.Bold),
             ForeColor = Color.FromArgb(220, 225, 235),
         };
         body.Dock = DockStyle.Fill;
@@ -1108,12 +1068,6 @@ public class MainForm : Form
 
     private async Task RunStartupAsync()
     {
-        // Hydrate the path inputs from saved settings so users can see
-        // and edit what's currently in effect.
-        _modsPathInput.Text = _settings.ModsDir;
-        _claudePathInput.Text = _settings.ClaudePath;
-        _decompPathInput.Text = _settings.GameSourcePath;
-
         // First-run convenience: try to auto-detect the Decomp/ folder
         // if the user hasn't set one yet. We only check known locations
         // (next to the game install, repo Desktop layout, Documents)
@@ -1127,7 +1081,6 @@ public class MainForm : Form
                 _settings.GameSourcePath = detected;
                 _settings.Save();
                 _resolver.GameSourcePath = detected;
-                _decompPathInput.Text = detected;
             }
         }
 
@@ -1331,7 +1284,28 @@ public class MainForm : Form
 
     private void PopulateConflictsList(List<ConflictDetector.Conflict> conflicts)
     {
-        _displayedConflicts = conflicts.ToList();
+        // Sort conflicts by the load-order priority of their
+        // earliest-loading involved mod, ascending — so conflicts
+        // affecting low-priority (early-loading) mods come first.
+        // Within the same priority, group by type then key for
+        // stable ordering. Mods we can't resolve to a registry
+        // entry (e.g. duplicate_mod_id ModIds are filenames, not
+        // mod IDs) sort to the end via int.MaxValue.
+        int PrioOf(string modIdOrFile)
+        {
+            var hit = _registry.Entries.FirstOrDefault(
+                m => string.Equals(m.ModId, modIdOrFile,
+                    StringComparison.OrdinalIgnoreCase));
+            return hit?.Priority ?? int.MaxValue;
+        }
+        int EarliestPrio(ConflictDetector.Conflict c)
+            => c.ModIds.Count == 0 ? int.MaxValue : c.ModIds.Min(PrioOf);
+
+        _displayedConflicts = conflicts
+            .OrderBy(EarliestPrio)
+            .ThenBy(c => c.Type, StringComparer.Ordinal)
+            .ThenBy(c => c.Key, StringComparer.Ordinal)
+            .ToList();
         _conflictsGrid.SuspendLayout();
         _conflictsGrid.Rows.Clear();
         foreach (var c in _displayedConflicts)
@@ -1940,6 +1914,26 @@ public class MainForm : Form
         }
     }
 
+    /// <summary>Opens the description dialog for a mod. Pre-fills
+    /// from `_settings.CachedDescriptions` so subsequent opens are
+    /// instant; the dialog kicks off a fresh fetch when there's
+    /// nothing cached. The cache callback persists fresh fetches
+    /// back into settings.json so the next launch sees them too.</summary>
+    private void ShowDescription(ModEntry e)
+    {
+        var key = e.ModWorkshopId.ToString();
+        _settings.CachedDescriptions.TryGetValue(key, out var cached);
+        using var dlg = new DescriptionDialog(
+            e, _mw, cached ?? "",
+            onCached: text =>
+            {
+                _settings.CachedDescriptions[key] = text;
+                try { _settings.Save(); }
+                catch { /* description cache is best-effort */ }
+            });
+        dlg.ShowDialog(this);
+    }
+
     /// <summary>Prompts for a ModWorkshop ID (or URL — we parse either)
     /// and rewrites the mod's mod.txt to set [updates] modworkshop = N.
     /// Backs up archive mods to a .bak first; for directory mods we
@@ -2330,111 +2324,62 @@ public class MainForm : Form
 
     // --- settings + setup banner ----------------------------------
 
-    private void BrowseMods()
+    /// <summary>Opens the Settings modal. On Save the dialog has
+    /// already updated the Settings instance fields; we persist
+    /// + re-apply the runtime-affecting paths (Claude detect,
+    /// ConflictResolver decomp, mods folder rescan) and refresh
+    /// the setup banner. Cancel = no-op.</summary>
+    private void OpenSettingsDialog()
     {
-        using var dlg = new FolderBrowserDialog
-        {
-            Description = "Locate the Road to Vostok mods folder",
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = false,
-        };
-        // Open the picker at whatever path is currently in the input
-        // (or the live ModsDir if the input's empty), so the user can
-        // step up one level to find the right one.
-        var seed = !string.IsNullOrWhiteSpace(_modsPathInput.Text)
-            ? _modsPathInput.Text
-            : ModsDir;
-        if (Directory.Exists(seed)) dlg.SelectedPath = seed;
-        if (dlg.ShowDialog(this) == DialogResult.OK)
-        {
-            _modsPathInput.Text = dlg.SelectedPath;
-            SaveModsPath();
-        }
-    }
+        // Snapshot the values so we can detect what changed and
+        // skip unnecessary work (e.g. don't rescan if mods folder
+        // didn't move).
+        var oldMods = _settings.ModsDir;
+        var oldClaude = _settings.ClaudePath;
+        var oldDecomp = _settings.GameSourcePath;
 
-    private void SaveModsPath()
-    {
-        var path = _modsPathInput.Text.Trim();
-        // Empty input = "use default Steam path" — preserve that
-        // explicit choice so the user can clear the box to revert.
-        // For non-empty paths we sanity-check existence; bail with a
-        // clear message rather than silently scanning a nonexistent
-        // folder.
-        if (!string.IsNullOrEmpty(path) && !Directory.Exists(path))
+        using var dlg = new SettingsDialog(_settings);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        // Validate mods folder before persisting; if it's invalid,
+        // revert that one field so we don't try to scan a missing
+        // folder. Other paths can be empty (auto-detect) or
+        // optional (decomp), so they don't need this check.
+        if (!string.IsNullOrEmpty(_settings.ModsDir)
+            && !Directory.Exists(_settings.ModsDir))
         {
             MessageBox.Show(this,
-                $"`{path}` doesn't exist. The mods folder must be a real "
-                + "directory — pick the `mods/` folder inside the Road to "
-                + "Vostok install.",
+                $"`{_settings.ModsDir}` doesn't exist. Reverting Mods "
+                + "folder to the previous value. Pick the `mods/` "
+                + "folder inside your Road to Vostok install.",
                 "Mods folder not found",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            _settings.ModsDir = oldMods;
         }
-        _settings.ModsDir = path;
-        _settings.Save();
-        // Re-scan from the new path immediately so the grid refreshes.
-        Rescan();
-        UpdateModsStatus();
-        PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
-        UpdateConflictsStatus(_lastConflicts);
-        PopulateConflictsList(_lastConflicts);
-        RefreshSetupBanner();
-    }
 
-    private void BrowseClaude()
-    {
-        using var dlg = new OpenFileDialog
+        try { _settings.Save(); }
+        catch (Exception ex) { ShowError("Couldn't save settings", ex); return; }
+
+        if (_settings.ClaudePath != oldClaude)
         {
-            Title = "Locate claude.exe / claude.cmd",
-            Filter = "Claude Code (*.exe;*.cmd;*.bat)|*.exe;*.cmd;*.bat|All files (*.*)|*.*",
-        };
-        // Default-open in %APPDATA%/npm where the npm-global install lives.
-        var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        if (!string.IsNullOrEmpty(appdata))
-            dlg.InitialDirectory = Path.Combine(appdata, "npm");
-        if (dlg.ShowDialog(this) == DialogResult.OK)
-        {
-            _claudePathInput.Text = dlg.FileName;
-            SaveClaudePath();
+            _claude.OverridePath = _settings.ClaudePath;
+            _claude.Detect();
+            UpdateClaudeStatus();
+            PopulateConflictsList(_lastConflicts);
         }
-    }
-
-    private void BrowseDecomp()
-    {
-        using var dlg = new FolderBrowserDialog
+        if (_settings.GameSourcePath != oldDecomp)
         {
-            Description = "Locate the decompiled game source folder",
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = false,
-        };
-        if (Directory.Exists(_decompPathInput.Text))
-            dlg.SelectedPath = _decompPathInput.Text;
-        if (dlg.ShowDialog(this) == DialogResult.OK)
-        {
-            _decompPathInput.Text = dlg.SelectedPath;
-            SaveDecompPath();
+            _resolver.GameSourcePath = _settings.GameSourcePath;
         }
-    }
-
-    private void SaveClaudePath()
-    {
-        _settings.ClaudePath = _claudePathInput.Text.Trim();
-        _settings.Save();
-        _claude.OverridePath = _settings.ClaudePath;
-        _claude.Detect();
-        UpdateClaudeStatus();
-        // Re-render conflicts grid so Resolve buttons reflect the new
-        // Claude availability state.
-        PopulateConflictsList(_lastConflicts);
-        RefreshSetupBanner();
-    }
-
-    private void SaveDecompPath()
-    {
-        _settings.GameSourcePath = _decompPathInput.Text.Trim();
-        _settings.Save();
-        _resolver.GameSourcePath = _settings.GameSourcePath;
+        if (_settings.ModsDir != oldMods)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+        }
         RefreshSetupBanner();
     }
 

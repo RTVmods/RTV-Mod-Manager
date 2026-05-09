@@ -35,6 +35,14 @@ public class Settings
     /// was last refreshed. Empty when no check has run yet.</summary>
     public string CacheTimestamp { get; set; } = "";
 
+    /// <summary>Snapshot of mod descriptions fetched from
+    /// /mods/&lt;id&gt;. Keyed by mod_workshop_id (as string for JSON
+    /// compatibility), value is the description text. Populated
+    /// lazily — only mods whose description has been viewed (or
+    /// proactively prefetched) end up here. Refreshed independently
+    /// of CachedVersions; no TTL beyond "user clicked refresh".</summary>
+    public Dictionary<string, string> CachedDescriptions { get; set; } = new();
+
     /// <summary>Last-known window bounds and state, restored on
     /// startup. 0/0/0/0 = "no saved state, use the form's coded
     /// defaults". Position is validated against current screens at

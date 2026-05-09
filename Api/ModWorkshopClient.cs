@@ -16,6 +16,14 @@ using System.Text.Json;
 
 namespace VostokModManager.Api;
 
+public record ModDetails
+{
+    public int Id { get; init; }
+    public string Name { get; init; } = "";
+    public string Description { get; init; } = "";
+    public string Author { get; init; } = "";
+}
+
 public class ModWorkshopClient
 {
     private const string BASE_URL = "https://api.modworkshop.net";
@@ -67,6 +75,51 @@ public class ModWorkshopClient
                 result[id] = prop.Value.GetString() ?? "";
         }
         return result;
+    }
+
+    /// <summary>Fetches a single mod's metadata (name, description,
+    /// author) from /mods/&lt;id&gt;. Defensive about field names —
+    /// ModWorkshop's response shape isn't formally documented, so we
+    /// try a few sensible aliases per field and fall back to empty
+    /// when nothing matches. Throws on non-2xx HTTP.</summary>
+    public async Task<ModDetails> GetModDetailsAsync(
+        int modId,
+        CancellationToken ct = default)
+    {
+        if (modId <= 0)
+            throw new ArgumentException("modId must be > 0", nameof(modId));
+        var url = $"{BASE_URL}/mods/{modId}";
+        using var resp = await _http.GetAsync(url, ct);
+        resp.EnsureSuccessStatusCode();
+        var json = await resp.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return new ModDetails
+        {
+            Id = modId,
+            Name = TryString(root, "name") ?? "",
+            Description = TryString(root, "description")
+                       ?? TryString(root, "summary")
+                       ?? TryString(root, "body")
+                       ?? TryString(root, "long_description")
+                       ?? "",
+            Author = TryString(root, "author")
+                  ?? TryString(root, "user_name")
+                  ?? TryString(root, "username")
+                  ?? "",
+        };
+    }
+
+    private static string? TryString(JsonElement obj, string name)
+    {
+        if (obj.ValueKind != JsonValueKind.Object) return null;
+        if (!obj.TryGetProperty(name, out var prop)) return null;
+        return prop.ValueKind switch
+        {
+            JsonValueKind.String => prop.GetString(),
+            JsonValueKind.Number => prop.GetRawText(),
+            _ => null,
+        };
     }
 
     /// <summary>Downloads the latest .vmz for a mod to `savePath`.
