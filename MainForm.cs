@@ -2131,30 +2131,44 @@ public class MainForm : Form
                 migrated = true;
             }
 
+            // Force-refresh the ModWorkshop /mods/versions cache —
+            // we just downloaded a new file, and the cached API
+            // value on _our_ side is likely stale (the cached
+            // "outdated" check is what told us to update in the
+            // first place). Without this refresh, the comparison
+            // below would always look like a version mismatch even
+            // when the new mod.txt + the latest API value agree.
+            // Best-effort: a network failure here just leaves the
+            // cache as-is and the message falls through to a
+            // neutral "versions disagree" wording.
+            try { await CheckUpdatesAsync(forceFresh: true); }
+            catch { /* keep going with the stale cache */ }
+
             UpdateModsStatus();
             PopulateModsGrid();
 
-            // Status message tells the truth: did the version field
-            // in mod.txt actually update, and does it match the
-            // ModWorkshop API's reported version?
             var apiVersion = _latestVersions.TryGetValue(mw, out var av) ? av : "";
             if (string.IsNullOrEmpty(apiVersion))
             {
-                _updatesLabel.Text = $"Updated {label} → v{newVersion}.";
+                _updatesLabel.Text = $"Updated {label} → v{newVersion}"
+                    + (migrated ? " (cfg state carried over)." : ".");
             }
             else if (string.Equals(newVersion, apiVersion, StringComparison.Ordinal))
             {
-                _updatesLabel.Text =
-                    $"Updated {label} → v{newVersion}"
+                _updatesLabel.Text = $"Updated {label} → v{newVersion}"
                     + (migrated ? " (cfg state carried over)." : ".");
             }
             else
             {
+                // Could be either side lagging — author hasn't
+                // bumped mod.txt yet, OR ModWorkshop's CDN hasn't
+                // caught up to a brand-new release. Don't take
+                // sides; just describe what we see.
                 _updatesLabel.Text =
-                    $"Updated {label} (file replaced; mod.txt version is "
-                    + $"v{newVersion} but ModWorkshop API reports v{apiVersion}"
-                    + " — the mod author hasn't bumped their mod.txt version "
-                    + "field, so the Update column may still show ⬆ here).";
+                    $"Updated {label}: file's mod.txt is v{newVersion}, "
+                    + $"ModWorkshop API reports v{apiVersion}. The Update "
+                    + "column may still show ⬆ until both sides agree — "
+                    + "click Refresh in a couple of minutes.";
             }
         }
         catch (Exception ex)
