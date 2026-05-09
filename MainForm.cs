@@ -212,9 +212,22 @@ public class MainForm : Form
         // Shown fires after the form has its real client size, so it
         // also guarantees a correct distance regardless of when the
         // SplitContainer first landed at its final width.
-        var ratio = _settings.SplitterRatio is > 0.1 and < 0.9
-            ? _settings.SplitterRatio
+        // Use any positive saved ratio with a safety clamp at apply
+        // time. Earlier we used `is > 0.1 and < 0.9` for the load
+        // check, which silently rejected saved values outside that
+        // band — including reasonable user preferences like 0.95
+        // (very wide mods) or 0.05 (very narrow). The fallback to
+        // 0.62 only kicks in for the "fresh install, no saved value"
+        // case (ratio = 0).
+        var ratio = _settings.SplitterRatio > 0
+            ? Math.Clamp(_settings.SplitterRatio, 0.05, 0.95)
             : 0.62;
+        // Guard so SplitterMoved doesn't write to settings during
+        // OUR programmatic SplitterDistance assignments — those
+        // happen on every window resize and would clobber the saved
+        // ratio with a slightly-drifted value (int truncation, or
+        // worse, a clamp on a small window).
+        var applyingSplit = false;
         void ApplySplit()
         {
             if (split.Width > 100)
@@ -225,14 +238,21 @@ public class MainForm : Form
                 // SplitterDistance.
                 var min = split.Panel1MinSize;
                 var max = split.Width - split.Panel2MinSize - split.SplitterWidth;
-                if (max > min) split.SplitterDistance = Math.Clamp(dist, min, max);
+                if (max > min)
+                {
+                    applyingSplit = true;
+                    try { split.SplitterDistance = Math.Clamp(dist, min, max); }
+                    finally { applyingSplit = false; }
+                }
             }
         }
         split.Resize += (_, _) => ApplySplit();
-        // User drags update the persisted ratio so it survives across
-        // launches. SplitterMoved fires after the drag completes.
+        // Only USER drags update the persisted ratio — programmatic
+        // SplitterDistance writes from ApplySplit are suppressed by
+        // the applyingSplit flag.
         split.SplitterMoved += (_, _) =>
         {
+            if (applyingSplit) return;
             if (split.Width > 100)
             {
                 ratio = (double)split.SplitterDistance / split.Width;
@@ -437,12 +457,15 @@ public class MainForm : Form
         {
             Name = "Name",
             HeaderText = "Mod",
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 100,
+            // Used to be AutoSizeMode = Fill, but Fill columns can't
+            // be drag-resized in any meaningful way — dragging the
+            // boundary just resizes the adjacent fixed column. Now
+            // it's a regular sized column so the user can drag it
+            // and the width persists across launches like every
+            // other column. Width is generous by default so a fresh
+            // install still shows long mod names without truncation.
+            Width = 600,
             ReadOnly = true,
-            // Don't let a narrow split-panel collapse this column —
-            // the user reported the Name being invisible when Fill
-            // had no minimum.
             MinimumWidth = 220,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
