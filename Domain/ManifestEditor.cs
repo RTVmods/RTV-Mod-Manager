@@ -87,12 +87,20 @@ public static class ManifestEditor
         => SetValue(modTxt, "mod", "priority", priority.ToString());
 
     /// <summary>Convenience wrapper for `[dependencies] required/optional`.
-    /// `kind` is "required" or "optional"; mod IDs are joined with
-    /// ", " for CSV form. Pass an empty list to write an empty value
-    /// (which will be parsed back as no deps — equivalent to clearing
-    /// the line).</summary>
+    /// `kind` is "required" or "optional"; mod IDs are written as a
+    /// Godot ConfigFile string array — `["a", "b", "c"]` — because
+    /// the in-game mod loader uses Godot's strict ConfigFile parser
+    /// and rejects the whole file if any value isn't a valid
+    /// Variant. (Bare CSV is the obvious-looking format but Godot's
+    /// parser fails on it, which would then prevent the game from
+    /// reading priority/autoload/hooks for the affected mod.)
+    /// Empty list writes `[]` so the section round-trips cleanly
+    /// — equivalent to no required deps.</summary>
     public static string SetDependencyList(string modTxt, string kind, IEnumerable<string> modIds)
-        => SetValue(modTxt, "dependencies", kind, string.Join(", ", modIds));
+    {
+        var quoted = modIds.Select(id => "\"" + id.Replace("\"", "\\\"") + "\"");
+        return SetValue(modTxt, "dependencies", kind, "[" + string.Join(", ", quoted) + "]");
+    }
 
     private static readonly Regex _modWorkshopUrlRe = new(
         @"modworkshop\.net/mods?/(\d+)",
