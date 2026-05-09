@@ -122,6 +122,12 @@ public class MainForm : Form
             _settings.WindowWidth = b.Width;
             _settings.WindowHeight = b.Height;
             _settings.WindowMaximized = WindowState == FormWindowState.Maximized;
+            // Snapshot per-grid column widths. Wrapped null-checks
+            // because BuildLayout assigns the grid fields, but if a
+            // construction error fired FormClosing before that ran
+            // we don't want to NRE on the way out.
+            if (_modsGrid != null) SaveColumnWidths(_modsGrid, "mods");
+            if (_conflictsGrid != null) SaveColumnWidths(_conflictsGrid, "conflicts");
             try { _settings.Save(); }
             catch { /* best-effort; don't block app close on a write error */ }
         };
@@ -189,11 +195,13 @@ public class MainForm : Form
 
         // Left: interactive mods grid + toolbar (filter, bulk, refresh).
         _modsGrid = BuildModsGrid();
+        ApplyColumnWidths(_modsGrid, "mods");
         split.Panel1.Controls.Add(
             WrapInPanel("Installed mods", _modsGrid, BuildModsToolbar()));
 
         // Right: interactive conflicts grid with Resolve button.
         _conflictsGrid = BuildConflictsGrid();
+        ApplyColumnWidths(_conflictsGrid, "conflicts");
         split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
 
         // Mods is the primary view — give it ~62% of the width by
@@ -621,6 +629,36 @@ public class MainForm : Form
         });
         grid.CellContentClick += async (_, e) => await OnConflictsCellClickedAsync(e);
         return grid;
+    }
+
+    /// <summary>Reads `_settings.ColumnWidths` and applies any saved
+    /// width to a non-Fill column whose name matches. Fill columns
+    /// are skipped — they auto-compute and pinning them would defeat
+    /// the leftover-space behaviour. The lower bound (20px) blocks a
+    /// corrupted settings file from rendering an unfindable 1px
+    /// column.</summary>
+    private void ApplyColumnWidths(DataGridView grid, string prefix)
+    {
+        foreach (DataGridViewColumn col in grid.Columns)
+        {
+            if (col.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill) continue;
+            var key = $"{prefix}.{col.Name}";
+            if (_settings.ColumnWidths.TryGetValue(key, out var w) && w >= 20)
+                col.Width = w;
+        }
+    }
+
+    /// <summary>Snapshots the current widths of every non-Fill column
+    /// into `_settings.ColumnWidths`. Caller is responsible for
+    /// _settings.Save() afterwards (FormClosing batches this with the
+    /// rest of the persisted UI state).</summary>
+    private void SaveColumnWidths(DataGridView grid, string prefix)
+    {
+        foreach (DataGridViewColumn col in grid.Columns)
+        {
+            if (col.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill) continue;
+            _settings.ColumnWidths[$"{prefix}.{col.Name}"] = col.Width;
+        }
     }
 
     /// <summary>Wraps a content control in a panel with a bold header

@@ -53,6 +53,14 @@ public class Settings
     /// pixels so the ratio is preserved when the window resizes.</summary>
     public double SplitterRatio { get; set; }
 
+    /// <summary>Per-column widths the user dragged to. Keyed by
+    /// "&lt;grid&gt;.&lt;column-name&gt;" — e.g. "mods.Update",
+    /// "conflicts.Type". Fill-mode columns (the Mod-name column,
+    /// for instance) are intentionally NOT persisted here because
+    /// they re-compute their own width from the leftover space and
+    /// pinning them would break that behaviour on window resize.</summary>
+    public Dictionary<string, int> ColumnWidths { get; set; } = new();
+
     [JsonIgnore]
     public TimeSpan CacheAge
     {
