@@ -14,8 +14,18 @@ namespace VostokModManager;
 
 public class MainForm : Form
 {
-    private const string DefaultModsDir =
+    /// <summary>Hardcoded fallback when the user hasn't set a custom
+    /// ModsDir. Default Steam install layout for Road to Vostok.</summary>
+    private const string SteamFallbackModsDir =
         @"C:\Program Files (x86)\Steam\steamapps\common\Road to Vostok\mods";
+
+    /// <summary>The active mods directory. Reads from the user's
+    /// settings if set; otherwise falls back to the Steam install
+    /// path. This is the path scan/toggle/install operations target.</summary>
+    private string ModsDir =>
+        !string.IsNullOrEmpty(_settings.ModsDir)
+            ? _settings.ModsDir
+            : SteamFallbackModsDir;
 
     private readonly Settings _settings;
     private readonly ModRegistry _registry = new();
@@ -50,6 +60,7 @@ public class MainForm : Form
     private DataGridView _conflictsGrid = null!;
     private Panel _setupBanner = null!;
     private Label _setupBannerLabel = null!;
+    private TextBox _modsPathInput = null!;
     private TextBox _claudePathInput = null!;
     private TextBox _decompPathInput = null!;
     private TextBox _filterBox = null!;
@@ -139,11 +150,11 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 10,
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
-        for (var i = 0; i < 8; i++)
+        for (var i = 0; i < 9; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
@@ -172,15 +183,23 @@ public class MainForm : Form
         _conflictsLabel = NewStatus("Conflicts: —");
         root.Controls.Add(_conflictsLabel, 0, 5);
 
-        // Inline settings rows — Claude path + Decomp path with
-        // Browse / Save buttons.
+        // Inline settings rows — Mods folder + Claude path + Decomp
+        // path, each with Browse / Save buttons. Mods folder is
+        // first because it's the most fundamental path: empty
+        // settings + missing default Steam folder = nothing else
+        // works.
+        _modsPathInput = BuildPathRow(
+            root, 6, "Mods folder:",
+            placeholder: "(default Steam install — change if you moved the game)",
+            onBrowse: BrowseMods,
+            onSave: SaveModsPath);
         _claudePathInput = BuildPathRow(
-            root, 6, "Claude Code path:",
+            root, 7, "Claude Code path:",
             placeholder: "(auto-detect — fill if not found above)",
             onBrowse: BrowseClaude,
             onSave: SaveClaudePath);
         _decompPathInput = BuildPathRow(
-            root, 7, "Game source (Decomp/):",
+            root, 8, "Game source (Decomp/):",
             placeholder: "path to the decompiled game source folder",
             onBrowse: BrowseDecomp,
             onSave: SaveDecompPath);
@@ -259,7 +278,7 @@ public class MainForm : Form
                 _settings.SplitterRatio = ratio;
             }
         };
-        root.Controls.Add(split, 0, 8);
+        root.Controls.Add(split, 0, 9);
         Shown += (_, _) => ApplySplit();
     }
 
@@ -771,6 +790,7 @@ public class MainForm : Form
     {
         // Hydrate the path inputs from saved settings so users can see
         // and edit what's currently in effect.
+        _modsPathInput.Text = _settings.ModsDir;
         _claudePathInput.Text = _settings.ClaudePath;
         _decompPathInput.Text = _settings.GameSourcePath;
 
@@ -795,10 +815,10 @@ public class MainForm : Form
         UpdateClaudeStatus();
         RefreshSetupBanner();
 
-        _modsLabel.Text = $"Mods: scanning {DefaultModsDir} ...";
-        if (!_registry.Scan(DefaultModsDir))
+        _modsLabel.Text = $"Mods: scanning {ModsDir} ...";
+        if (!_registry.Scan(ModsDir))
         {
-            _modsLabel.Text = $"Mods: cannot read {DefaultModsDir}. " +
+            _modsLabel.Text = $"Mods: cannot read {ModsDir}. " +
                 "Is the game installed at the default Steam path?";
             return;
         }
@@ -1137,7 +1157,7 @@ public class MainForm : Form
             if (!ToggleModFiles(e)) failed++;
         }
         // One rescan + one redetect at the end — far cheaper than per-mod.
-        _registry.Scan(DefaultModsDir);
+        _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1156,7 +1176,7 @@ public class MainForm : Form
 
     private async Task RefreshAllAsync()
     {
-        _registry.Scan(DefaultModsDir);
+        _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1247,7 +1267,7 @@ public class MainForm : Form
         }
         // Rescan + redetect conflicts (different enabled set may have
         // a different conflict set).
-        _registry.Scan(DefaultModsDir);
+        _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
@@ -1266,14 +1286,14 @@ public class MainForm : Form
         string dst;
         if (e.IsEnabled)
         {
-            var disabledDir = Path.Combine(DefaultModsDir, "Disabled");
+            var disabledDir = Path.Combine(ModsDir, "Disabled");
             try { Directory.CreateDirectory(disabledDir); }
             catch { return false; }
             dst = Path.Combine(disabledDir, fileName);
         }
         else
         {
-            dst = Path.Combine(DefaultModsDir, fileName);
+            dst = Path.Combine(ModsDir, fileName);
         }
         try
         {
@@ -1398,7 +1418,7 @@ public class MainForm : Form
         }
 
         // Re-scan + re-check updates so the new link kicks in.
-        _registry.Scan(DefaultModsDir);
+        _registry.Scan(ModsDir);
         UpdateModsStatus();
         PopulateModsGrid();
         await CheckUpdatesAsync(forceFresh: true);
@@ -1446,7 +1466,7 @@ public class MainForm : Form
                 $"Updated {label}. (Mod's internal version may still " +
                 "lag the ModWorkshop reported version — that's a mod-author quirk.)";
 
-            _registry.Scan(DefaultModsDir);
+            _registry.Scan(ModsDir);
             UpdateModsStatus();
             PopulateModsGrid();
         }
@@ -1470,6 +1490,58 @@ public class MainForm : Form
     }
 
     // --- settings + setup banner ----------------------------------
+
+    private void BrowseMods()
+    {
+        using var dlg = new FolderBrowserDialog
+        {
+            Description = "Locate the Road to Vostok mods folder",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+        // Open the picker at whatever path is currently in the input
+        // (or the live ModsDir if the input's empty), so the user can
+        // step up one level to find the right one.
+        var seed = !string.IsNullOrWhiteSpace(_modsPathInput.Text)
+            ? _modsPathInput.Text
+            : ModsDir;
+        if (Directory.Exists(seed)) dlg.SelectedPath = seed;
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+        {
+            _modsPathInput.Text = dlg.SelectedPath;
+            SaveModsPath();
+        }
+    }
+
+    private void SaveModsPath()
+    {
+        var path = _modsPathInput.Text.Trim();
+        // Empty input = "use default Steam path" — preserve that
+        // explicit choice so the user can clear the box to revert.
+        // For non-empty paths we sanity-check existence; bail with a
+        // clear message rather than silently scanning a nonexistent
+        // folder.
+        if (!string.IsNullOrEmpty(path) && !Directory.Exists(path))
+        {
+            MessageBox.Show(this,
+                $"`{path}` doesn't exist. The mods folder must be a real "
+                + "directory — pick the `mods/` folder inside the Road to "
+                + "Vostok install.",
+                "Mods folder not found",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _settings.ModsDir = path;
+        _settings.Save();
+        // Re-scan from the new path immediately so the grid refreshes.
+        _registry.Scan(ModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        RefreshSetupBanner();
+    }
 
     private void BrowseClaude()
     {
@@ -1551,6 +1623,13 @@ public class MainForm : Form
                     "a known claude.exe path into the input below and " +
                     "click Save.");
             }
+        }
+        if (!Directory.Exists(ModsDir))
+        {
+            msgs.Add(
+                $"• Mods folder `{ModsDir}` doesn't exist. The default " +
+                "Steam install path doesn't apply on your machine — set " +
+                "the Mods folder below to wherever Road to Vostok lives.");
         }
         if (string.IsNullOrEmpty(_settings.GameSourcePath)
             || !Directory.Exists(_settings.GameSourcePath))
@@ -1640,7 +1719,7 @@ public class MainForm : Form
         // any related ones) drop off the list cleanly.
         if (dlg.Applied)
         {
-            _registry.Scan(DefaultModsDir);
+            _registry.Scan(ModsDir);
             UpdateModsStatus();
             PopulateModsGrid();
             _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
