@@ -106,6 +106,26 @@ public class MainForm : Form
             if (e.KeyCode == Keys.Escape) Close();
         };
 
+        // Drag-and-drop install: drop one or more .vmz files anywhere
+        // on the window to copy them into the mods folder.
+        AllowDrop = true;
+        DragEnter += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+            var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+            if (files.Any(f => f.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase)))
+                e.Effect = DragDropEffects.Copy;
+        };
+        DragDrop += async (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+            var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+            var vmz = files
+                .Where(f => f.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (vmz.Count > 0) await InstallModFilesAsync(vmz);
+        };
+
         // Restore last-session size + position if we have one. Validate
         // the saved bounds intersect a current screen so a multi-monitor
         // disconnect can't park us offscreen.
@@ -857,13 +877,14 @@ public class MainForm : Form
         {
             Height = 32,
             Dock = DockStyle.Top,
-            ColumnCount = 5,
+            ColumnCount = 6,
             RowCount = 1,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 2, 0, 4),
         };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -889,20 +910,25 @@ public class MainForm : Form
         _filterBox.TextChanged += (_, _) => PopulateModsGrid();
         bar.Controls.Add(_filterBox, 1, 0);
 
+        var install = ThemedButton("Install mod…");
+        install.Margin = new Padding(0, 2, 4, 2);
+        install.Click += async (_, _) => await InstallModFromFilePickerAsync();
+        bar.Controls.Add(install, 2, 0);
+
         var enableAll = ThemedButton("Enable all");
         enableAll.Margin = new Padding(0, 2, 4, 2);
         enableAll.Click += (_, _) => BulkToggle(enable: true);
-        bar.Controls.Add(enableAll, 2, 0);
+        bar.Controls.Add(enableAll, 3, 0);
 
         var disableAll = ThemedButton("Disable all");
         disableAll.Margin = new Padding(0, 2, 4, 2);
         disableAll.Click += (_, _) => BulkToggle(enable: false);
-        bar.Controls.Add(disableAll, 3, 0);
+        bar.Controls.Add(disableAll, 4, 0);
 
         var refresh = ThemedButton("Refresh");
         refresh.Margin = new Padding(0, 2, 0, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
-        bar.Controls.Add(refresh, 4, 0);
+        bar.Controls.Add(refresh, 5, 0);
 
         return bar;
     }
@@ -1348,6 +1374,146 @@ public class MainForm : Form
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
         await CheckUpdatesAsync(forceFresh: true);
+    }
+
+    /// <summary>Opens an OpenFileDialog seeded at the user's Downloads
+    /// folder (where browsers drop ModWorkshop downloads by default)
+    /// and installs every selected .vmz via InstallModFilesAsync.</summary>
+    private async Task InstallModFromFilePickerAsync()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Install mod from .vmz",
+            Filter = "Vostok mod (*.vmz)|*.vmz|All files (*.*)|*.*",
+            Multiselect = true,
+            CheckFileExists = true,
+        };
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(home))
+        {
+            var downloads = Path.Combine(home, "Downloads");
+            if (Directory.Exists(downloads)) dlg.InitialDirectory = downloads;
+        }
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        await InstallModFilesAsync(dlg.FileNames);
+    }
+
+    /// <summary>Copies one or more .vmz files into the mods folder,
+    /// rejecting anything that doesn't look like a real Vostok mod
+    /// archive. Skip-or-overwrite prompt for filename collisions.
+    /// Single registry rescan + conflict redetect at the end so a
+    /// drop of 20 files doesn't trigger 20 full refreshes.</summary>
+    private async Task InstallModFilesAsync(IEnumerable<string> sources)
+    {
+        var modsDir = ModsDir;
+        if (!Directory.Exists(modsDir))
+        {
+            MessageBox.Show(this,
+                $"Mods folder `{modsDir}` doesn't exist. Set a valid "
+                + "Mods folder above before installing.",
+                "Mods folder not found",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var installed = new List<string>();
+        var skipped = new List<(string path, string reason)>();
+        // Compute full path of mods dir (case-insensitive comparable)
+        // so we can detect "drop a file already in the mods folder."
+        var modsDirFull = Path.GetFullPath(modsDir);
+
+        foreach (var src in sources)
+        {
+            try
+            {
+                if (!File.Exists(src))
+                    throw new FileNotFoundException("File not found.", src);
+                if (!src.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Not a .vmz file.");
+
+                // Validate: opens as a zip and contains mod.txt.
+                using (var arch = new ModArchive())
+                {
+                    if (!arch.Open(src))
+                        throw new InvalidDataException(
+                            "Couldn't open as a zip archive — probably "
+                            + "corrupt or wrong file type.");
+                    if (!arch.HasFile("mod.txt"))
+                        throw new InvalidDataException(
+                            "No mod.txt inside the archive — doesn't "
+                            + "look like a Vostok mod.");
+                }
+
+                var dst = Path.Combine(modsDir, Path.GetFileName(src));
+                // Source already inside mods/? Treat as no-op.
+                if (string.Equals(
+                        Path.GetFullPath(src),
+                        Path.GetFullPath(dst),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped.Add((src, "already in the mods folder"));
+                    continue;
+                }
+
+                if (File.Exists(dst))
+                {
+                    var dr = MessageBox.Show(this,
+                        $"`{Path.GetFileName(src)}` already exists in the "
+                        + "mods folder. Overwrite the existing file?",
+                        "File exists",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2);
+                    if (dr != DialogResult.Yes)
+                    {
+                        skipped.Add((src, "exists, user declined overwrite"));
+                        continue;
+                    }
+                }
+                // File.Copy is fast for typical mod sizes (<10MB) but
+                // run on a thread pool so a slow disk doesn't freeze
+                // the UI mid-batch.
+                await Task.Run(() => File.Copy(src, dst, overwrite: true));
+                installed.Add(Path.GetFileName(src));
+            }
+            catch (Exception ex)
+            {
+                skipped.Add((src, ex.Message));
+            }
+        }
+
+        _registry.Scan(ModsDir);
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
+        if (installed.Count > 0)
+            _modsLabel.Text =
+                $"Installed {installed.Count} mod"
+                + (installed.Count == 1 ? "" : "s")
+                + (skipped.Count > 0 ? $" ({skipped.Count} skipped)" : "")
+                + ".";
+        else if (skipped.Count > 0)
+            _modsLabel.Text =
+                $"No mods installed ({skipped.Count} skipped).";
+
+        if (skipped.Count > 0)
+        {
+            var preview = string.Join("\n",
+                skipped.Take(8).Select(s => $"  • {Path.GetFileName(s.path)}: {s.reason}"));
+            if (skipped.Count > 8)
+                preview += $"\n  …and {skipped.Count - 8} more";
+            MessageBox.Show(this,
+                $"{installed.Count} installed; {skipped.Count} skipped.\n\n"
+                + preview,
+                "Install report",
+                MessageBoxButtons.OK,
+                installed.Count > 0
+                    ? MessageBoxIcon.Information
+                    : MessageBoxIcon.Warning);
+        }
     }
 
     // --- decomp auto-detect ---------------------------------------
