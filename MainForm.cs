@@ -1347,51 +1347,81 @@ public class MainForm : Form
         await CheckMmlVersionAsync();
     }
 
-    /// <summary>Polls GitHub for the latest MML release tag and
-    /// updates the MML status label. Uses the cached value from
-    /// settings.json when it's &lt;24h old; otherwise re-fetches and
-    /// caches. Network failures fall through to the cached value
-    /// when available; otherwise the label says "(check failed)".</summary>
+    /// <summary>Updates the MML status row: detects the installed
+    /// MODLOADER_VERSION from `<gameDir>/modloader.gd`, polls GitHub
+    /// for the latest release tag (cached for 24h), and renders the
+    /// pair with a comparison glyph (✓ / ⬆ / ↑) using the same
+    /// version-compare logic the mod grid uses. Network failures
+    /// fall back to the cached latest; missing modloader.gd shows
+    /// "not detected" with a hint.</summary>
     private async Task CheckMmlVersionAsync(bool forceFresh = false)
     {
+        var installed = MmlInstall.DetectInstalledVersion(ModsDir);
+
+        // Latest from GitHub — cache-first.
+        string latest = "";
+        bool fromCache = false;
         if (!forceFresh && _settings.IsMmlCacheFresh)
         {
-            RenderMmlLabel(
-                _settings.MmlLatestTag, _settings.MmlLatestUrl,
-                fromCache: true);
-            return;
+            latest = _settings.MmlLatestTag;
+            fromCache = true;
         }
-        _mmlLabel.Text = "MML: checking for latest release …";
-        var release = await _mml.FetchLatestAsync();
-        if (release == null)
+        else
         {
-            // Fall back to cache if we have one — beats showing
-            // "(check failed)" while a stale-but-useful tag is
-            // sitting in settings.
-            if (!string.IsNullOrEmpty(_settings.MmlLatestTag))
-                RenderMmlLabel(
-                    _settings.MmlLatestTag, _settings.MmlLatestUrl,
-                    fromCache: true);
-            else
-                _mmlLabel.Text =
-                    "MML: latest-version check failed (offline?). "
-                    + "Click to open the releases page.";
-            return;
+            _mmlLabel.Text = "MML: checking for latest release …";
+            var release = await _mml.FetchLatestAsync();
+            if (release != null)
+            {
+                latest = release.TagName;
+                _settings.MmlLatestTag = release.TagName;
+                _settings.MmlLatestUrl = release.HtmlUrl;
+                _settings.MmlCheckedAt = DateTime.UtcNow.ToString("o");
+                try { _settings.Save(); } catch { /* best-effort */ }
+            }
+            else if (!string.IsNullOrEmpty(_settings.MmlLatestTag))
+            {
+                latest = _settings.MmlLatestTag;
+                fromCache = true;
+            }
         }
-        _settings.MmlLatestTag = release.TagName;
-        _settings.MmlLatestUrl = release.HtmlUrl;
-        _settings.MmlCheckedAt = DateTime.UtcNow.ToString("o");
-        try { _settings.Save(); }
-        catch { /* best-effort */ }
-        RenderMmlLabel(release.TagName, release.HtmlUrl, fromCache: false);
+        RenderMmlLabel(installed, latest, fromCache);
     }
 
-    private void RenderMmlLabel(string tag, string url, bool fromCache)
+    private void RenderMmlLabel(string installed, string latest, bool fromCache)
     {
         var freshness = fromCache ? " (cached)" : "";
-        var safeTag = string.IsNullOrEmpty(tag) ? "(unknown)" : tag;
+        var hasInstalled = !string.IsNullOrEmpty(installed);
+        var hasLatest = !string.IsNullOrEmpty(latest);
+
+        if (!hasInstalled && !hasLatest)
+        {
+            _mmlLabel.Text =
+                "MML: not detected and latest-version check failed. "
+                + "Click to open the releases page.";
+            return;
+        }
+        if (!hasInstalled)
+        {
+            _mmlLabel.Text =
+                $"MML: not detected at modloader.gd; latest release "
+                + $"v{latest}{freshness} — click to open releases page.";
+            return;
+        }
+        if (!hasLatest)
+        {
+            _mmlLabel.Text =
+                $"MML: installed v{installed}; latest unknown — "
+                + "click to open releases page.";
+            return;
+        }
+        var cmp = CompareVersions(installed, latest);
+        string state;
+        if (cmp == 0) state = "✓ up to date";
+        else if (cmp > 0) state = "↑ ahead of release";
+        else state = "⬆ outdated";
         _mmlLabel.Text =
-            $"MML: latest release {safeTag}{freshness} — click to open releases page.";
+            $"MML: installed v{installed}, latest v{latest} {state}{freshness} — "
+            + "click to open releases page.";
     }
 
     private void OpenMmlReleasesPage()
