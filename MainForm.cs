@@ -1116,8 +1116,20 @@ public class MainForm : Form
             HeaderText = "Mods",
             Width = 220,
         });
+        // "Wins" — which mod currently wins this conflict given the
+        // load order. Computed in PopulateConflictsList by
+        // DetermineWinner; semantics depend on conflict type
+        // (highest priority wins for overlap/autoload/hook/etc.;
+        // hard fail for class_name; "needs <dep>" for missing
+        // dependency; etc.). Cell text colour-coded by outcome.
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Wins",
+            HeaderText = "Wins",
+            Width = 220,
+        });
         // Key (Fill) goes last for the same reason Mod is last in
-        // the mods grid: gives Mods a draggable right edge and lets
+        // the mods grid: gives Wins a draggable right edge and lets
         // Key absorb leftover width without needing a drag handle.
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -1871,8 +1883,116 @@ public class MainForm : Form
             row.Cells["Type"].Value = c.Type;
             row.Cells["Key"].Value = c.Key;
             row.Cells["Mods"].Value = string.Join(", ", c.ModIds);
+            var (winnerText, winnerColor, winnerTip) = DetermineWinner(c);
+            row.Cells["Wins"].Value = winnerText;
+            row.Cells["Wins"].ToolTipText = winnerTip;
+            row.Cells["Wins"].Style.ForeColor = winnerColor;
+            row.Cells["Wins"].Style.SelectionForeColor = winnerColor;
         }
         _conflictsGrid.ResumeLayout();
+    }
+
+    /// <summary>Resolves which mod currently "wins" a conflict given
+    /// the live load-order priorities. Semantics vary per conflict
+    /// type:
+    ///   - file_overlap / autoload / hook / script_extend /
+    ///     take_over → highest priority value among the involved
+    ///     mods (last to load → final write wins / hook chain
+    ///     terminator);
+    ///   - class_name → no winner; the project refuses to load,
+    ///     so the cell renders red with a "hard fail" hint;
+    ///   - super_chain_constraint / dependency_order → the late-
+    ///     loading side of the constraint (its behaviour is what
+    ///     the player ultimately sees);
+    ///   - missing_dependency → "(needs &lt;dep&gt;)" — neither
+    ///     mod meaningfully loads until the dep is enabled;
+    ///   - duplicate_mod_id → loader picks the alphabetically-
+    ///     first filename it discovers, so we surface that too.
+    /// Returns (display text, foreground colour, tooltip).</summary>
+    private (string text, Color color, string tooltip) DetermineWinner(
+        ConflictDetector.Conflict c)
+    {
+        var defaultColor = Color.FromArgb(220, 225, 235);
+        var mutedColor = Color.FromArgb(160, 170, 190);
+        var redColor = Color.FromArgb(245, 130, 120);
+        var greenColor = Color.FromArgb(120, 220, 140);
+
+        if (c.ModIds.Count == 0)
+            return ("—", mutedColor, "No involved mods recorded.");
+
+        switch (c.Type)
+        {
+            case ConflictDetector.TYPE_CLASS_NAME_COLLISION:
+                return ("(hard fail — game won't load)",
+                    redColor,
+                    "Two mods declare the same class_name. Godot "
+                    + "refuses to load the project. Disable one of "
+                    + "the involved mods.");
+
+            case ConflictDetector.TYPE_MISSING_DEPENDENCY:
+                // Details["required"] holds the missing dep id.
+                var required = c.Details.TryGetValue("required", out var r)
+                    ? r?.ToString() ?? "?"
+                    : "?";
+                return ($"(needs `{required}`)",
+                    redColor,
+                    "Dependent mod won't function until the required "
+                    + "mod is installed and enabled.");
+
+            case ConflictDetector.TYPE_DUPLICATE_MOD_ID:
+                // ModIds for this type are FILENAMES, not mod_ids.
+                // The loader picks the first one it discovers,
+                // which is typically alphabetical.
+                var picked = c.ModIds
+                    .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                    .First();
+                return ($"{picked} (loader picks first)",
+                    mutedColor,
+                    "Two .vmz files share the same mod_id; the in-game "
+                    + "loader picks the alphabetically-first filename "
+                    + "and silently ignores the rest.");
+
+            case ConflictDetector.TYPE_DEPENDENCY_ORDER:
+            case ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT:
+                // These are ordering constraints, not winner-takes-
+                // all conflicts. The mod that loads LAST is the one
+                // whose behaviour the player ultimately sees.
+                var lateMod = HighestPriorityModId(c.ModIds);
+                return (string.IsNullOrEmpty(lateMod) ? "—" : lateMod,
+                    defaultColor,
+                    "Late-loading side of the order constraint — its "
+                    + "overrides land last in the chain.");
+
+            default:
+                // file_overlap, autoload, hook, script_extend,
+                // take_over — last write wins.
+                var winner = HighestPriorityModId(c.ModIds);
+                if (string.IsNullOrEmpty(winner))
+                    return ("—", mutedColor, "Couldn't resolve any "
+                        + "involved mod against the registry.");
+                return (winner, greenColor,
+                    "Highest priority value (loads last) → its "
+                    + "version is what the game actually sees.");
+        }
+    }
+
+    /// <summary>Among the given mod_ids, returns the one with the
+    /// highest Priority value (= loads last). Falls back to
+    /// alphabetical order on ties; returns "" when none of the ids
+    /// resolve against the registry.</summary>
+    private string HighestPriorityModId(IEnumerable<string> modIds)
+    {
+        var resolved = modIds
+            .Select(id => _registry.FindById(id))
+            .Where(e => e != null)
+            .Select(e => e!)
+            .ToList();
+        if (resolved.Count == 0) return "";
+        return resolved
+            .OrderByDescending(e => e.Priority)
+            .ThenBy(e => e.ModId, StringComparer.OrdinalIgnoreCase)
+            .First()
+            .ModId;
     }
 
     private string ResolveButtonTooltip(ConflictDetector.Conflict c)
