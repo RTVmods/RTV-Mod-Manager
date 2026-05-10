@@ -222,7 +222,10 @@ public class MainForm : Form
 
     private void InitializeWindow()
     {
-        Text = "Vostok Mod Manager";
+        // OS title bar text — kept clean Latin so Alt-Tab + the
+        // taskbar list it correctly. The decorative faux-Cyrillic
+        // version lives on the in-form title label.
+        Text = "Road to Vostok Mod Manager";
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
@@ -352,21 +355,36 @@ public class MainForm : Form
             Color.FromArgb(220, 200, 50, 60));
         titleRow.Controls.Add(titleStar, 0, 0);
 
+        // Title in faux-Cyrillic — Я for R (distinctive mirror) and
+        // И for N (also distinctive). Cyrillic look-alikes for the
+        // rest (О, А, Т, К, М, Е) are visually identical to Latin
+        // so the text still reads as "Road to Vostok Mod Manager"
+        // at a glance, but the spotted Я / И give it the soviet
+        // stencil-poster flavour.
         var title = new Label
         {
-            Text = "Vostok Mod Manager",
+            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ",
             Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
             AutoSize = true,
             Anchor = AnchorStyles.Left,
         };
         titleRow.Controls.Add(title, 1, 0);
 
-        var launchBtn = ThemedButton("▶ Launch Vostok");
+        // Green-themed Launch Game button. Reuses ThemedButton's
+        // FlatStyle + sizing scaffolding then overrides the colours
+        // for a forest-green look that visually distinguishes it
+        // from the (slate) Settings button next to it.
+        var launchBtn = ThemedButton("▶ Launch Game");
         launchBtn.Width = 170;
         launchBtn.Height = 40;
         launchBtn.AutoSize = false;
         launchBtn.Anchor = AnchorStyles.Right;
         launchBtn.Margin = new Padding(0, 8, 8, 0);
+        launchBtn.BackColor = Color.FromArgb(45, 90, 55);
+        launchBtn.ForeColor = Color.FromArgb(225, 240, 230);
+        launchBtn.FlatAppearance.BorderColor = Color.FromArgb(90, 160, 100);
+        launchBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 115, 70);
+        launchBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 70, 45);
         launchBtn.Click += (_, _) => LaunchVostok();
         titleRow.Controls.Add(launchBtn, 2, 0);
 
