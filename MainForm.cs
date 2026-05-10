@@ -466,7 +466,7 @@ public class MainForm : Form
         grid.Columns.Add(new DataGridViewLinkColumn
         {
             Name = "Update",
-            HeaderText = "Upd",
+            HeaderText = "Updt",
             Width = 50,
             ReadOnly = true,
             TrackVisitedState = false,
@@ -498,7 +498,7 @@ public class MainForm : Form
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Priority",
-            HeaderText = "Prio",
+            HeaderText = "LoadOrd",
             Width = 50,
             // Editable in-place — commits write the new value to
             // mod_config.cfg's [profile.<active>.priority] block.
