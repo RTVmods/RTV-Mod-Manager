@@ -1223,6 +1223,14 @@ public class MainForm : Form
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Capture scroll state before Rows.Clear() so toggling a
+        // mod 30 rows down doesn't snap us back to row 0. Both the
+        // first-displayed-row and the selected-row indexes
+        // survive the rebuild since the load-order sort means
+        // each mod stays at the same row index across rescans.
+        var topRowBefore = _modsGrid.FirstDisplayedScrollingRowIndex;
+        var selectedRowBefore = _modsGrid.CurrentRow?.Index ?? -1;
+
         // Guard the CellValueChanged handler — setting the checkbox
         // value programmatically would otherwise be indistinguishable
         // from a user click and would re-toggle the mod.
@@ -1259,6 +1267,21 @@ public class MainForm : Form
         {
             _modsGrid.ResumeLayout();
             _populatingMods = false;
+        }
+
+        // Restore scroll + selection. Wrapped in try/catch because
+        // FirstDisplayedScrollingRowIndex throws if the grid hasn't
+        // had its handle created yet, or if the index is out of
+        // range after a filter that shrank the row count.
+        if (topRowBefore >= 0 && topRowBefore < _modsGrid.RowCount)
+        {
+            try { _modsGrid.FirstDisplayedScrollingRowIndex = topRowBefore; }
+            catch { /* benign — first paint hasn't happened yet */ }
+        }
+        if (selectedRowBefore >= 0 && selectedRowBefore < _modsGrid.RowCount)
+        {
+            _modsGrid.ClearSelection();
+            _modsGrid.Rows[selectedRowBefore].Selected = true;
         }
     }
 
@@ -1834,7 +1857,15 @@ public class MainForm : Form
             var cellValue = _modsGrid.Rows[e.RowIndex].Cells["Enabled"].Value;
             var nowChecked = cellValue is bool b && b;
             if (nowChecked == entry.IsEnabled) return;
-            ToggleMod(entry);
+            // Defer the registry rescan + grid rebuild so the
+            // CellValueChanged callback can return first. Tearing
+            // down rows synchronously inside this handler leaves
+            // DataGridView's edit-state machine half-committed —
+            // the checkbox's visual tick doesn't redraw until the
+            // user clicks somewhere else. BeginInvoke posts the
+            // work back to the message loop, after WinForms has
+            // finished its internal commit cycle.
+            BeginInvoke(() => ToggleMod(entry));
             return;
         }
 
