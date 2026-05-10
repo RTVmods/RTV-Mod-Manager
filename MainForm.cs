@@ -1882,7 +1882,7 @@ public class MainForm : Form
             row.Cells["Resolve"].ToolTipText = ResolveButtonTooltip(c);
             row.Cells["Type"].Value = c.Type;
             row.Cells["Key"].Value = c.Key;
-            row.Cells["Mods"].Value = string.Join(", ", c.ModIds.Select(ModNameForCell));
+            row.Cells["Mods"].Value = string.Join(", ", OrderedModNames(c.ModIds));
             var (winnerText, winnerColor, winnerTip) = DetermineWinner(c);
             row.Cells["Wins"].Value = winnerText;
             row.Cells["Wins"].ToolTipText = winnerTip;
@@ -2012,6 +2012,35 @@ public class MainForm : Form
     {
         var entry = _registry.FindById(idOrFilename);
         return entry != null ? DisplayLabel(entry) : idOrFilename;
+    }
+
+    /// <summary>Maps + ORDERS conflict-row ids by current
+    /// load-order priority (ascending — earliest-loading first,
+    /// latest-loading last). The last name in the result is
+    /// therefore the same mod as the one in the Wins column for
+    /// "last write wins" conflict types. Unresolvable ids
+    /// (missing mods, filenames in duplicate_mod_id) sort after
+    /// the resolvable ones, ordered alphabetically among
+    /// themselves.</summary>
+    private IEnumerable<string> OrderedModNames(IEnumerable<string> ids)
+    {
+        var idList = ids.ToList();
+        var resolved = new List<(string label, int priority)>();
+        var unresolved = new List<string>();
+        foreach (var id in idList)
+        {
+            var entry = _registry.FindById(id);
+            if (entry != null)
+                resolved.Add((DisplayLabel(entry), entry.Priority));
+            else
+                unresolved.Add(id);
+        }
+        return resolved
+            .OrderBy(t => t.priority)
+            .ThenBy(t => t.label, StringComparer.OrdinalIgnoreCase)
+            .Select(t => t.label)
+            .Concat(unresolved.OrderBy(
+                s => s, StringComparer.OrdinalIgnoreCase));
     }
 
     private string ResolveButtonTooltip(ConflictDetector.Conflict c)
