@@ -499,11 +499,23 @@ public class MainForm : Form
         {
             Name = "Priority",
             HeaderText = "LoadOrd",
-            Width = 50,
+            // 100px to fit the wider header text + bigger cell font
+            // without truncating multi-digit values like -100 / 922.
+            Width = 100,
             // Editable in-place — commits write the new value to
             // mod_config.cfg's [profile.<active>.priority] block.
             ReadOnly = false,
-            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight },
+            DefaultCellStyle =
+            {
+                // Center alignment so the load-order numbers read as
+                // their own visual column rather than rag-right
+                // against the (auto-fill) Mod column boundary.
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                // Bigger numeric font so the load order is glanceable
+                // at a distance — these are the values the user
+                // tweaks to fix dependency_order conflicts.
+                Font = new Font("Consolas", 14f, FontStyle.Bold),
+            },
         });
         // Mod (Fill) goes LAST so every other column has a draggable
         // right edge. With Mod in the middle, Prio (last) had no

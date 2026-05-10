@@ -39,9 +39,9 @@ public class SettingsDialog : Form
         // minimum a bit larger than what fits today so subsequent
         // small layout tweaks don't immediately re-introduce
         // clipping.
-        MinimumSize = new Size(840, 580);
+        MinimumSize = new Size(840, 660);
         Width = 920;
-        Height = 620;
+        Height = 700;
         ShowInTaskbar = false;
         Padding = new Padding(18, 16, 18, 16);
 
@@ -72,6 +72,20 @@ public class SettingsDialog : Form
             current.ModsDir,
             isFolder: true);
 
+        // The OS title-bar font is system-controlled and looks tiny
+        // next to our 13pt body text. Add a big in-form title label
+        // so users get a properly-sized visual heading without us
+        // trying to repaint the non-client area.
+        var titleLabel = new Label
+        {
+            Text = "Settings",
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Font = new Font("Segoe UI", 22f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(220, 225, 235),
+            Margin = new Padding(0, 0, 0, 12),
+        };
+
         // Add in reverse so Top-dock children stack with the first-
         // added at the bottom (closest to the docked edge processed
         // last by WinForms).
@@ -80,6 +94,7 @@ public class SettingsDialog : Form
         Controls.Add(decompPanel);
         Controls.Add(claudePanel);
         Controls.Add(modsPanel);
+        Controls.Add(titleLabel);
     }
 
     private TextBox AddPathSection(
@@ -131,12 +146,17 @@ public class SettingsDialog : Form
             ForeColor = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
             Font = new Font("Consolas", 13f),
-            Top = 4, Left = 0, Width = 600,
+            Top = 6, Left = 0, Width = 600, Height = 32,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
         var browse = MainForm.ThemedButton("Browse…");
         browse.Top = 2;
         browse.Width = 110;
+        // Explicit Height — without this, the Button keeps its
+        // pre-AutoSize-disabled internal size (~23px) and clips
+        // the bumped 13pt text. 40px matches the dialog's Save /
+        // Cancel buttons for visual consistency.
+        browse.Height = 40;
         browse.AutoSize = false;
         browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         browse.Click += (_, _) => DoBrowse(box, isFolder);
@@ -211,12 +231,14 @@ public class SettingsDialog : Form
             Margin = new Padding(0, 12, 0, 0),
         };
         var save = MainForm.ThemedButton("Save");
-        save.Width = 100;
+        save.Width = 110;
+        save.Height = 40;
         save.AutoSize = false;
         save.DialogResult = DialogResult.OK;
         save.Click += (_, _) => CommitAndClose();
         var cancel = MainForm.ThemedButton("Cancel");
-        cancel.Width = 100;
+        cancel.Width = 110;
+        cancel.Height = 40;
         cancel.AutoSize = false;
         cancel.DialogResult = DialogResult.Cancel;
         cancel.Click += (_, _) => Close();
