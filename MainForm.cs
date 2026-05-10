@@ -284,9 +284,21 @@ public class MainForm : Form
             WrapInPanel("Installed mods", _modsGrid, BuildModsToolbar()));
 
         // Right: interactive conflicts grid with Resolve button.
+        // Empty spacer toolbar of the same height as the mods
+        // toolbar (48px) so the two grids' column headers vertically
+        // align — without it the conflicts headers floated up to the
+        // top of the panel while the mods headers sat below the
+        // toolbar, looking misaligned across the splitter.
         _conflictsGrid = BuildConflictsGrid();
         ApplyColumnWidths(_conflictsGrid, "conflicts");
-        split.Panel2.Controls.Add(WrapInPanel("Conflicts", _conflictsGrid));
+        var conflictsSpacer = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 48,
+            BackColor = Color.Transparent,
+        };
+        split.Panel2.Controls.Add(
+            WrapInPanel("Conflicts", _conflictsGrid, conflictsSpacer));
 
         // Mods is the primary view — give it ~62% of the width by
         // default, or whatever ratio the user dragged it to last
@@ -1031,12 +1043,16 @@ public class MainForm : Form
     {
         var bar = new TableLayoutPanel
         {
-            Height = 32,
+            // 48px = bumped-button Height (40) + top/bottom padding
+            // (4 + 4). Used as the canonical toolbar height; the
+            // conflicts grid gets a same-height empty spacer so its
+            // column headers vertically line up with the mods grid's.
+            Height = 48,
             Dock = DockStyle.Top,
             ColumnCount = 6,
             RowCount = 1,
             BackColor = Color.Transparent,
-            Padding = new Padding(0, 2, 0, 4),
+            Padding = new Padding(0, 4, 0, 4),
         };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
