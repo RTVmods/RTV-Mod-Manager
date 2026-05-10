@@ -69,12 +69,14 @@ public class TextInputDialog : Form
             Margin = new Padding(0, 12, 0, 0),
         };
         var ok = MainForm.ThemedButton("OK");
-        ok.Width = 90;
+        ok.Width = 100;
+        ok.Height = 40;
         ok.AutoSize = false;
         ok.DialogResult = DialogResult.OK;
         ok.Click += (_, _) => { Result = input.Text; Close(); };
         var cancel = MainForm.ThemedButton("Cancel");
-        cancel.Width = 90;
+        cancel.Width = 100;
+        cancel.Height = 40;
         cancel.AutoSize = false;
         cancel.DialogResult = DialogResult.Cancel;
         cancel.Click += (_, _) => { Result = ""; Close(); };

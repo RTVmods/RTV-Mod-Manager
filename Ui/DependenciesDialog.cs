@@ -13,14 +13,19 @@ public class DependenciesDialog : Form
     public DependenciesDialog(ModEntry subject, IReadOnlyDictionary<string, ModEntry> registry)
     {
         Text = $"Dependencies — {DisplayLabel(subject)}";
-        MinimumSize = new Size(540, 320);
-        Width = 620;
-        Height = 460;
+        // Sized for the +2pt-bumped fonts. Old 320/460 clipped the
+        // Close button at the bottom and the Kind/Status columns
+        // didn't have room for the bumped text. Switched away from
+        // SizableToolWindow because that border lacks a title-bar
+        // icon area, making the dialog feel cramped at large sizes.
+        MinimumSize = new Size(700, 480);
+        Width = 820;
+        Height = 580;
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 12f);
-        FormBorderStyle = FormBorderStyle.SizableToolWindow;
+        FormBorderStyle = FormBorderStyle.Sizable;
         ShowInTaskbar = false;
 
         var root = new TableLayoutPanel
@@ -70,10 +75,14 @@ public class DependenciesDialog : Form
             Font = new Font("Consolas", 12f),
             OwnerDraw = false,
         };
-        list.Columns.Add("State", 70);
-        list.Columns.Add("Mod ID", 200);
-        list.Columns.Add("Kind", 80);
-        list.Columns.Add("Status", 220);
+        // Column widths sized for 12pt bumped fonts. "Kind" needs
+        // ~110px to fit "required" without truncation, and Status
+        // grew because its longest message ("Installed but
+        // currently disabled") doesn't fit at the old 220.
+        list.Columns.Add("State", 80);
+        list.Columns.Add("Mod ID", 240);
+        list.Columns.Add("Kind", 110);
+        list.Columns.Add("Status", 320);
         AddRows(list, required, kind: "required", registry);
         AddRows(list, optional, kind: "optional", registry);
         root.Controls.Add(list, 0, 1);
@@ -87,7 +96,11 @@ public class DependenciesDialog : Form
             Margin = new Padding(0, 12, 0, 0),
         };
         var close = MainForm.ThemedButton("Close (Esc)");
-        close.Width = 110;
+        close.Width = 130;
+        // Explicit Height for the same reason every other dialog
+        // got one — Button defaults to ~23px when AutoSize is
+        // disabled, which clips the 12pt body font.
+        close.Height = 40;
         close.AutoSize = false;
         close.DialogResult = DialogResult.OK;
         close.Click += (_, _) => Close();

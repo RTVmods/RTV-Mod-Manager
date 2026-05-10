@@ -58,7 +58,8 @@ public class ResolutionDialog : Form
             BackColor = Color.Transparent,
         };
         var close = MainForm.ThemedButton("Close (Esc)");
-        close.Width = 110;
+        close.Width = 130;
+        close.Height = 40;
         close.AutoSize = false;
         close.DialogResult = DialogResult.OK;
         close.Click += (_, _) => Close();

@@ -154,7 +154,8 @@ public class DependencyPickerDialog : Form
         var add = MainForm.ThemedButton("Add");
         add.Top = 4;
         add.Left = 460;
-        add.Width = 70;
+        add.Width = 80;
+        add.Height = 40;
         add.AutoSize = false;
         add.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         var localBox = box;
@@ -181,17 +182,19 @@ public class DependencyPickerDialog : Form
         {
             FlowDirection = FlowDirection.RightToLeft,
             Dock = DockStyle.Bottom,
-            Height = 48,
+            Height = 56,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 12, 0, 0),
         };
         var ok = MainForm.ThemedButton("OK");
-        ok.Width = 90;
+        ok.Width = 100;
+        ok.Height = 40;
         ok.AutoSize = false;
         ok.DialogResult = DialogResult.OK;
         ok.Click += (_, _) => { Result = _checked.ToList(); Close(); };
         var cancel = MainForm.ThemedButton("Cancel");
-        cancel.Width = 90;
+        cancel.Width = 100;
+        cancel.Height = 40;
         cancel.AutoSize = false;
         cancel.DialogResult = DialogResult.Cancel;
         cancel.Click += (_, _) => { Result.Clear(); Close(); };
