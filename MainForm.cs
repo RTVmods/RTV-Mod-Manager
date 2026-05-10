@@ -120,6 +120,106 @@ public class MainForm : Form
         }
     }
 
+    /// <summary>Soviet-aesthetic decorations painted on the form's
+    /// background BEHIND every control. Three layers:
+    ///   1. weathered noise texture (subtle stippled greys)
+    ///   2. faux-Cyrillic watermark (large diagonal stencil-style
+    ///      banner — `★ ВФSТФК ★ МФD ★ МАNАGЕЯ ★`)
+    ///   3. red stencil divider with a `★ MOD CATALOG ★` label below
+    ///      the title row
+    /// All layered at low opacity so the actual UI text on top
+    /// stays primary. Repainted on every form resize.</summary>
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        base.OnPaintBackground(e);
+        PaintSovietDecorations(e.Graphics);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        // Repaint background so the watermark + divider follow the
+        // new form size. Children invalidate themselves naturally.
+        Invalidate();
+    }
+
+    private void PaintSovietDecorations(Graphics g)
+    {
+        var w = ClientSize.Width;
+        var h = ClientSize.Height;
+        if (w <= 0 || h <= 0) return;
+
+        // --- Layer 1: weathered noise (cached + tiled) ----------
+        var noise = GetOrBuildNoise();
+        for (var ny = 0; ny < h; ny += noise.Height)
+            for (var nx = 0; nx < w; nx += noise.Width)
+                g.DrawImageUnscaled(noise, nx, ny);
+
+        // --- Layer 2: huge faded faux-Cyrillic watermark --------
+        // Tilted, drawn with VERY low alpha so UI text reads cleanly
+        // on top.
+        var prev = g.SmoothingMode;
+        var prevText = g.TextRenderingHint;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        var watermark = "★ ВФSТФК ★ МФD ★ МАNАGЕЯ ★";
+        using (var wf = new Font("Impact", 110f, FontStyle.Bold))
+        using (var wb = new SolidBrush(Color.FromArgb(22, 200, 200, 220)))
+        {
+            var st = g.Save();
+            g.TranslateTransform(50, h * 0.36f);
+            g.RotateTransform(-6f);
+            g.DrawString(watermark, wf, wb, 0, 0);
+            g.Restore(st);
+        }
+
+        // --- Layer 3: stencil divider with "★ MOD CATALOG ★" label
+        // Just below the title row. The label uses Latin so it stays
+        // readable; the faux-Cyrillic is reserved for purely
+        // decorative elements (watermark above).
+        var dividerY = 100f;
+        using (var dp = new Pen(Color.FromArgb(110, 200, 50, 60), 2f))
+            g.DrawLine(dp, 24, dividerY, w - 24, dividerY);
+        var label = "★  MOD  CATALOG  ★";
+        using (var lf = new Font("Consolas", 12f, FontStyle.Bold))
+        using (var bgBrush = new SolidBrush(BackColor))
+        using (var lb = new SolidBrush(Color.FromArgb(220, 200, 50, 60)))
+        {
+            var sz = g.MeasureString(label, lf);
+            var labelX = (w - sz.Width) / 2f;
+            // Erase the line behind the label so the text floats on
+            // a clean background.
+            g.FillRectangle(bgBrush, labelX - 12, dividerY - sz.Height / 2f,
+                sz.Width + 24, sz.Height);
+            g.DrawString(label, lf, lb, labelX, dividerY - sz.Height / 2f);
+        }
+        g.SmoothingMode = prev;
+        g.TextRenderingHint = prevText;
+    }
+
+    /// <summary>Cached noise texture. Built once at lazy first-use
+    /// (small, 256x256 tile that we DrawImageUnscaled across the
+    /// form). Static so it survives MainForm reconstruction in
+    /// case we ever support multiple instances.</summary>
+    private static Bitmap? _noiseTile;
+    private static Bitmap GetOrBuildNoise()
+    {
+        if (_noiseTile != null) return _noiseTile;
+        const int size = 256;
+        var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var rand = new Random(42);
+        for (var y = 0; y < size; y += 2)
+        {
+            for (var x = 0; x < size; x += 2)
+            {
+                if (rand.Next(0, 8) < 3)
+                    bmp.SetPixel(x, y, Color.FromArgb(8, 200, 200, 200));
+            }
+        }
+        _noiseTile = bmp;
+        return _noiseTile;
+    }
+
     private void InitializeWindow()
     {
         Text = "Vostok Mod Manager";
@@ -221,18 +321,37 @@ public class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
 
-        // Title row hosts the title + a Settings button on the right.
+        // Title row: [star] [title] [Launch] [Settings]
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 2,
+            ColumnCount = 4,
             RowCount = 1,
             AutoSize = true,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8),
         };
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // star
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f)); // title (fills)
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // launch
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // settings
+
+        // Decorative red star ornament next to the title — pure
+        // soviet-aesthetic flourish, no behaviour. Painted via
+        // OnPaint so it can be a proper polygon at any DPI.
+        var titleStar = new Panel
+        {
+            Width = 44,
+            Height = 44,
+            BackColor = Color.Transparent,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 8, 12, 0),
+        };
+        titleStar.Paint += (s, e) => DrawStar(
+            e.Graphics, 22, 22, 18,
+            Color.FromArgb(220, 200, 50, 60));
+        titleRow.Controls.Add(titleStar, 0, 0);
+
         var title = new Label
         {
             Text = "Vostok Mod Manager",
@@ -240,18 +359,26 @@ public class MainForm : Form
             AutoSize = true,
             Anchor = AnchorStyles.Left,
         };
-        titleRow.Controls.Add(title, 0, 0);
+        titleRow.Controls.Add(title, 1, 0);
+
+        var launchBtn = ThemedButton("▶ Launch Vostok");
+        launchBtn.Width = 170;
+        launchBtn.Height = 40;
+        launchBtn.AutoSize = false;
+        launchBtn.Anchor = AnchorStyles.Right;
+        launchBtn.Margin = new Padding(0, 8, 8, 0);
+        launchBtn.Click += (_, _) => LaunchVostok();
+        titleRow.Controls.Add(launchBtn, 2, 0);
+
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
-        // Explicit Height — without this, the button keeps the
-        // WinForms default 23px and clips its text (especially with
-        // the +2pt-bumped 12pt body font).
         settingsBtn.Height = 40;
         settingsBtn.AutoSize = false;
         settingsBtn.Anchor = AnchorStyles.Right;
         settingsBtn.Margin = new Padding(0, 8, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn, 1, 0);
+        titleRow.Controls.Add(settingsBtn, 3, 0);
+
         root.Controls.Add(titleRow, 0, 0);
 
         _setupBanner = BuildSetupBanner();
@@ -1041,7 +1168,47 @@ public class MainForm : Form
             p.Controls.Add(toolbar);
         }
         p.Controls.Add(hdr);
+        // Military crate-corner brackets around the body. Drawn on
+        // the wrapper Panel's surface so they sit just outside the
+        // grid's edges. Repainted on resize automatically because
+        // Panel.Paint fires after Dock-driven re-layouts.
+        p.Paint += (s, e) =>
+        {
+            var bodyBounds = body.Bounds;
+            // Stretch a few px outward so the brackets frame the
+            // grid rather than overlap the grid's own border.
+            var rect = new Rectangle(
+                bodyBounds.Left - 4, bodyBounds.Top - 4,
+                bodyBounds.Width + 8, bodyBounds.Height + 8);
+            DrawCrateCorners(e.Graphics, rect,
+                Color.FromArgb(180, 200, 50, 60),
+                size: 22, thickness: 3);
+        };
         return p;
+    }
+
+    /// <summary>Draws four "L"-shaped corner marks just inside the
+    /// rectangle, like the rope-handle reinforcements on a military
+    /// crate. Cheap visual frame without a full border.</summary>
+    private static void DrawCrateCorners(
+        Graphics g, Rectangle r, Color color, int size, float thickness)
+    {
+        using var pen = new Pen(color, thickness);
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        // Top-left
+        g.DrawLine(pen, r.Left, r.Top, r.Left + size, r.Top);
+        g.DrawLine(pen, r.Left, r.Top, r.Left, r.Top + size);
+        // Top-right
+        g.DrawLine(pen, r.Right, r.Top, r.Right - size, r.Top);
+        g.DrawLine(pen, r.Right, r.Top, r.Right, r.Top + size);
+        // Bottom-left
+        g.DrawLine(pen, r.Left, r.Bottom, r.Left + size, r.Bottom);
+        g.DrawLine(pen, r.Left, r.Bottom, r.Left, r.Bottom - size);
+        // Bottom-right
+        g.DrawLine(pen, r.Right, r.Bottom, r.Right - size, r.Bottom);
+        g.DrawLine(pen, r.Right, r.Bottom, r.Right, r.Bottom - size);
+        g.SmoothingMode = prev;
     }
 
     private Control BuildModsToolbar()
@@ -2453,6 +2620,61 @@ public class MainForm : Form
     }
 
     // --- settings + setup banner ----------------------------------
+
+    /// <summary>Launches Road to Vostok via Steam. Auto-detects the
+    /// app id from the steamapps appmanifest matching the parent of
+    /// our ModsDir, then fires steam://rungameid/&lt;id&gt;. Steam
+    /// integration matters for achievements, playtime, and the
+    /// in-game overlay — we don't try to launch the .exe directly.
+    /// Falls back to a clear error message when detection fails.</summary>
+    private void LaunchVostok()
+    {
+        var appId = SteamLauncher.FindAppId(ModsDir);
+        if (appId <= 0)
+        {
+            MessageBox.Show(this,
+                "Couldn't find Road to Vostok's Steam app id.\n\n"
+                + $"Expected an appmanifest_*.acf in:\n  "
+                + $"{Path.GetDirectoryName(Path.GetDirectoryName(ModsDir)) ?? "(unknown)"}\n"
+                + "with installdir matching the game folder.\n\n"
+                + "Either the Mods folder isn't under a Steam library, "
+                + "or you've moved the game outside of Steam. Launch "
+                + "from your Steam library directly.",
+                "Can't launch via Steam",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!SteamLauncher.LaunchAppId(appId))
+        {
+            MessageBox.Show(this,
+                $"Steam protocol launch failed for app id {appId}. "
+                + "Is Steam installed and running?",
+                "Launch failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _modsLabel.Text = $"Launching Vostok via Steam (app id {appId})…";
+    }
+
+    /// <summary>Five-pointed star polygon, used for the title-row
+    /// ornament + the watermark separators. Filled solid.</summary>
+    internal static void DrawStar(Graphics g, float cx, float cy, float r, Color color)
+    {
+        var pts = new PointF[10];
+        for (var i = 0; i < 10; i++)
+        {
+            var rr = (i % 2 == 0) ? r : r * 0.4f;
+            var angle = (i * 36 - 90) * Math.PI / 180.0;
+            pts[i] = new PointF(
+                cx + (float)(Math.Cos(angle) * rr),
+                cy + (float)(Math.Sin(angle) * rr));
+        }
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var brush = new SolidBrush(color);
+        g.FillPolygon(brush, pts);
+        g.SmoothingMode = prev;
+    }
 
     /// <summary>Opens the Settings modal. On Save the dialog has
     /// already updated the Settings instance fields; we persist
