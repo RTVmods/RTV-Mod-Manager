@@ -62,6 +62,8 @@ public class MainForm : Form
     private Label _modsLabel = null!;
     private Label _updatesLabel = null!;
     private Label _conflictsLabel = null!;
+    private Label _mmlLabel = null!;
+    private readonly MmlVersionChecker _mml = new();
     private DataGridView _modsGrid = null!;
     private DataGridView _conflictsGrid = null!;
     private Panel _setupBanner = null!;
@@ -311,15 +313,13 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            // 7 rows: title (0), banner (1), Claude/Mods/Updates/
-            // Conflicts status labels (2-5), split (6, fills).
-            // Path rows moved to a Settings dialog — frees ~120px
-            // of vertical space at the top of the main form.
-            RowCount = 7,
+            // 8 rows: title (0), banner (1), Claude/Mods/Updates/
+            // Conflicts/MML status labels (2-6), split (7, fills).
+            RowCount = 8,
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 7; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
@@ -414,6 +414,17 @@ public class MainForm : Form
         _conflictsLabel = NewStatus("Conflicts: —");
         root.Controls.Add(_conflictsLabel, 0, 5);
 
+        // MML latest-release indicator. Click opens the GitHub
+        // releases page in the user's default browser. We only know
+        // the LATEST published release here — installed-version
+        // detection isn't implemented because MML ships as a Godot
+        // .pck and reading its internal VERSION constant requires
+        // pck-walking we don't do today.
+        _mmlLabel = NewStatus("MML: checking …");
+        _mmlLabel.Cursor = Cursors.Hand;
+        _mmlLabel.Click += (_, _) => OpenMmlReleasesPage();
+        root.Controls.Add(_mmlLabel, 0, 6);
+
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
@@ -496,7 +507,7 @@ public class MainForm : Form
             ratio = observed;
             _settings.SplitterRatio = ratio;
         };
-        root.Controls.Add(split, 0, 6);
+        root.Controls.Add(split, 0, 7);
         Shown += (_, _) =>
         {
             ApplySplit();
@@ -1333,6 +1344,73 @@ public class MainForm : Form
         PopulateConflictsList(_lastConflicts);
 
         await CheckUpdatesAsync();
+        await CheckMmlVersionAsync();
+    }
+
+    /// <summary>Polls GitHub for the latest MML release tag and
+    /// updates the MML status label. Uses the cached value from
+    /// settings.json when it's &lt;24h old; otherwise re-fetches and
+    /// caches. Network failures fall through to the cached value
+    /// when available; otherwise the label says "(check failed)".</summary>
+    private async Task CheckMmlVersionAsync(bool forceFresh = false)
+    {
+        if (!forceFresh && _settings.IsMmlCacheFresh)
+        {
+            RenderMmlLabel(
+                _settings.MmlLatestTag, _settings.MmlLatestUrl,
+                fromCache: true);
+            return;
+        }
+        _mmlLabel.Text = "MML: checking for latest release …";
+        var release = await _mml.FetchLatestAsync();
+        if (release == null)
+        {
+            // Fall back to cache if we have one — beats showing
+            // "(check failed)" while a stale-but-useful tag is
+            // sitting in settings.
+            if (!string.IsNullOrEmpty(_settings.MmlLatestTag))
+                RenderMmlLabel(
+                    _settings.MmlLatestTag, _settings.MmlLatestUrl,
+                    fromCache: true);
+            else
+                _mmlLabel.Text =
+                    "MML: latest-version check failed (offline?). "
+                    + "Click to open the releases page.";
+            return;
+        }
+        _settings.MmlLatestTag = release.TagName;
+        _settings.MmlLatestUrl = release.HtmlUrl;
+        _settings.MmlCheckedAt = DateTime.UtcNow.ToString("o");
+        try { _settings.Save(); }
+        catch { /* best-effort */ }
+        RenderMmlLabel(release.TagName, release.HtmlUrl, fromCache: false);
+    }
+
+    private void RenderMmlLabel(string tag, string url, bool fromCache)
+    {
+        var freshness = fromCache ? " (cached)" : "";
+        var safeTag = string.IsNullOrEmpty(tag) ? "(unknown)" : tag;
+        _mmlLabel.Text =
+            $"MML: latest release {safeTag}{freshness} — click to open releases page.";
+    }
+
+    private void OpenMmlReleasesPage()
+    {
+        var url = !string.IsNullOrEmpty(_settings.MmlLatestUrl)
+            ? _settings.MmlLatestUrl
+            : "https://github.com/ametrocavich/vostok-mod-loader/releases";
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't open browser", ex);
+        }
     }
 
     // --- status / list rendering ----------------------------------

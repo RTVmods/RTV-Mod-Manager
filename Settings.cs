@@ -35,6 +35,33 @@ public class Settings
     /// was last refreshed. Empty when no check has run yet.</summary>
     public string CacheTimestamp { get; set; } = "";
 
+    /// <summary>Latest MML (Vostok Mod Loader) release tag fetched
+    /// from GitHub's releases/latest endpoint. Empty when no check
+    /// has run yet.</summary>
+    public string MmlLatestTag { get; set; } = "";
+
+    /// <summary>HTML page URL for the latest MML release (clickable
+    /// in the status row).</summary>
+    public string MmlLatestUrl { get; set; } = "";
+
+    /// <summary>ISO-8601 timestamp of the last successful MML
+    /// version check. We re-poll once per 24h.</summary>
+    public string MmlCheckedAt { get; set; } = "";
+
+    [JsonIgnore]
+    public bool IsMmlCacheFresh
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(MmlLatestTag)) return false;
+            if (!DateTime.TryParse(
+                    MmlCheckedAt, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out var t)) return false;
+            return (DateTime.UtcNow - t) < TimeSpan.FromHours(24);
+        }
+    }
+
     /// <summary>Snapshot of mod descriptions fetched from
     /// /mods/&lt;id&gt;. Keyed by mod_workshop_id (as string for JSON
     /// compatibility), value is the description text. Populated
