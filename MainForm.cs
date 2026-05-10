@@ -1116,27 +1116,27 @@ public class MainForm : Form
             HeaderText = "Mods",
             Width = 220,
         });
-        // "Wins" — which mod currently wins this conflict given the
-        // load order. Computed in PopulateConflictsList by
-        // DetermineWinner; semantics depend on conflict type
-        // (highest priority wins for overlap/autoload/hook/etc.;
-        // hard fail for class_name; "needs <dep>" for missing
-        // dependency; etc.). Cell text colour-coded by outcome.
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "Wins",
-            HeaderText = "Wins",
-            Width = 220,
-        });
-        // Key (Fill) goes last for the same reason Mod is last in
-        // the mods grid: gives Wins a draggable right edge and lets
-        // Key absorb leftover width without needing a drag handle.
+        // Key (Fill) absorbs whatever leftover width remains so the
+        // Wins column can sit at the right edge with a fixed
+        // sensible size.
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Key",
             HeaderText = "Key",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 100,
+        });
+        // "Wins" — which mod currently wins this conflict given the
+        // load order. Last column on the right (per user preference).
+        // Computed in PopulateConflictsList by DetermineWinner;
+        // semantics depend on conflict type. Cell text shows the
+        // mod's DisplayName (falling back to mod_id when the
+        // manifest doesn't declare a name).
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Wins",
+            HeaderText = "Wins",
+            Width = 260,
         });
         // Suppress the button chrome on empty Resolve cells so
         // non-resolvable conflict rows (everything except
@@ -1957,8 +1957,8 @@ public class MainForm : Form
                 // These are ordering constraints, not winner-takes-
                 // all conflicts. The mod that loads LAST is the one
                 // whose behaviour the player ultimately sees.
-                var lateMod = HighestPriorityModId(c.ModIds);
-                return (string.IsNullOrEmpty(lateMod) ? "—" : lateMod,
+                var lateMod = HighestPriorityMod(c.ModIds);
+                return (lateMod == null ? "—" : DisplayLabel(lateMod),
                     defaultColor,
                     "Late-loading side of the order constraint — its "
                     + "overrides land last in the chain.");
@@ -1966,34 +1966,40 @@ public class MainForm : Form
             default:
                 // file_overlap, autoload, hook, script_extend,
                 // take_over — last write wins.
-                var winner = HighestPriorityModId(c.ModIds);
-                if (string.IsNullOrEmpty(winner))
+                var winner = HighestPriorityMod(c.ModIds);
+                if (winner == null)
                     return ("—", mutedColor, "Couldn't resolve any "
                         + "involved mod against the registry.");
-                return (winner, greenColor,
+                return (DisplayLabel(winner), greenColor,
                     "Highest priority value (loads last) → its "
                     + "version is what the game actually sees.");
         }
     }
 
-    /// <summary>Among the given mod_ids, returns the one with the
-    /// highest Priority value (= loads last). Falls back to
-    /// alphabetical order on ties; returns "" when none of the ids
-    /// resolve against the registry.</summary>
-    private string HighestPriorityModId(IEnumerable<string> modIds)
+    /// <summary>Among the given mod_ids, returns the ModEntry with
+    /// the highest Priority value (= loads last). Falls back to
+    /// alphabetical mod_id ordering on ties; returns null when
+    /// none of the ids resolve against the registry.</summary>
+    private ModEntry? HighestPriorityMod(IEnumerable<string> modIds)
     {
-        var resolved = modIds
+        return modIds
             .Select(id => _registry.FindById(id))
             .Where(e => e != null)
             .Select(e => e!)
-            .ToList();
-        if (resolved.Count == 0) return "";
-        return resolved
             .OrderByDescending(e => e.Priority)
             .ThenBy(e => e.ModId, StringComparer.OrdinalIgnoreCase)
-            .First()
-            .ModId;
+            .FirstOrDefault();
     }
+
+    /// <summary>Human-readable label for a mod — DisplayName when
+    /// declared in mod.txt, falling back to mod_id (and then the
+    /// archive filename if that's also empty).</summary>
+    private static string DisplayLabel(ModEntry e)
+        => !string.IsNullOrEmpty(e.DisplayName)
+            ? e.DisplayName
+            : !string.IsNullOrEmpty(e.ModId)
+                ? e.ModId
+                : Path.GetFileName(e.Path);
 
     private string ResolveButtonTooltip(ConflictDetector.Conflict c)
     {
