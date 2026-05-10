@@ -422,7 +422,7 @@ public class MainForm : Form
         // pck-walking we don't do today.
         _mmlLabel = NewStatus("MML: checking …");
         _mmlLabel.Cursor = Cursors.Hand;
-        _mmlLabel.Click += (_, _) => OpenMmlReleasesPage();
+        _mmlLabel.Click += async (_, _) => await HandleMmlClickAsync();
         root.Controls.Add(_mmlLabel, 0, 6);
 
         var split = new SplitContainer
@@ -1441,6 +1441,145 @@ public class MainForm : Form
         {
             ShowError("Couldn't open browser", ex);
         }
+    }
+
+    /// <summary>Click on the MML status row: when MML is outdated,
+    /// prompt to update; Yes runs the auto-update flow, No falls
+    /// through to opening the releases page in the browser.
+    /// Otherwise (up-to-date / unknown) just opens releases.</summary>
+    private async Task HandleMmlClickAsync()
+    {
+        var installed = MmlInstall.DetectInstalledVersion(ModsDir);
+        var latest = _settings.MmlLatestTag;
+        if (string.IsNullOrEmpty(installed)
+            || string.IsNullOrEmpty(latest)
+            || CompareVersions(installed, latest) >= 0)
+        {
+            OpenMmlReleasesPage();
+            return;
+        }
+
+        var dr = MessageBox.Show(this,
+            $"MML v{installed} is installed; latest is v{latest}.\n\n"
+            + $"Download v{latest}'s `modloader.gd` and `override.cfg` "
+            + "and replace the files in your game folder?\n\n"
+            + "Existing files will be backed up first as "
+            + "<name>.<timestamp>.bak alongside the originals — "
+            + "if anything looks wrong after launch, restore the "
+            + ".bak files manually.\n\n"
+            + "Yes  →  download + install\n"
+            + "No   →  just open the releases page in the browser",
+            "Update MML?",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button1);
+        if (dr == DialogResult.Yes) await UpdateMmlAsync(latest);
+        else if (dr == DialogResult.No) OpenMmlReleasesPage();
+        // Cancel = no-op
+    }
+
+    /// <summary>Downloads `modloader.gd` and `override.cfg` from the
+    /// given tag's release assets, backs up any existing copies in
+    /// the game folder, and atomically replaces them. Both files
+    /// are downloaded to .download temp paths first so a mid-
+    /// transfer failure on the second file leaves the first one's
+    /// original in place untouched.</summary>
+    private async Task UpdateMmlAsync(string tag)
+    {
+        var gameDir = Path.GetDirectoryName(ModsDir);
+        if (string.IsNullOrEmpty(gameDir) || !Directory.Exists(gameDir))
+        {
+            ShowError("Game folder not found",
+                new Exception(
+                    $"Couldn't resolve the game folder from ModsDir=\n  {ModsDir}\n"
+                    + "Set the Mods folder to <game>/mods/ via Settings."));
+            return;
+        }
+        var modloaderPath = Path.Combine(gameDir, "modloader.gd");
+        var overridePath = Path.Combine(gameDir, "override.cfg");
+        var modloaderTmp = modloaderPath + ".download";
+        var overrideTmp = overridePath + ".download";
+
+        _busy = true;
+        _mmlLabel.Text = $"MML: downloading v{tag} …";
+        try
+        {
+            // Clean up any leftover .download files from a prior
+            // failed attempt before we start.
+            DeleteIfExists(modloaderTmp);
+            DeleteIfExists(overrideTmp);
+
+            await _mml.DownloadReleaseAssetAsync(tag, "modloader.gd", modloaderTmp);
+            await _mml.DownloadReleaseAssetAsync(tag, "override.cfg", overrideTmp);
+
+            // Sanity-check the downloads. modloader.gd should be a
+            // GDScript file containing the version constant; if it
+            // doesn't, something went wrong (404 page, partial
+            // download, GitHub asset moved).
+            if (!File.Exists(modloaderTmp) || new FileInfo(modloaderTmp).Length < 1000)
+                throw new InvalidDataException(
+                    "Downloaded modloader.gd looks empty / truncated.");
+            var probe = File.ReadAllText(modloaderTmp).Substring(
+                0, Math.Min(2000, (int)new FileInfo(modloaderTmp).Length));
+            if (!probe.Contains("MODLOADER_VERSION"))
+                throw new InvalidDataException(
+                    "Downloaded modloader.gd doesn't look like a real "
+                    + "MML build (no MODLOADER_VERSION constant). Aborting.");
+
+            // Backup existing files (if any). Same .timestamp.bak
+            // naming as the .vmz patch flow for consistency.
+            var stamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+            var backups = new List<string>();
+            if (File.Exists(modloaderPath))
+            {
+                var bak = $"{modloaderPath}.{stamp}.bak";
+                File.Copy(modloaderPath, bak, overwrite: false);
+                backups.Add(Path.GetFileName(bak));
+            }
+            if (File.Exists(overridePath))
+            {
+                var bak = $"{overridePath}.{stamp}.bak";
+                File.Copy(overridePath, bak, overwrite: false);
+                backups.Add(Path.GetFileName(bak));
+            }
+
+            // Move temp files into place. Both final paths use
+            // overwrite: true since we already backed them up.
+            File.Move(modloaderTmp, modloaderPath, overwrite: true);
+            File.Move(overrideTmp, overridePath, overwrite: true);
+
+            await CheckMmlVersionAsync(forceFresh: false);
+
+            var bakNote = backups.Count > 0
+                ? $"\n\nBackups: {string.Join(", ", backups)}"
+                : "\n\n(No prior install — nothing to back up.)";
+            MessageBox.Show(this,
+                $"MML updated to v{tag}.\n\n"
+                + "Restart Road to Vostok if it's running for the new "
+                + "loader to take effect."
+                + bakNote,
+                "MML updated",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            DeleteIfExists(modloaderTmp);
+            DeleteIfExists(overrideTmp);
+            ShowError("MML update failed", ex);
+        }
+        finally
+        {
+            _busy = false;
+            // Re-render in case CheckMmlVersionAsync didn't reach
+            // (e.g. exception thrown before the download finished).
+            await CheckMmlVersionAsync(forceFresh: false);
+        }
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch { /* best-effort cleanup */ }
     }
 
     // --- status / list rendering ----------------------------------

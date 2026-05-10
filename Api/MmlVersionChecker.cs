@@ -41,6 +41,35 @@ public class MmlVersionChecker
         return c;
     }
 
+    /// <summary>Downloads a single asset from a published release
+    /// (`https://github.com/.../releases/download/<tag>/<asset>`) to
+    /// the given save path. Streams the response to disk so the
+    /// 500KB modloader.gd doesn't sit fully in memory. Throws on
+    /// non-2xx HTTP — caller decides whether to clean up the
+    /// partially-written file.</summary>
+    public async Task DownloadReleaseAssetAsync(
+        string tag,
+        string assetName,
+        string savePath,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(tag))
+            throw new ArgumentException("tag must be set", nameof(tag));
+        if (string.IsNullOrEmpty(assetName))
+            throw new ArgumentException("assetName must be set", nameof(assetName));
+        var url =
+            "https://github.com/ametrocavich/vostok-mod-loader/releases/download/"
+            + Uri.EscapeDataString(tag) + "/" + Uri.EscapeDataString(assetName);
+        using var resp = await _http.GetAsync(
+            url, HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        var dir = Path.GetDirectoryName(savePath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        await using var file = File.Create(savePath);
+        await stream.CopyToAsync(file, ct);
+    }
+
     /// <summary>Fetches the latest MML release. Returns null on
     /// network/parse failure — caller decides whether to fall back
     /// to a cached value or surface the error.</summary>
