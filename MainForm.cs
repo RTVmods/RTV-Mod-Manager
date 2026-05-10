@@ -575,6 +575,11 @@ public class MainForm : Form
             BackColor = Color.FromArgb(36, 42, 54),
             ForeColor = Color.FromArgb(220, 225, 235),
             ShowImageMargin = false,
+            // ContextMenuStrip default Font is the system menu font
+            // (~9pt) which looks tiny next to the bumped 12pt body
+            // text. Match the body so right-click items read at the
+            // same scale as the rest of the UI.
+            Font = new Font("Segoe UI", 12f),
         };
         _modsContextMenu.Opening += (_, e) =>
         {
