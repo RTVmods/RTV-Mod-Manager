@@ -1882,7 +1882,7 @@ public class MainForm : Form
             row.Cells["Resolve"].ToolTipText = ResolveButtonTooltip(c);
             row.Cells["Type"].Value = c.Type;
             row.Cells["Key"].Value = c.Key;
-            row.Cells["Mods"].Value = string.Join(", ", c.ModIds);
+            row.Cells["Mods"].Value = string.Join(", ", c.ModIds.Select(ModNameForCell));
             var (winnerText, winnerColor, winnerTip) = DetermineWinner(c);
             row.Cells["Wins"].Value = winnerText;
             row.Cells["Wins"].ToolTipText = winnerTip;
@@ -2000,6 +2000,19 @@ public class MainForm : Form
             : !string.IsNullOrEmpty(e.ModId)
                 ? e.ModId
                 : Path.GetFileName(e.Path);
+
+    /// <summary>Maps a single conflict-row id (mod_id for most
+    /// types, or filename for duplicate_mod_id) to the user-
+    /// facing string that goes into the Mods cell. Resolves
+    /// against the registry to swap in DisplayName when we have
+    /// it; falls through to the raw id when the mod isn't
+    /// installed (e.g. the missing-side of a missing_dependency)
+    /// or when the id is actually a filename (duplicate_mod_id).</summary>
+    private string ModNameForCell(string idOrFilename)
+    {
+        var entry = _registry.FindById(idOrFilename);
+        return entry != null ? DisplayLabel(entry) : idOrFilename;
+    }
 
     private string ResolveButtonTooltip(ConflictDetector.Conflict c)
     {
