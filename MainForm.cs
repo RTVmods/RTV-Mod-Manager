@@ -1262,13 +1262,14 @@ public class MainForm : Form
             // column headers vertically line up with the mods grid's.
             Height = 48,
             Dock = DockStyle.Top,
-            ColumnCount = 6,
+            ColumnCount = 7,
             RowCount = 1,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 4, 0, 4),
         };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1311,9 +1312,14 @@ public class MainForm : Form
         bar.Controls.Add(disableAll, 4, 0);
 
         var refresh = ThemedButton("Refresh");
-        refresh.Margin = new Padding(0, 2, 0, 2);
+        refresh.Margin = new Padding(0, 2, 4, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
         bar.Controls.Add(refresh, 5, 0);
+
+        var profiles = ThemedButton("⊞ Profiles…");
+        profiles.Margin = new Padding(0, 2, 0, 2);
+        profiles.Click += async (_, _) => await OpenProfilesDialogAsync();
+        bar.Controls.Add(profiles, 6, 0);
 
         return bar;
     }
@@ -3166,6 +3172,26 @@ public class MainForm : Form
             PopulateConflictsList(_lastConflicts);
         }
         RefreshSetupBanner();
+    }
+
+    /// <summary>Opens the profile manager dialog. If the user applied a
+    /// profile, rescans the registry and refreshes both grids so the
+    /// result is visible immediately.</summary>
+    private async Task OpenProfilesDialogAsync()
+    {
+        using var dlg = new Ui.ProfileManagerDialog(
+            _registry, _mw, _modConfig, ModsDir);
+        dlg.ShowDialog(this);
+        if (dlg.NeedsRescan)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+            await CheckUpdatesAsync();
+        }
     }
 
     private void RefreshSetupBanner()

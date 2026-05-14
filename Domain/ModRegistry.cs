@@ -83,6 +83,39 @@ public class ModRegistry
     public ModEntry? FindById(string modId)
         => Entries.FirstOrDefault(e => e.ModId == modId);
 
+    /// <summary>Compares two version strings component by component,
+    /// parsing each component as int when both are numeric (so "1.14"
+    /// &gt; "1.13"), falling back to ordinal string compare otherwise.
+    /// Missing components are treated as 0 ("1.2" == "1.2.0").
+    /// Strips leading 'v'/'V' prefixes before parsing.</summary>
+    public static int CompareVersions(string? a, string? b)
+    {
+        a = (a ?? "").Trim().TrimStart('v', 'V');
+        b = (b ?? "").Trim().TrimStart('v', 'V');
+        if (a == b) return 0;
+        var aParts = a.Split('.');
+        var bParts = b.Split('.');
+        var n = Math.Max(aParts.Length, bParts.Length);
+        for (var i = 0; i < n; i++)
+        {
+            var ap = i < aParts.Length ? aParts[i] : "0";
+            var bp = i < bParts.Length ? bParts[i] : "0";
+            var aIsInt = int.TryParse(ap, out var ai);
+            var bIsInt = int.TryParse(bp, out var bi);
+            if (aIsInt && bIsInt)
+            {
+                var cmp = ai.CompareTo(bi);
+                if (cmp != 0) return cmp;
+            }
+            else
+            {
+                var cmp = string.CompareOrdinal(ap, bp);
+                if (cmp != 0) return cmp;
+            }
+        }
+        return 0;
+    }
+
     public List<ModEntry> Enabled()
         => Entries.Where(e => e.IsEnabled).ToList();
 
