@@ -5,7 +5,9 @@
 // Conflicts column is still a read-only ListBox; AI Resolve buttons +
 // Settings panel + resolution dialog land in the next commit.
 
+#if AI_RESOLVER
 using VostokModManager.Ai;
+#endif
 using VostokModManager.Api;
 using VostokModManager.Domain;
 using VostokModManager.Ui;
@@ -29,9 +31,13 @@ public class MainForm : Form
 
     private readonly Settings _settings;
     private readonly ModRegistry _registry = new();
+#if AI_RESOLVER
     private readonly ClaudeCodeRunner _claude = new();
+#endif
     private readonly ModWorkshopClient _mw = new();
+#if AI_RESOLVER
     private readonly ConflictResolver _resolver;
+#endif
     /// <summary>The in-game mod loader's mod_config.cfg state under
     /// %APPDATA%\Road to Vostok\. Reloaded on every Rescan so we
     /// pick up any changes the loader made between our scans;
@@ -58,7 +64,9 @@ public class MainForm : Form
     /// our own Value assignments and try to "toggle" each row.</summary>
     private bool _populatingMods;
 
+#if AI_RESOLVER
     private Label _claudeLabel = null!;
+#endif
     private Label _modsLabel = null!;
     private Label _updatesLabel = null!;
     private Label _conflictsLabel = null!;
@@ -84,11 +92,13 @@ public class MainForm : Form
     {
         _settings = Settings.Load();
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
+#if AI_RESOLVER
         _claude.OverridePath = _settings.ClaudePath;
         _resolver = new ConflictResolver(_claude, _registry)
         {
             GameSourcePath = _settings.GameSourcePath,
         };
+#endif
         InitializeWindow();
         BuildLayout();
         Shown += async (_, _) => await RunStartupAsync();
@@ -227,7 +237,11 @@ public class MainForm : Form
         // OS title bar text — kept clean Latin so Alt-Tab + the
         // taskbar list it correctly. The decorative faux-Cyrillic
         // version lives on the in-form title label.
+#if AI_RESOLVER
         Text = "Road to Vostok Mod Manager";
+#else
+        Text = "Road to Vostok Mod Manager Lite";
+#endif
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
@@ -364,7 +378,11 @@ public class MainForm : Form
         // stencil-poster flavour.
         var title = new Label
         {
+#if AI_RESOLVER
             Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ",
+#else
+            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  LITE",
+#endif
             Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
             AutoSize = true,
             Anchor = AnchorStyles.Left,
@@ -416,8 +434,15 @@ public class MainForm : Form
         _setupBanner = BuildSetupBanner();
         root.Controls.Add(_setupBanner, 0, 1);
 
+#if AI_RESOLVER
         _claudeLabel = NewStatus("Claude Code: detecting ...");
         root.Controls.Add(_claudeLabel, 0, 2);
+#else
+        // Reserve the row anyway so the status stack below it lines up
+        // with the AI build. A blank zero-height filler keeps the
+        // TableLayoutPanel row index assignments stable across editions.
+        root.Controls.Add(new Panel { Height = 0, BackColor = Color.Transparent }, 0, 2);
+#endif
 
         _modsLabel = NewStatus("Mods: scanning ...");
         root.Controls.Add(_modsLabel, 0, 3);
@@ -1334,11 +1359,14 @@ public class MainForm : Form
 
     private async Task RunStartupAsync()
     {
+#if AI_RESOLVER
         // First-run convenience: try to auto-detect the Decomp/ folder
         // if the user hasn't set one yet. We only check known locations
         // (next to the game install, repo Desktop layout, Documents)
         // and only when the candidate looks like a real Decomp (Scripts/
         // Loader.gd + Interface.gd present).
+        // Lite edition skips this — the path is only used by the AI
+        // resolver to give Claude the original game script as context.
         if (string.IsNullOrEmpty(_settings.GameSourcePath))
         {
             var detected = AutodetectDecomp();
@@ -1352,6 +1380,7 @@ public class MainForm : Form
 
         _claude.Detect();
         UpdateClaudeStatus();
+#endif
         RefreshSetupBanner();
 
         _modsLabel.Text = $"Mods: scanning {ModsDir} ...";
@@ -1610,6 +1639,7 @@ public class MainForm : Form
 
     // --- status / list rendering ----------------------------------
 
+#if AI_RESOLVER
     private void UpdateClaudeStatus()
     {
         if (_claude.IsAvailable)
@@ -1633,6 +1663,7 @@ public class MainForm : Form
                 "`npm install -g @anthropic-ai/claude-code`.";
         }
     }
+#endif
 
     private void UpdateModsStatus()
     {
@@ -2080,11 +2111,16 @@ public class MainForm : Form
         }
         if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP)
             return "AI resolve only handles file_overlap conflicts in v1.";
+#if AI_RESOLVER
         if (!_claude.IsAvailable)
             return "Claude Code not detected — install it to enable AI resolve.";
         return "Send this conflict to Claude Code for analysis.";
+#else
+        return "AI conflict resolution is not available in the Lite edition.";
+#endif
     }
 
+#if AI_RESOLVER
     /// <summary>True if the conflict can be sent to Claude. v1 covers
     /// every file_overlap (Claude can merge any text file — README,
     /// INSTRUCTIONS, .gd, etc. — though .gd is where real merges
@@ -2097,13 +2133,19 @@ public class MainForm : Form
         if (c.Type != ConflictDetector.TYPE_FILE_OVERLAP) return false;
         return _claude.IsAvailable;
     }
+#endif
 
     /// <summary>True for any file_overlap regardless of Claude state —
     /// drives whether the button cell shows "Resolve" or stays blank.
     /// Click handler still re-checks IsResolvable() and surfaces a
-    /// clear hint if Claude isn't available.</summary>
+    /// clear hint if Claude isn't available. Always false in the Lite
+    /// edition — the Resolve column stays empty.</summary>
     private static bool IsButtonRow(ConflictDetector.Conflict c)
+#if AI_RESOLVER
         => c.Type == ConflictDetector.TYPE_FILE_OVERLAP;
+#else
+        => false;
+#endif
 
     // --- async update check ---------------------------------------
 
@@ -3159,6 +3201,7 @@ public class MainForm : Form
         try { _settings.Save(); }
         catch (Exception ex) { ShowError("Couldn't save settings", ex); return; }
 
+#if AI_RESOLVER
         if (_settings.ClaudePath != oldClaude)
         {
             _claude.OverridePath = _settings.ClaudePath;
@@ -3170,6 +3213,7 @@ public class MainForm : Form
         {
             _resolver.GameSourcePath = _settings.GameSourcePath;
         }
+#endif
         if (_settings.ModsDir != oldMods)
         {
             Rescan();
@@ -3205,6 +3249,7 @@ public class MainForm : Form
     private void RefreshSetupBanner()
     {
         var msgs = new List<string>();
+#if AI_RESOLVER
         if (!_claude.IsAvailable)
         {
             if (ClaudeCodeRunner.HasMsixInstall())
@@ -3227,6 +3272,7 @@ public class MainForm : Form
                     "click Save.");
             }
         }
+#endif
         if (!Directory.Exists(ModsDir))
         {
             msgs.Add(
@@ -3234,6 +3280,7 @@ public class MainForm : Form
                 "Steam install path doesn't apply on your machine — set " +
                 "the Mods folder below to wherever Road to Vostok lives.");
         }
+#if AI_RESOLVER
         if (string.IsNullOrEmpty(_settings.GameSourcePath)
             || !Directory.Exists(_settings.GameSourcePath))
         {
@@ -3244,6 +3291,7 @@ public class MainForm : Form
                 "Paste your Decomp/ path into the input below or click " +
                 "Browse... to pick the folder.");
         }
+#endif
         if (msgs.Count == 0)
         {
             _setupBanner.Visible = false;
@@ -3267,6 +3315,7 @@ public class MainForm : Form
         var col = _conflictsGrid.Columns[e.ColumnIndex].Name;
         if (col != "Resolve") return;
         var conflict = _displayedConflicts[e.RowIndex];
+#if AI_RESOLVER
         if (!IsButtonRow(conflict))
         {
             _conflictsLabel.Text =
@@ -3283,8 +3332,17 @@ public class MainForm : Form
             return;
         }
         await ResolveAsync(conflict);
+#else
+        // Lite edition: clicking the (empty) Resolve cell is a no-op,
+        // but surface a hint so users know why the column is unused.
+        _conflictsLabel.Text =
+            "AI conflict resolution is not available in the Lite edition. "
+            + "Download the full edition to enable it.";
+        await Task.CompletedTask;
+#endif
     }
 
+#if AI_RESOLVER
     private async Task ResolveAsync(ConflictDetector.Conflict conflict)
     {
         _busy = true;
@@ -3330,4 +3388,5 @@ public class MainForm : Form
             PopulateConflictsList(_lastConflicts);
         }
     }
+#endif
 }

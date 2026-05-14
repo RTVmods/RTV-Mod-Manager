@@ -7,28 +7,79 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>VostokModManager</RootNamespace>
-    <AssemblyName>VostokModManager</AssemblyName>
     <Version>0.3.0</Version>
-    <Product>Vostok Mod Manager</Product>
     <Description>Standalone mod manager for Road to Vostok</Description>
   </PropertyGroup>
 
-  <!-- Single-file self-contained release build:
-       dotnet publish -c Release
-       produces publish/VostokModManager.exe — one file, no runtime
-       install needed on the user's machine. -->
+  <!--
+    Two editions, one source tree.
+
+      EnableAI=true   →  Full edition (default). Includes Claude Code
+                         integration for AI-driven conflict resolution.
+                         Assembly: VostokModManager.exe
+                         Publish folder: publish/full/
+
+      EnableAI=false  →  Lite edition. Detects conflicts the same way
+                         (everything in Domain/ConflictDetector.cs) but
+                         no AI resolver, no Claude CLI dependency, no
+                         Decomp/ requirement.
+                         Assembly: VostokModManagerLite.exe
+                         Publish folder: publish/lite/
+
+    Build:
+      dotnet publish -c Release -p:EnableAI=true
+      dotnet publish -c Release -p:EnableAI=false
+
+    The AI_RESOLVER compile constant is defined only in the full build;
+    every AI-aware code path is wrapped in `#if AI_RESOLVER` so the lite
+    binary genuinely doesn't contain the ConflictResolver / Claude
+    runner code. Excluding the three AI source files from compilation
+    (see ItemGroup below) keeps the lite binary smaller and removes any
+    static analysis surface for Anthropic SDK dependencies.
+  -->
+  <PropertyGroup>
+    <EnableAI Condition="'$(EnableAI)' == ''">true</EnableAI>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableAI)' == 'true'">
+    <AssemblyName>VostokModManager</AssemblyName>
+    <Product>Vostok Mod Manager</Product>
+    <DefineConstants>$(DefineConstants);AI_RESOLVER</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableAI)' != 'true'">
+    <AssemblyName>VostokModManagerLite</AssemblyName>
+    <Product>Vostok Mod Manager Lite</Product>
+  </PropertyGroup>
+
+  <!-- Files that only exist in the AI edition. Excluding them in the
+       lite build means a 'cannot find type' compile error in MainForm
+       would surface immediately if a wrap-with-#if was forgotten. -->
+  <ItemGroup Condition="'$(EnableAI)' != 'true'">
+    <Compile Remove="Ai\**\*.cs" />
+    <Compile Remove="Api\ClaudeCodeRunner.cs" />
+    <Compile Remove="Ui\ResolutionDialog.cs" />
+  </ItemGroup>
+
+  <!-- Single-file self-contained release build. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <PublishDir>publish/</PublishDir>
     <!-- Strip debug symbols from the published .exe — no .pdb in the
          publish/ output, smaller distribution. -->
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(EnableAI)' == 'true'">
+    <PublishDir>publish/full/</PublishDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(EnableAI)' != 'true'">
+    <PublishDir>publish/lite/</PublishDir>
   </PropertyGroup>
 
 </Project>

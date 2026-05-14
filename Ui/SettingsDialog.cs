@@ -45,11 +45,19 @@ public class SettingsDialog : Form
         ShowInTaskbar = false;
         Padding = new Padding(18, 16, 18, 16);
 
-        // Stack: 3 path rows + a help blurb + button row, in
+        // Stack: 1-3 path rows + a help blurb + button row, in
         // reverse-add order so DockStyle.Top puts the prompt at
         // the top and buttons at the bottom.
+        //
+        // Lite edition: Game source (Decomp/) and Claude Code path
+        // are AI-only configuration — both are hidden so the dialog
+        // only shows the Mods folder. The backing _claudeBox /
+        // _decompBox TextBoxes still exist (so CommitAndClose can
+        // round-trip the persisted values) but never get added to
+        // the form, so the user can't accidentally clear them.
         var btnRow = BuildButtonRow();
         var help = BuildHelpLabel();
+#if AI_RESOLVER
         _decompBox = AddPathSection(out var decompPanel,
             "Game source (Decomp/):",
             "Path to the decompiled game source folder. Optional, but "
@@ -64,6 +72,10 @@ public class SettingsDialog : Form
             + "%APPDATA%/npm/claude.cmd usually wins).",
             current.ClaudePath,
             isFolder: false);
+#else
+        _decompBox = new TextBox { Text = current.GameSourcePath, Visible = false };
+        _claudeBox = new TextBox { Text = current.ClaudePath, Visible = false };
+#endif
         _modsBox = AddPathSection(out var modsPanel,
             "Mods folder:",
             "Where Road to Vostok looks for installed mods. Leave "
@@ -91,8 +103,10 @@ public class SettingsDialog : Form
         // last by WinForms).
         Controls.Add(btnRow);
         Controls.Add(help);
+#if AI_RESOLVER
         Controls.Add(decompPanel);
         Controls.Add(claudePanel);
+#endif
         Controls.Add(modsPanel);
         Controls.Add(titleLabel);
     }
