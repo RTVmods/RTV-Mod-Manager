@@ -219,11 +219,15 @@ public class ProfileManagerDialog : Form
             Padding   = new Padding(12, 0, 0, 0),
         };
 
+        // Match the main form's "Installed mods" / "Conflicts" panel
+        // headers — Segoe UI 14pt bold — so the dialog feels visually
+        // continuous with the main window rather than landing in a
+        // different typographic register.
         _detName = new Label
         {
             Dock      = DockStyle.Top,
             AutoSize  = true,
-            Font      = new Font("Segoe UI", 16f, FontStyle.Bold),
+            Font      = new Font("Segoe UI", 14f, FontStyle.Bold),
             ForeColor = Color.FromArgb(220, 225, 235),
             Margin    = new Padding(0, 0, 0, 4),
         };
@@ -231,6 +235,7 @@ public class ProfileManagerDialog : Form
         {
             Dock      = DockStyle.Top,
             AutoSize  = true,
+            Font      = new Font("Segoe UI", 12f),
             ForeColor = Color.FromArgb(160, 170, 190),
             Margin    = new Padding(0, 0, 0, 4),
         };
@@ -238,7 +243,7 @@ public class ProfileManagerDialog : Form
         {
             Dock      = DockStyle.Top,
             AutoSize  = true,
-            Font      = new Font("Consolas", 11f),
+            Font      = new Font("Segoe UI", 12f),
             ForeColor = Color.FromArgb(120, 140, 170),
             Margin    = new Padding(0, 0, 0, 8),
         };
@@ -292,6 +297,10 @@ public class ProfileManagerDialog : Form
 
     private DataGridView BuildDetailGrid()
     {
+        // Mirror the main form's mods grid styling beat-for-beat —
+        // 12pt Consolas cells, 12pt bold Segoe UI headers, 36px header,
+        // 32px rows, identical selection / grid colours — so the
+        // profile detail and the main list look like the same widget.
         var grid = new DataGridView
         {
             Dock  = DockStyle.Fill,
@@ -309,26 +318,28 @@ public class ProfileManagerDialog : Form
             {
                 BackColor  = Color.FromArgb(36, 42, 54),
                 ForeColor  = Color.FromArgb(220, 225, 235),
-                Font       = new Font("Segoe UI", 11f, FontStyle.Bold),
+                Font       = new Font("Segoe UI", 12f, FontStyle.Bold),
                 SelectionBackColor = Color.FromArgb(36, 42, 54),
+                SelectionForeColor = Color.FromArgb(220, 225, 235),
             },
             DefaultCellStyle =
             {
                 BackColor  = Color.FromArgb(18, 22, 30),
-                ForeColor  = Color.FromArgb(200, 210, 230),
+                ForeColor  = Color.FromArgb(220, 225, 235),
                 SelectionBackColor = Color.FromArgb(40, 60, 90),
-                Font       = new Font("Consolas", 11f),
+                SelectionForeColor = Color.FromArgb(255, 255, 255),
+                Font       = new Font("Consolas", 12f),
             },
-            GridColor        = Color.FromArgb(40, 46, 58),
-            ColumnHeadersHeight = 32,
-            RowTemplate      = { Height = 28 },
+            GridColor           = Color.FromArgb(40, 46, 58),
+            ColumnHeadersHeight = 36,
+            RowTemplate         = { Height = 32 },
         };
 
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name       = "On",
             HeaderText = "On",
-            Width      = 36,
+            Width      = 40,
             ReadOnly   = true,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
@@ -338,23 +349,29 @@ public class ProfileManagerDialog : Form
             HeaderText   = "Mod",
             ReadOnly     = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            MinimumWidth = 140,
+            MinimumWidth = 220,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name       = "Version",
             HeaderText = "Version",
-            Width      = 90,
+            Width      = 80,
             ReadOnly   = true,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
+        // Match the main grid's bumped, centered, bold load-order column
+        // so the numbers read at a glance the same way they do there.
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name       = "Priority",
-            HeaderText = "Prio",
-            Width      = 60,
+            HeaderText = "LoadOrd",
+            Width      = 100,
             ReadOnly   = true,
-            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
+            DefaultCellStyle =
+            {
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Font      = new Font("Consolas", 14f, FontStyle.Bold),
+            },
         });
 
         foreach (DataGridViewColumn col in grid.Columns)
