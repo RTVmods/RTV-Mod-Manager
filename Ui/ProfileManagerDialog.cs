@@ -517,21 +517,22 @@ public class ProfileManagerDialog : Form
             if (dr != DialogResult.Yes) return;
         }
 
-        // Build the profile + bundle archives. Use a wait cursor so a
-        // large mod folder (~50 enabled .vmz, hundreds of MB) doesn't
-        // look like the UI froze.
+        // Build the profile + bundle EVERY installed mod, enabled or
+        // disabled. The earlier "enabled-only" filter saved a bit of
+        // disk but meant disabled mods were silently flagged as
+        // "failed to bundle" (because they weren't in the live
+        // entries list passed to SaveWithBundles) — a confusing false
+        // positive. Bundling the full set keeps the failure report
+        // accurate (only directory mods / locked files appear) and
+        // gives the apply flow a real archive to restore from when
+        // the user later re-enables one of the bundled mods.
         Cursor = Cursors.WaitCursor;
         List<ProfileMod> failed;
         ModProfile profile;
         try
         {
             profile = ModProfile.FromRegistry(name, desc ?? "", _registry.Entries);
-            // Only bundle ENABLED mods — disabled ones are still listed
-            // in profile.Mods (so apply can restore their cfg state)
-            // but copying their archives doubles disk usage without a
-            // matching benefit. The apply path falls back to MW for any
-            // disabled mod that's gone missing.
-            failed = profile.SaveWithBundles(_registry.Entries.Where(e => e.IsEnabled));
+            failed = profile.SaveWithBundles(_registry.Entries);
         }
         finally
         {
@@ -545,10 +546,10 @@ public class ProfileManagerDialog : Form
             var more = failed.Count > 6 ? $"\n  … and {failed.Count - 6} more" : "";
             MessageBox.Show(this,
                 $"Profile saved, but {failed.Count} mod(s) couldn't be bundled:\n  • {sample}{more}\n\n"
-                + "These are typically directory mods (unpacked) or files that "
-                + "were locked at copy time. On apply, the manager will fall "
-                + "back to downloading them from ModWorkshop if they have a "
-                + "linked ID.",
+                + "These are typically directory mods (unpacked) or .vmz "
+                + "files that were locked at copy time. On apply, the manager "
+                + "will fall back to downloading them from ModWorkshop if they "
+                + "have a linked ID.",
                 "Partial bundle",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
