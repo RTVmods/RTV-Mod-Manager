@@ -399,9 +399,15 @@ public class ProfileManagerDialog : Form
         var updated = profile.UpdatedAt.HasValue
             ? $"  ·  updated {profile.UpdatedAt.Value.ToLocalTime():yyyy-MM-dd}"
             : "";
+        var bundled = profile.BundledArchivesCount();
+        var size    = profile.BundledArchivesSize();
+        var bundleNote = bundled > 0
+            ? $"  ·  {bundled} archive(s) bundled, {FormatBytes(size)}"
+            : "  ·  metadata-only (no archives bundled)";
         _detMeta.Text =
             $"{profile.Mods.Count} mods  ·  "
-            + $"created {profile.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}{updated}";
+            + $"created {profile.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}{updated}"
+            + bundleNote;
 
         _detGrid.Rows.Clear();
         foreach (var m in profile.Mods.OrderBy(m => m.Priority).ThenBy(m => m.DisplayName))
@@ -412,10 +418,25 @@ public class ProfileManagerDialog : Form
             r.Cells["ModName"].Value  = m.DisplayName;
             r.Cells["Version"].Value  = m.Version;
             r.Cells["Priority"].Value = m.Priority;
+            // Bundle indicator in tooltip — mods missing an archive
+            // will fall back to ModWorkshop on apply.
+            var hasBundle = !string.IsNullOrEmpty(profile.ResolveBundledArchive(m));
+            r.Cells["ModName"].ToolTipText = hasBundle
+                ? $"id: {m.ModId}\nbundled: {m.ArchiveFileName}"
+                : $"id: {m.ModId}\nno bundled archive — will fall back to ModWorkshop";
             r.Cells["On"].Style.ForeColor = m.IsEnabled
                 ? Color.FromArgb(120, 200, 130)
                 : Color.FromArgb(160, 80, 80);
+            if (!hasBundle) r.DefaultCellStyle.ForeColor = Color.FromArgb(160, 170, 190);
         }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:F1} MB";
+        return $"{bytes / 1024.0 / 1024.0 / 1024.0:F2} GB";
     }
 
     private ModProfile? SelectedProfile()
@@ -445,22 +466,52 @@ public class ProfileManagerDialog : Form
         if (existing != null)
         {
             var dr = MessageBox.Show(this,
-                $"A profile named '{name}' already exists.\nOverwrite it?",
+                $"A profile named '{name}' already exists.\n\n"
+                + "Overwrite it (existing bundled archives will be replaced "
+                + "with copies of the currently-installed mods)?",
                 "Overwrite?",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question,
                 MessageBoxDefaultButton.Button2);
             if (dr != DialogResult.Yes) return;
-            existing.Mods      = ModProfile.FromRegistry(name, desc ?? "", _registry.Entries).Mods;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.Description = desc ?? "";
-            existing.Save();
         }
-        else
+
+        // Build the profile + bundle archives. Use a wait cursor so a
+        // large mod folder (~50 enabled .vmz, hundreds of MB) doesn't
+        // look like the UI froze.
+        Cursor = Cursors.WaitCursor;
+        List<ProfileMod> failed;
+        ModProfile profile;
+        try
         {
-            var profile = ModProfile.FromRegistry(name, desc ?? "", _registry.Entries);
-            profile.Save();
+            profile = ModProfile.FromRegistry(name, desc ?? "", _registry.Entries);
+            // Only bundle ENABLED mods — disabled ones are still listed
+            // in profile.Mods (so apply can restore their cfg state)
+            // but copying their archives doubles disk usage without a
+            // matching benefit. The apply path falls back to MW for any
+            // disabled mod that's gone missing.
+            failed = profile.SaveWithBundles(_registry.Entries.Where(e => e.IsEnabled));
         }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+
+        if (failed.Count > 0)
+        {
+            var sample = string.Join("\n  • ",
+                failed.Take(6).Select(m => $"{m.DisplayName} ({m.Version})"));
+            var more = failed.Count > 6 ? $"\n  … and {failed.Count - 6} more" : "";
+            MessageBox.Show(this,
+                $"Profile saved, but {failed.Count} mod(s) couldn't be bundled:\n  • {sample}{more}\n\n"
+                + "These are typically directory mods (unpacked) or files that "
+                + "were locked at copy time. On apply, the manager will fall "
+                + "back to downloading them from ModWorkshop if they have a "
+                + "linked ID.",
+                "Partial bundle",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         LoadProfiles();
         // Select the newly saved profile
         for (int i = 0; i < _list.Items.Count; i++)
@@ -475,51 +526,57 @@ public class ProfileManagerDialog : Form
         using var dlg = new OpenFileDialog
         {
             Title  = "Import Profile",
-            Filter = "Profile JSON (*.json)|*.json|All files (*.*)|*.*",
+            Filter = "Profile bundle (*.vmprofile;*.zip)|*.vmprofile;*.zip"
+                   + "|Profile JSON (*.json)|*.json"
+                   + "|All files (*.*)|*.*",
         };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
-        var profile = ModProfile.LoadFromFile(dlg.FileName);
+        ModProfile? profile;
+        var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+        Cursor = Cursors.WaitCursor;
+        try
+        {
+            profile = (ext == ".vmprofile" || ext == ".zip")
+                ? ModProfile.LoadFromZip(dlg.FileName)
+                : ModProfile.LoadFromJsonFile(dlg.FileName);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+
         if (profile == null)
         {
             MessageBox.Show(this,
-                "Could not parse the selected file as a mod profile.",
+                "Could not parse the selected file as a mod profile.\n\n"
+                + "Expected a .vmprofile zip (bundled archives) or a "
+                + ".json file (metadata only).",
                 "Import failed",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        // Offer to rename before saving
-        var name = TextInputDialog.Prompt(this,
-            "Import Profile",
-            "Profile name (change if you like):",
-            profile.Name);
-        if (string.IsNullOrWhiteSpace(name)) return;
-        profile.Name = name;
-
-        var existing = _profiles.FirstOrDefault(
-            p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (existing != null)
+        // If we imported a JSON (no folder), save it through SaveMetadataOnly
+        // so it lands in a folder under ProfilesDir. Zip imports already
+        // unzip themselves into a folder.
+        if (string.IsNullOrEmpty(profile.FolderPath))
         {
-            var dr = MessageBox.Show(this,
-                $"A profile named '{name}' already exists.\nOverwrite it?",
-                "Overwrite?",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question,
-                MessageBoxDefaultButton.Button2);
-            if (dr != DialogResult.Yes) return;
+            profile.SaveMetadataOnly();
         }
-        profile.Save();
+
         LoadProfiles();
         for (int i = 0; i < _list.Items.Count; i++)
         {
-            if (string.Equals(_list.Items[i]?.ToString(), name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_list.Items[i]?.ToString(), profile.Name, StringComparison.OrdinalIgnoreCase))
             { _list.SelectedIndex = i; break; }
         }
 
         // Ask if they want to apply immediately
         var applyNow = MessageBox.Show(this,
-            $"Profile '{name}' imported. Apply it now?",
+            $"Profile '{profile.Name}' imported "
+            + $"({profile.BundledArchivesCount()} archive(s) bundled).\n\n"
+            + "Apply it now?",
             "Apply?",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question,
@@ -533,14 +590,45 @@ public class ProfileManagerDialog : Form
         if (profile == null) return;
         using var dlg = new SaveFileDialog
         {
-            Title      = "Export Profile",
-            Filter     = "Profile JSON (*.json)|*.json",
-            FileName   = ModProfile.SafeFileName(profile.Name) + ".json",
+            Title    = "Export Profile",
+            Filter   = "Profile bundle (*.vmprofile)|*.vmprofile"
+                     + "|Profile JSON only (*.json)|*.json",
+            FileName = ModProfile.SafeFileName(profile.Name) + ".vmprofile",
         };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        Cursor = Cursors.WaitCursor;
         try
         {
-            profile.SaveTo(dlg.FileName);
+            var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+            if (ext == ".vmprofile" || ext == ".zip")
+            {
+                profile.ExportToZip(dlg.FileName);
+            }
+            else
+            {
+                // Metadata-only export. Strip ArchiveFileName fields
+                // so the recipient knows there are no bundles to look for.
+                var copy = new ModProfile
+                {
+                    Name        = profile.Name,
+                    Description = profile.Description,
+                    CreatedAt   = profile.CreatedAt,
+                    UpdatedAt   = profile.UpdatedAt,
+                    Mods = profile.Mods.Select(m => new ProfileMod
+                    {
+                        ModId = m.ModId,
+                        DisplayName = m.DisplayName,
+                        Version = m.Version,
+                        IsEnabled = m.IsEnabled,
+                        Priority = m.Priority,
+                        ModWorkshopId = m.ModWorkshopId,
+                    }).ToList(),
+                };
+                File.WriteAllText(dlg.FileName,
+                    System.Text.Json.JsonSerializer.Serialize(copy,
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            }
             MessageBox.Show(this,
                 $"Profile exported to:\n{dlg.FileName}",
                 "Exported",
@@ -552,6 +640,10 @@ public class ProfileManagerDialog : Form
                 $"Export failed:\n{ex.Message}",
                 "Export error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
         }
     }
 
