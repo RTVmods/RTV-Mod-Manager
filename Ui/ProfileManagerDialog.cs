@@ -91,28 +91,33 @@ public class ProfileManagerDialog : Form
         // names + the three toolbar buttons (Save Current / 📂 / Delete)
         // comfortably; the right pane still gets the majority of the
         // width for the per-mod detail grid.
+        //
+        // SplitterDistance + Panel*MinSize must be set together AFTER
+        // the SplitContainer has a real Width — assigning Panel1MinSize
+        // in the initializer (while SplitterDistance is still at its
+        // 50px default) throws "SplitterDistance must be between
+        // Panel1MinSize and Width - Panel2MinSize". Defer the whole
+        // configuration to Shown, set SplitterDistance first, then
+        // apply MinSizes that won't contradict it.
         var split = new SplitContainer
         {
             Dock          = DockStyle.Fill,
             Orientation   = Orientation.Vertical,
             SplitterWidth = 6,
             BackColor     = Color.Transparent,
-            Panel1MinSize = 240,
-            Panel2MinSize = 400,
         };
-
-        // SplitterDistance must be set AFTER the SplitContainer has a
-        // real Width — setting it in the initializer (before the form
-        // is shown / sized) throws InvalidOperationException at runtime.
-        // Apply it in Shown, with a clamp against the actual Width so a
-        // narrow window doesn't trip the min-size guard.
         Shown += (_, _) =>
         {
             if (split.Width <= 100) return;
-            var min  = split.Panel1MinSize;
-            var max  = split.Width - split.Panel2MinSize - split.SplitterWidth;
-            var want = 450;
-            if (max > min) split.SplitterDistance = Math.Clamp(want, min, max);
+            const int want = 450;
+            // Reserve at least 200px for Panel2 so the detail grid never
+            // collapses; cap dist so we never hand Panel2 less than that.
+            var dist = Math.Clamp(want, 25, Math.Max(25, split.Width - 200 - split.SplitterWidth));
+            try { split.SplitterDistance = dist; }
+            catch { /* very narrow window — leave the default */ }
+            // Apply MinSizes now that SplitterDistance is in a sane spot.
+            try { split.Panel1MinSize = 200; } catch { }
+            try { split.Panel2MinSize = 200; } catch { }
         };
 
         // Left pane
