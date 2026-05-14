@@ -496,10 +496,20 @@ public class ProfileManagerDialog : Form
             $"Profile {DateTime.Now:yyyy-MM-dd}");
         if (string.IsNullOrWhiteSpace(name)) return;
 
+        // Default description summarises the snapshot — total mod
+        // count, enabled / disabled split, and timestamp. Pre-filled
+        // so the user can hit OK without typing; still freely
+        // editable if they want a real note.
+        var total    = _registry.Entries.Count(e => !string.IsNullOrEmpty(e.ModId));
+        var enabled  = _registry.Entries.Count(e => !string.IsNullOrEmpty(e.ModId) && e.IsEnabled);
+        var disabled = total - enabled;
+        var defaultDesc =
+            $"{total} mods ({enabled} enabled, {disabled} disabled) — "
+            + $"snapshot {DateTime.Now:yyyy-MM-dd HH:mm}";
         var desc = TextInputDialog.Prompt(this,
             "Save Profile — description (optional)",
-            "Short description (leave blank to skip):",
-            "");
+            "Short description (edit or leave as-is):",
+            defaultDesc);
 
         // Check for existing profile with same name
         var existing = _profiles.FirstOrDefault(
