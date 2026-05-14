@@ -87,13 +87,32 @@ public class ProfileManagerDialog : Form
         };
 
         // ── SplitContainer ──────────────────────────────────────────
+        // Pinned a bit past one-third so the left pane fits long profile
+        // names + the three toolbar buttons (Save Current / 📂 / Delete)
+        // comfortably; the right pane still gets the majority of the
+        // width for the per-mod detail grid.
         var split = new SplitContainer
         {
-            Dock           = DockStyle.Fill,
-            Orientation    = Orientation.Vertical,
-            SplitterWidth  = 6,
-            BackColor      = Color.Transparent,
-            SplitterDistance = 240,
+            Dock          = DockStyle.Fill,
+            Orientation   = Orientation.Vertical,
+            SplitterWidth = 6,
+            BackColor     = Color.Transparent,
+            Panel1MinSize = 240,
+            Panel2MinSize = 400,
+        };
+
+        // SplitterDistance must be set AFTER the SplitContainer has a
+        // real Width — setting it in the initializer (before the form
+        // is shown / sized) throws InvalidOperationException at runtime.
+        // Apply it in Shown, with a clamp against the actual Width so a
+        // narrow window doesn't trip the min-size guard.
+        Shown += (_, _) =>
+        {
+            if (split.Width <= 100) return;
+            var min  = split.Panel1MinSize;
+            var max  = split.Width - split.Panel2MinSize - split.SplitterWidth;
+            var want = 450;
+            if (max > min) split.SplitterDistance = Math.Clamp(want, min, max);
         };
 
         // Left pane
