@@ -71,8 +71,8 @@ public class ProfileManagerDialog : Form
         Font            = new Font("Segoe UI", 12f);
         FormBorderStyle = FormBorderStyle.Sizable;
         MinimumSize     = new Size(880, 560);
-        Width  = 1000;
-        Height = 660;
+        Width  = 1226;
+        Height = 663;
         ShowInTaskbar   = false;
 
         // ── Main title ──────────────────────────────────────────────
