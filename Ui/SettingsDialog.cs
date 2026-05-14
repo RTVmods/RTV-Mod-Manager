@@ -49,8 +49,8 @@ public class SettingsDialog : Form
         // reverse-add order so DockStyle.Top puts the prompt at
         // the top and buttons at the bottom.
         //
-        // Lite edition: Game source (Decomp/) and Claude Code path
-        // are AI-only configuration — both are hidden so the dialog
+        // Integrated edition: Game source (Decomp/) and Claude Code
+        // path are AI-only configuration — both are hidden so the dialog
         // only shows the Mods folder. The backing _claudeBox /
         // _decompBox TextBoxes still exist (so CommitAndClose can
         // round-trip the persisted values) but never get added to

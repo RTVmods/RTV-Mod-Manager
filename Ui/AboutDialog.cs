@@ -41,12 +41,12 @@ public class AboutDialog : Form
             + "true incompatibilities.";
         const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ";
 #else
-        const string edition       = "Lite edition";
+        const string edition       = "Integrated edition";
         const string editionDetail =
             "Conflict detection is fully active; the AI resolver is "
             + "omitted entirely. No Claude Code CLI dependency, no "
             + "Decomp/ requirement.";
-        const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  LITE";
+        const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  IИTEGЯATED";
 #endif
 
         // ── Decorative star + title ─────────────────────────────────
@@ -71,7 +71,7 @@ public class AboutDialog : Form
         };
         star.Paint += (_, e) => DrawStar(
             e.Graphics, 28, 28, 24,
-            // Edition-specific accent: red for Full, blue for Lite —
+            // Edition-specific accent: red for Full, blue for Integrated —
             // matches the per-edition .exe icon colour treatment.
 #if AI_RESOLVER
             Color.FromArgb(220, 200, 50, 60)

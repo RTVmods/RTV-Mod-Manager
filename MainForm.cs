@@ -240,7 +240,7 @@ public class MainForm : Form
 #if AI_RESOLVER
         Text = "Road to Vostok Mod Manager";
 #else
-        Text = "Road to Vostok Mod Manager Lite";
+        Text = "Road to Vostok Mod Manager Integrated";
 #endif
         MinimumSize = new Size(900, 600);
         BackColor = Color.FromArgb(26, 30, 40);
@@ -396,7 +396,7 @@ public class MainForm : Form
 #if AI_RESOLVER
             Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ",
 #else
-            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  LITE",
+            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  IИTEGЯATED",
 #endif
             Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
             AutoSize = true,
@@ -409,7 +409,7 @@ public class MainForm : Form
 #if AI_RESOLVER
         var editionTag = "Full";
 #else
-        var editionTag = "Lite";
+        var editionTag = "Integrated";
 #endif
         var versionLabel = new Label
         {
@@ -1407,8 +1407,8 @@ public class MainForm : Form
         // (next to the game install, repo Desktop layout, Documents)
         // and only when the candidate looks like a real Decomp (Scripts/
         // Loader.gd + Interface.gd present).
-        // Lite edition skips this — the path is only used by the AI
-        // resolver to give Claude the original game script as context.
+        // Integrated edition skips this — the path is only used by the
+        // AI resolver to give Claude the original game script as context.
         if (string.IsNullOrEmpty(_settings.GameSourcePath))
         {
             var detected = AutodetectDecomp();
@@ -2158,7 +2158,7 @@ public class MainForm : Form
             return "Claude Code not detected — install it to enable AI resolve.";
         return "Send this conflict to Claude Code for analysis.";
 #else
-        return "AI conflict resolution is not available in the Lite edition.";
+        return "AI conflict resolution is not available in the Integrated edition.";
 #endif
     }
 
@@ -2180,8 +2180,8 @@ public class MainForm : Form
     /// <summary>True for any file_overlap regardless of Claude state —
     /// drives whether the button cell shows "Resolve" or stays blank.
     /// Click handler still re-checks IsResolvable() and surfaces a
-    /// clear hint if Claude isn't available. Always false in the Lite
-    /// edition — the Resolve column stays empty.</summary>
+    /// clear hint if Claude isn't available. Always false in the
+    /// Integrated edition — the Resolve column stays empty.</summary>
     private static bool IsButtonRow(ConflictDetector.Conflict c)
 #if AI_RESOLVER
         => c.Type == ConflictDetector.TYPE_FILE_OVERLAP;
@@ -3383,10 +3383,10 @@ public class MainForm : Form
         }
         await ResolveAsync(conflict);
 #else
-        // Lite edition: clicking the (empty) Resolve cell is a no-op,
+        // Integrated edition: clicking the (empty) Resolve cell is a no-op,
         // but surface a hint so users know why the column is unused.
         _conflictsLabel.Text =
-            "AI conflict resolution is not available in the Lite edition. "
+            "AI conflict resolution is not available in the Integrated edition. "
             + "Download the full edition to enable it.";
         await Task.CompletedTask;
 #endif
