@@ -7,8 +7,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>VostokModManager</RootNamespace>
-    <Version>0.3.0</Version>
+    <!-- Single version source — reflected at runtime by the About
+         dialog via Assembly.GetName().Version. Bumping it here updates
+         both editions and the Win32 file-version resource embedded in
+         the .exe (Properties → Details in Explorer). -->
+    <Version>0.4.0</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
+    <Authors>Joni</Authors>
+    <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>
   </PropertyGroup>
 
   <!--

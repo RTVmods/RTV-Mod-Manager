@@ -376,6 +376,21 @@ public class MainForm : Form
         // so the text still reads as "Road to Vostok Mod Manager"
         // at a glance, but the spotted Я / И give it the soviet
         // stencil-poster flavour.
+        // Title + version stack. Title doubles as the About-dialog
+        // entry point — hand cursor + tooltip make it discoverable
+        // without crowding the toolbar with another button next to
+        // Launch / Profiles / Settings. The version label below is
+        // small / dim and also clickable so users can spot the
+        // version at a glance.
+        var titleStack = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            RowCount    = 2,
+            AutoSize    = true,
+            BackColor   = Color.Transparent,
+            Anchor      = AnchorStyles.Left,
+            Margin      = new Padding(0),
+        };
         var title = new Label
         {
 #if AI_RESOLVER
@@ -386,8 +401,35 @@ public class MainForm : Form
             Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
             AutoSize = true,
             Anchor = AnchorStyles.Left,
+            Cursor = Cursors.Hand,
+            Margin = new Padding(0),
         };
-        titleRow.Controls.Add(title, 1, 0);
+        var asmVer = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version ?? new Version(0, 0, 0);
+#if AI_RESOLVER
+        var editionTag = "Full";
+#else
+        var editionTag = "Lite";
+#endif
+        var versionLabel = new Label
+        {
+            Text      = $"v{asmVer.Major}.{asmVer.Minor}.{asmVer.Build}  ·  "
+                      + $"{editionTag} edition  ·  click for About",
+            Font      = new Font("Consolas", 10f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(140, 150, 170),
+            AutoSize  = true,
+            Anchor    = AnchorStyles.Left,
+            Cursor    = Cursors.Hand,
+            Margin    = new Padding(2, 0, 0, 0),
+        };
+        var titleTip = new ToolTip();
+        titleTip.SetToolTip(title, "Click for version and credits");
+        titleTip.SetToolTip(versionLabel, "Click for version and credits");
+        title.Click        += (_, _) => OpenAboutDialog();
+        versionLabel.Click += (_, _) => OpenAboutDialog();
+        titleStack.Controls.Add(title,        0, 0);
+        titleStack.Controls.Add(versionLabel, 0, 1);
+        titleRow.Controls.Add(titleStack, 1, 0);
 
         // Green-themed Launch Game button. Reuses ThemedButton's
         // FlatStyle + sizing scaffolding then overrides the colours
@@ -3224,6 +3266,14 @@ public class MainForm : Form
             PopulateConflictsList(_lastConflicts);
         }
         RefreshSetupBanner();
+    }
+
+    /// <summary>Opens the About dialog (version + edition + credits +
+    /// links). Reached from the in-form title label.</summary>
+    private void OpenAboutDialog()
+    {
+        using var dlg = new Ui.AboutDialog();
+        dlg.ShowDialog(this);
     }
 
     /// <summary>Opens the profile manager dialog. If the user applied a
