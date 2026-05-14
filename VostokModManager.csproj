@@ -61,6 +61,17 @@
     <Compile Remove="Ui\ResolutionDialog.cs" />
   </ItemGroup>
 
+  <!-- Per-edition application icon. icon.ico is the red soviet star
+       used by the Full edition; icon-lite.ico is the same artwork run
+       through a desaturate + cool-blue tint so the lite .exe is
+       visually distinct in the taskbar and on disk. -->
+  <PropertyGroup Condition="'$(EnableAI)' == 'true'">
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EnableAI)' != 'true'">
+    <ApplicationIcon>icon-lite.ico</ApplicationIcon>
+  </PropertyGroup>
+
   <!-- Single-file self-contained release build. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <PublishSingleFile>true</PublishSingleFile>
@@ -72,7 +83,6 @@
          publish/ output, smaller distribution. -->
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(EnableAI)' == 'true'">
