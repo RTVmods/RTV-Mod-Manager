@@ -328,16 +328,17 @@ public class MainForm : Form
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 4,
+            ColumnCount = 5,
             RowCount = 1,
             AutoSize = true,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8),
         };
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // star
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // star
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f)); // title (fills)
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // launch
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));   // settings
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // launch
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profiles
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // settings
 
         // Decorative red star ornament next to the title — pure
         // soviet-aesthetic flourish, no behaviour. Painted via
@@ -388,6 +389,19 @@ public class MainForm : Form
         launchBtn.Click += (_, _) => LaunchVostok();
         titleRow.Controls.Add(launchBtn, 2, 0);
 
+        // Profiles button — sits between Launch and Settings so the
+        // user can save / apply mod loadouts without digging through
+        // the mods toolbar. Same slate theme as Settings; the green
+        // accent is reserved for the launch action.
+        var profilesBtn = ThemedButton("⊞ Profiles…");
+        profilesBtn.Width = 140;
+        profilesBtn.Height = 40;
+        profilesBtn.AutoSize = false;
+        profilesBtn.Anchor = AnchorStyles.Right;
+        profilesBtn.Margin = new Padding(0, 8, 8, 0);
+        profilesBtn.Click += async (_, _) => await OpenProfilesDialogAsync();
+        titleRow.Controls.Add(profilesBtn, 3, 0);
+
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
         settingsBtn.Height = 40;
@@ -395,7 +409,7 @@ public class MainForm : Form
         settingsBtn.Anchor = AnchorStyles.Right;
         settingsBtn.Margin = new Padding(0, 8, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn, 3, 0);
+        titleRow.Controls.Add(settingsBtn, 4, 0);
 
         root.Controls.Add(titleRow, 0, 0);
 
@@ -1262,14 +1276,13 @@ public class MainForm : Form
             // column headers vertically line up with the mods grid's.
             Height = 48,
             Dock = DockStyle.Top,
-            ColumnCount = 7,
+            ColumnCount = 6,
             RowCount = 1,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 4, 0, 4),
         };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1312,14 +1325,9 @@ public class MainForm : Form
         bar.Controls.Add(disableAll, 4, 0);
 
         var refresh = ThemedButton("Refresh");
-        refresh.Margin = new Padding(0, 2, 4, 2);
+        refresh.Margin = new Padding(0, 2, 0, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
         bar.Controls.Add(refresh, 5, 0);
-
-        var profiles = ThemedButton("⊞ Profiles…");
-        profiles.Margin = new Padding(0, 2, 0, 2);
-        profiles.Click += async (_, _) => await OpenProfilesDialogAsync();
-        bar.Controls.Add(profiles, 6, 0);
 
         return bar;
     }
