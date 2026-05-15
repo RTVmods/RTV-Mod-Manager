@@ -238,7 +238,7 @@ public class MainForm : Form
         // taskbar list it correctly. The decorative faux-Cyrillic
         // version lives on the in-form title label.
 #if AI_RESOLVER
-        Text = "Road to Vostok Mod Manager";
+        Text = "Road to Vostok Mod Manager AI";
 #else
         Text = "Road to Vostok Mod Manager Integrated";
 #endif
@@ -394,7 +394,7 @@ public class MainForm : Form
         var title = new Label
         {
 #if AI_RESOLVER
-            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ",
+            Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  AI",
 #else
             Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  IИTEGЯATED",
 #endif
@@ -407,7 +407,7 @@ public class MainForm : Form
         var asmVer = System.Reflection.Assembly.GetExecutingAssembly()
             .GetName().Version ?? new Version(0, 0, 0);
 #if AI_RESOLVER
-        var editionTag = "Full";
+        var editionTag = "AI";
 #else
         var editionTag = "Integrated";
 #endif

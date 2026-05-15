@@ -20,10 +20,10 @@
   <!--
     Two editions, one source tree.
 
-      EnableAI=true   →  Full edition (default). Includes Claude Code
+      EnableAI=true   →  AI edition (default). Includes Claude Code
                          integration for AI-driven conflict resolution.
-                         Assembly: VostokModManager.exe
-                         Publish folder: publish/full/
+                         Assembly: VostokModManagerAI.exe
+                         Publish folder: publish/ai/
 
       EnableAI=false  →  Integrated edition. Detects conflicts the same
                          way (everything in Domain/ConflictDetector.cs)
@@ -36,7 +36,7 @@
       dotnet publish -c Release -p:EnableAI=true
       dotnet publish -c Release -p:EnableAI=false
 
-    The AI_RESOLVER compile constant is defined only in the full build;
+    The AI_RESOLVER compile constant is defined only in the AI build;
     every AI-aware code path is wrapped in `#if AI_RESOLVER` so the
     integrated binary genuinely doesn't contain the ConflictResolver /
     Claude runner code. Excluding the three AI source files from
@@ -49,8 +49,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(EnableAI)' == 'true'">
-    <AssemblyName>VostokModManager</AssemblyName>
-    <Product>Vostok Mod Manager</Product>
+    <AssemblyName>VostokModManagerAI</AssemblyName>
+    <Product>Vostok Mod Manager AI</Product>
     <DefineConstants>$(DefineConstants);AI_RESOLVER</DefineConstants>
   </PropertyGroup>
 
@@ -70,7 +70,7 @@
   </ItemGroup>
 
   <!-- Per-edition application icon. icon.ico is the red soviet star
-       used by the Full edition; icon-integrated.ico is the same
+       used by the AI edition; icon-integrated.ico is the same
        artwork run through a desaturate + cool-blue tint so the
        integrated .exe is visually distinct in the taskbar and on
        disk. -->
@@ -95,7 +95,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(EnableAI)' == 'true'">
-    <PublishDir>publish/full/</PublishDir>
+    <PublishDir>publish/ai/</PublishDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(EnableAI)' != 'true'">
     <PublishDir>publish/integrated/</PublishDir>

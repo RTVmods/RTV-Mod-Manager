@@ -33,13 +33,13 @@ public class AboutDialog : Form
         var version = $"v{asmVer.Major}.{asmVer.Minor}.{asmVer.Build}";
 
 #if AI_RESOLVER
-        const string edition       = "Full edition";
+        const string edition       = "AI edition";
         const string editionDetail =
             "Includes AI-driven conflict resolution powered by your "
             + "local Claude Code CLI. The manager analyses file_overlap "
             + "conflicts and suggests merges, load-order fixes, or flags "
             + "true incompatibilities.";
-        const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ";
+        const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  AI";
 #else
         const string edition       = "Integrated edition";
         const string editionDetail =
@@ -71,7 +71,7 @@ public class AboutDialog : Form
         };
         star.Paint += (_, e) => DrawStar(
             e.Graphics, 28, 28, 24,
-            // Edition-specific accent: red for Full, blue for Integrated —
+            // Edition-specific accent: red for AI, blue for Integrated —
             // matches the per-edition .exe icon colour treatment.
 #if AI_RESOLVER
             Color.FromArgb(220, 200, 50, 60)
