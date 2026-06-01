@@ -10,9 +10,8 @@
 // function" — which works because GDScript has no nested funcs. Inner
 // classes aren't handled separately (we treat their funcs as flat).
 //
-// This is the surface Dildz/RtV-Load-Order-Editor uses to derive
-// load-order constraints (a mod that calls super() in foo() must load
-// AFTER any mod that overrides foo() without super()).
+// Used to derive load-order constraints (a mod that calls super() in
+// foo() must load AFTER any mod that overrides foo() without super()).
 
 using System.Text.RegularExpressions;
 

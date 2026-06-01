@@ -35,6 +35,31 @@ public class Settings
     /// was last refreshed. Empty when no check has run yet.</summary>
     public string CacheTimestamp { get; set; } = "";
 
+    /// <summary>Latest version string published for the mod manager
+    /// itself on ModWorkshop (modid 56801). Empty when no check has
+    /// run yet. We use the same /mods/versions endpoint we use for
+    /// every other tracked mod — the manager just isn't a mod in the
+    /// mods grid, so it gets its own status row + cache slot.</summary>
+    public string ManagerLatestVersion { get; set; } = "";
+
+    /// <summary>ISO-8601 timestamp of the last successful manager
+    /// version check. We re-poll once per 24h, same TTL as MML.</summary>
+    public string ManagerCheckedAt { get; set; } = "";
+
+    [JsonIgnore]
+    public bool IsManagerCacheFresh
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(ManagerLatestVersion)) return false;
+            if (!DateTime.TryParse(
+                    ManagerCheckedAt, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out var t)) return false;
+            return (DateTime.UtcNow - t) < TimeSpan.FromHours(24);
+        }
+    }
+
     /// <summary>Latest MML (Vostok Mod Loader) release tag fetched
     /// from GitHub's releases/latest endpoint. Empty when no check
     /// has run yet.</summary>
@@ -88,6 +113,32 @@ public class Settings
     /// pixels so the ratio is preserved when the window resizes.</summary>
     public double SplitterRatio { get; set; }
 
+    /// <summary>Name of the currently-active mod profile, or empty
+    /// before the first profile has been created. The manager keeps
+    /// this in sync with the game's mod_config.cfg
+    /// `[settings] active_profile` — switching the dropdown rewrites
+    /// both. An empty string means the new profile model hasn't been
+    /// adopted yet on this install (pre-migration); ModRegistry's
+    /// existing pass + grid behave the way they did before
+    /// migration was offered.</summary>
+    public string ActiveProfileName { get; set; } = "";
+
+    /// <summary>True after the user has explicitly skipped the
+    /// migration prompt. Without this, the prompt would re-appear
+    /// on every launch — annoying for users who want to keep the
+    /// legacy "all mods, no profile" workflow. Reset to false on
+    /// any successful migration.</summary>
+    public bool MigrationDeclined { get; set; }
+
+    /// <summary>Whether the right-hand Conflicts sidebar is shown.
+    /// Default true — first-run users get the full split layout. When
+    /// false, the SplitContainer's Panel2 is collapsed and the mods
+    /// grid expands to fill the entire width. Toggled by the
+    /// "Hide/Show conflicts" button on the mods toolbar; the saved
+    /// SplitterRatio is preserved so re-showing restores the same
+    /// proportions.</summary>
+    public bool ConflictsVisible { get; set; } = true;
+
     /// <summary>Mod IDs the user has explicitly locked. Locked mods
     /// are skipped by Enable all / Disable all bulk toggles — useful
     /// when a single mod (e.g. Mod Configuration Menu) should always
@@ -96,6 +147,14 @@ public class Settings
     /// callers should treat it as a set.</summary>
     public List<string> LockedMods { get; set; } = new();
 
+    /// <summary>Mod IDs flagged "Testing Mod" — purely a visual
+    /// marker: rows render with a yellow background so the user
+    /// can spot which mods they're currently shaking out at a
+    /// glance, without disturbing enable / lock / priority state.
+    /// Toggle via the row's right-click menu. Persists across
+    /// sessions like LockedMods.</summary>
+    public List<string> TestingMods { get; set; } = new();
+
     /// <summary>Per-column widths the user dragged to. Keyed by
     /// "&lt;grid&gt;.&lt;column-name&gt;" — e.g. "mods.Update",
     /// "conflicts.Type". Fill-mode columns (the Mod-name column,
@@ -103,6 +162,24 @@ public class Settings
     /// they re-compute their own width from the leftover space and
     /// pinning them would break that behaviour on window resize.</summary>
     public Dictionary<string, int> ColumnWidths { get; set; } = new();
+
+    /// <summary>Free-form per-mod notes — keyed by mod_id (case-
+    /// preserved in the dict but the manager reads case-insensitively).
+    /// Surfaced as a tooltip on the Mod-name cell and edited via the
+    /// row's right-click menu. Use cases: remembering why a particular
+    /// mod is locked, tracking a personal "swap when v2 ships" plan,
+    /// jotting compatibility notes that the in-game loader doesn't
+    /// know about. Persisted in settings.json so notes survive
+    /// uninstall / reinstall.</summary>
+    public Dictionary<string, string> ModNotes { get; set; } = new();
+
+    /// <summary>Names of pack groups the user has collapsed in
+    /// the mods grid. Persisted so the collapsed/expanded state
+    /// survives between sessions — collapsing the "Big audio
+    /// pack" group should still hide its 30 mods the next time
+    /// the manager opens. Case-insensitive lookups via the
+    /// IsPackCollapsed helper below.</summary>
+    public List<string> CollapsedPacks { get; set; } = new();
 
     [JsonIgnore]
     public TimeSpan CacheAge

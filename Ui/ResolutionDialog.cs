@@ -229,7 +229,7 @@ public class ResolutionDialog : Form
     {
         if (!m.IsArchive)
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Apply only supports .vmz archive mods at the moment. "
                 + $"`{m.ModId}` is a directory mod — edit it manually for now.",
                 "Not supported",
@@ -239,7 +239,7 @@ public class ResolutionDialog : Form
         if (string.IsNullOrEmpty(_verdict.ConflictKey)
             || string.IsNullOrEmpty(_verdict.MergedSource))
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 "Verdict is missing the conflict path or the merged "
                 + "source — can't apply.",
                 "Not enough data",
@@ -249,7 +249,7 @@ public class ResolutionDialog : Form
 
         var entryName = _verdict.ConflictKey;
         var fileName = Path.GetFileName(m.ArchivePath);
-        var dr = MessageBox.Show(this,
+        var dr = ThemedMessageBox.Show(this,
             $"Replace `{entryName}` inside `{fileName}` with Claude's merged source?\n\n"
             + "A timestamped .bak backup of the .vmz will be saved alongside the "
             + "original first, so you can roll back if anything goes wrong.\n\n"
@@ -266,7 +266,7 @@ public class ResolutionDialog : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Backup failed: {ex.Message}\n\nNothing was changed.",
                 "Apply failed",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -278,7 +278,7 @@ public class ResolutionDialog : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Patch failed: {ex.Message}\n\n"
                 + $"Backup at: {Path.GetFileName(backup)}\n"
                 + "The original may be partially modified — restore from the "
@@ -289,7 +289,7 @@ public class ResolutionDialog : Form
         }
 
         Applied = true;
-        MessageBox.Show(this,
+        ThemedMessageBox.Show(this,
             $"Applied to `{m.DisplayName}`.\n\n"
             + $"Backup saved as `{Path.GetFileName(backup)}` (delete it once "
             + "you've confirmed the mod still works).",

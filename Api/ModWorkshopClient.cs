@@ -28,7 +28,7 @@ public class ModWorkshopClient
 {
     private const string BASE_URL = "https://api.modworkshop.net";
     private const string USER_AGENT =
-        "VostokModManager/0.3.0 (+https://modworkshop.net/g/roadtovostok)";
+        "VostokModManager/0.5.73 (+https://modworkshop.net/g/roadtovostok)";
     private const int BATCH_LIMIT = 100;
 
     private static readonly HttpClient _http = CreateHttpClient();

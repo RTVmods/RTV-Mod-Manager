@@ -71,9 +71,80 @@ public class MainForm : Form
     private Label _updatesLabel = null!;
     private Label _conflictsLabel = null!;
     private Label _mmlLabel = null!;
+    private Label _managerLabel = null!;
+    /// <summary>Status row that surfaces drift between the live
+    /// registry and the active profile — enabled/priority/version
+    /// changes the user made without saving back to profile.json.
+    /// Hidden when there's no drift; click to commit live state
+    /// into the profile.</summary>
+    private Label _driftLabel = null!;
+
+    /// <summary>Status row offering a one-click restore of the
+    /// pre-launch checkpoint. Visible whenever
+    /// CrashCheckpoint.Exists() returns true — i.e. the user has
+    /// launched the game since the last restore. Click to roll
+    /// mod_config.cfg + profile.json back to their pre-launch
+    /// state. Cleared on successful restore so it hides again.</summary>
+    private Label _checkpointLabel = null!;
     private readonly MmlVersionChecker _mml = new();
+
+    /// <summary>The mod manager's own ModWorkshop ID. The page lives
+    /// at https://modworkshop.net/mod/56801. Used by
+    /// CheckManagerUpdateAsync to compare the assembly version
+    /// against the latest published release, surfacing an "update
+    /// available" hint in the Manager status row.</summary>
+    private const int ManagerModWorkshopId = 56801;
     private DataGridView _modsGrid = null!;
     private DataGridView _conflictsGrid = null!;
+    private SplitContainer _split = null!;
+    private Button _conflictsToggle = null!;
+
+    /// <summary>Title-row profile-selector button. Shows the active
+    /// profile name + a dropdown chevron; clicking opens a context
+    /// menu of all known profiles. Null when the new profile model
+    /// hasn't been adopted (pre-migration installs) — in that case
+    /// the button still appears but reads "(no profile)" and the
+    /// menu shows the migration prompt instead of a profile list.</summary>
+    private Button _profileSelector = null!;
+
+    /// <summary>Currently-active mod profile, or null when no
+    /// profile is active (pre-migration). When non-null, the mods
+    /// grid + conflict scope filter to its Mods list.</summary>
+    private Domain.ModProfile? _activeProfile;
+
+    /// <summary>Temporary mod-id allowlist applied on top of the
+    /// active-profile filter. Non-null only while the Dependencies
+    /// dialog is open — narrows the grid to mods that participate
+    /// in dependency relationships (dependents + their declared
+    /// deps) so the user can correlate dialog rows with grid rows
+    /// without scrolling through unrelated mods. Locked mods still
+    /// bypass this just like they bypass the profile filter.</summary>
+    private HashSet<string>? _dependencyFilter;
+
+    /// <summary>FileSystemWatcher on the active mods folder.
+    /// Triggers an auto-rescan when a `.vmz` lands or disappears,
+    /// so the user doesn't have to click Refresh after dropping
+    /// a file in Explorer. Disposed + recreated when the user
+    /// changes the mods folder in Settings.</summary>
+    private FileSystemWatcher? _modsWatcher;
+
+    /// <summary>Debounce timer for the file-system watcher. Multi-
+    /// file copies fire one event per file at high frequency;
+    /// without a debounce we'd rescan N times in a second. The
+    /// timer collapses a burst into a single rescan ~800ms after
+    /// the last event.</summary>
+    private System.Windows.Forms.Timer? _watcherDebounce;
+
+    /// <summary>Snapshot of every profile on disk, refreshed on
+    /// startup and after profile-manager actions. Used to populate
+    /// the title-row selector menu.</summary>
+    private List<Domain.ModProfile> _allProfiles = new();
+    /// <summary>Reapplies the saved splitter ratio. Captured from
+    /// InitializeWindow so the toolbar's "Show conflicts" handler can
+    /// re-snap Panel2 to the right width when the sidebar comes back —
+    /// otherwise the SplitContainer keeps whatever transient
+    /// SplitterDistance it had at startup-while-collapsed.</summary>
+    private Action _applySplit = () => { };
     private Panel _setupBanner = null!;
     private Label _setupBannerLabel = null!;
     private TextBox _filterBox = null!;
@@ -84,12 +155,16 @@ public class MainForm : Form
     private ContextMenuStrip _modsContextMenu = null!;
     private int _modsContextRow = -1;
 
-    /// <summary>Backing list for the conflicts grid, in display order.
-    /// Click handlers look up by row index.</summary>
-    private List<ConflictDetector.Conflict> _displayedConflicts = new();
+    /// <summary>True when settings.json didn't exist at startup —
+    /// i.e. the user has never run any edition of the manager on
+    /// this machine. Drives the welcome / backup prompt. Captured
+    /// before Settings.Load() because Load() returns defaults for a
+    /// missing file, erasing the signal otherwise.</summary>
+    private readonly bool _isFirstRun;
 
     public MainForm()
     {
+        _isFirstRun = !File.Exists(Settings.Path);
         _settings = Settings.Load();
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
 #if AI_RESOLVER
@@ -110,10 +185,250 @@ public class MainForm : Form
     /// so every refresh path (RefreshAllAsync, after-toggle, etc.)
     /// picks up cfg changes the in-game loader may have written
     /// since our last scan.</summary>
+    /// <summary>Return the ModEntry attached to a given grid row,
+    /// or null when the row is a pack-header (Tag is a "pack:…"
+    /// string sentinel). All click / context-menu / value-changed
+    /// handlers route through this so they uniformly skip header
+    /// rows without indexing into the wrong place.</summary>
+    private ModEntry? ModAtRow(int rowIdx)
+    {
+        if (_modsGrid == null) return null;
+        if (rowIdx < 0 || rowIdx >= _modsGrid.Rows.Count) return null;
+        return _modsGrid.Rows[rowIdx].Tag as ModEntry;
+    }
+
+    /// <summary>If the given grid row is a pack-header, returns
+    /// its pack name; otherwise empty string. The header's Tag
+    /// is the sentinel "pack:&lt;name&gt;".</summary>
+    private string PackHeaderAt(int rowIdx)
+    {
+        if (_modsGrid == null) return "";
+        if (rowIdx < 0 || rowIdx >= _modsGrid.Rows.Count) return "";
+        if (_modsGrid.Rows[rowIdx].Tag is string s
+            && s.StartsWith("pack:", StringComparison.Ordinal))
+            return s.Substring(5);
+        return "";
+    }
+
+    /// <summary>Convert a GRID row index into a _displayed
+    /// (mod-only) list index. With pack-header rows interleaved,
+    /// the two indexes don't line up: a grid row at position 5
+    /// might map to _displayed[3] if there are two headers
+    /// above it. When `nearestMod` is true and the targeted row
+    /// is a header, walks down to the first mod row below it
+    /// (so dropping on a header lands the mod at the top of
+    /// that pack). Returns -1 when no valid mod position can
+    /// be derived.</summary>
+    private int GridRowToDisplayedIndex(int gridRowIdx, bool nearestMod = false)
+    {
+        if (_modsGrid == null) return -1;
+        if (gridRowIdx < 0 || gridRowIdx >= _modsGrid.Rows.Count) return -1;
+        // Walk down from gridRowIdx until we land on a mod row,
+        // counting mod rows we pass.
+        var target = nearestMod ? FindNearestModRow(gridRowIdx) : gridRowIdx;
+        if (target < 0) return -1;
+        var entryAtTarget = ModAtRow(target);
+        if (entryAtTarget == null) return -1;
+        // Index of entryAtTarget within _displayed.
+        for (int i = 0; i < _displayed.Count; i++)
+            if (ReferenceEquals(_displayed[i], entryAtTarget)) return i;
+        return -1;
+    }
+
+    private int FindNearestModRow(int gridRowIdx)
+    {
+        // Try the row itself, then walk down, then walk up.
+        if (ModAtRow(gridRowIdx) != null) return gridRowIdx;
+        for (int i = gridRowIdx + 1; i < _modsGrid.Rows.Count; i++)
+            if (ModAtRow(i) != null) return i;
+        for (int i = gridRowIdx - 1; i >= 0; i--)
+            if (ModAtRow(i) != null) return i;
+        return -1;
+    }
+
+    /// <summary>Toggle the collapsed/expanded state of a pack
+    /// group and refresh the grid. Persists to Settings so the
+    /// state survives between sessions.</summary>
+    private void TogglePackCollapse(string packName)
+    {
+        if (string.IsNullOrEmpty(packName)) return;
+        var existing = _settings.CollapsedPacks.FirstOrDefault(p =>
+            string.Equals(p, packName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(existing))
+            _settings.CollapsedPacks.Remove(existing);
+        else
+            _settings.CollapsedPacks.Add(packName);
+        try { _settings.Save(); } catch { /* best-effort */ }
+        PopulateModsGrid();
+    }
+
     private bool Rescan()
     {
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
-        return _registry.Scan(ModsDir, _modConfig);
+        var ok = _registry.Scan(ModsDir, _modConfig);
+        AutoAdoptOrphansIntoActiveProfile();
+        return ok;
+    }
+
+    /// <summary>Reconcile the registry against the active profile:
+    /// any `.vmz` (or directory mod) sitting in the live mods
+    /// folder but NOT listed in the profile gets adopted —
+    /// recorded as a ProfileMod entry and given a cfg
+    /// enabled/priority row. Without this step, mods the user
+    /// drops directly in Explorer end up "registered but
+    /// invisible" — the grid's active-profile filter hides them
+    /// AND mod_config.cfg has no entry so the in-game loader
+    /// leaves them off too.
+    ///
+    /// Constraints:
+    ///   • Only runs when an active profile exists. Pre-migration
+    ///     (no profile) the grid shows everything anyway, so
+    ///     there's nothing to "adopt".
+    ///   • Skips mods with empty mod_id — can't be tracked in
+    ///     profile.json or cfg without one.
+    ///   • Idempotent: a second scan finds nothing to adopt
+    ///     because the previous scan put it in the profile.</summary>
+    private void AutoAdoptOrphansIntoActiveProfile()
+    {
+        if (_activeProfile == null) return;
+
+        var profileIds = new HashSet<string>(
+            _activeProfile.Mods.Select(m => m.ModId),
+            StringComparer.OrdinalIgnoreCase);
+
+        var adopted = 0;
+        var cfgDirty = false;
+        foreach (var entry in _registry.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.ModId)) continue;
+            if (profileIds.Contains(entry.ModId)) continue;
+
+            // Add to profile with the registry's read of the mod's
+            // current state. IsEnabled mirrors whatever the on-
+            // disk location implies (true unless the file lives
+            // under Disabled/), so a mod the user manually parked
+            // in Disabled/ stays disabled. Priority comes from
+            // DeclaredPriority — the [mod] priority in mod.txt —
+            // so the load order matches what the mod author
+            // suggested.
+            _activeProfile.Mods.Add(new Domain.ProfileMod
+            {
+                ModId         = entry.ModId,
+                DisplayName   = entry.DisplayName,
+                Version       = entry.Version,
+                IsEnabled     = entry.IsEnabled,
+                Priority      = entry.DeclaredPriority,
+                ModWorkshopId = entry.ModWorkshopId,
+            });
+            profileIds.Add(entry.ModId);
+
+            // Write the cfg row too — without this the in-game
+            // loader doesn't know the mod is enabled (it doesn't
+            // apply the manager's fallback=true rule).
+            _modConfig.SetEnabled(entry.ModId, entry.Version, entry.IsEnabled);
+            _modConfig.SetPriority(entry.ModId, entry.Version, entry.DeclaredPriority);
+            cfgDirty = true;
+            adopted++;
+        }
+        if (adopted == 0) return;
+
+        _activeProfile.UpdatedAt = DateTime.UtcNow;
+        try { _activeProfile.SaveMetadataOnly(); } catch { /* best-effort */ }
+        if (cfgDirty)
+        {
+            try { _modConfig.Save(); } catch { /* best-effort; rare */ }
+        }
+        // Re-apply cfg to the in-memory registry so each adopted
+        // entry's Priority field reflects the freshly-written cfg
+        // value (cfg writes don't mutate entries directly — they
+        // only persist; the next read picks them up).
+        _registry.Scan(ModsDir, _modConfig);
+    }
+
+    /// <summary>Hook a `FileSystemWatcher` onto the active mods
+    /// folder so dropping a `.vmz` in Explorer (or any other
+    /// external write) auto-triggers a rescan + refresh + orphan
+    /// adoption — no more clicking Refresh after every Explorer
+    /// drop. Disposes any previous watcher, so it's safe to call
+    /// repeatedly (e.g. after the user changes the mods folder
+    /// in Settings).</summary>
+    private void InitModsFolderWatcher()
+    {
+        if (_modsWatcher != null)
+        {
+            try { _modsWatcher.EnableRaisingEvents = false; } catch { }
+            try { _modsWatcher.Dispose(); } catch { }
+            _modsWatcher = null;
+        }
+        if (!Directory.Exists(ModsDir)) return;
+        try
+        {
+            _modsWatcher = new FileSystemWatcher(ModsDir)
+            {
+                Filter = "*.vmz",
+                NotifyFilter = NotifyFilters.FileName
+                             | NotifyFilters.LastWrite
+                             | NotifyFilters.Size,
+                // We only care about top-level live mods. Library/
+                // and Backups/ subfolders are manager-managed and
+                // shouldn't trigger user-visible rescans.
+                IncludeSubdirectories = false,
+            };
+            _modsWatcher.Created += (_, _) => ScheduleAutoRescan();
+            _modsWatcher.Deleted += (_, _) => ScheduleAutoRescan();
+            _modsWatcher.Renamed += (_, _) => ScheduleAutoRescan();
+            _modsWatcher.Changed += (_, _) => ScheduleAutoRescan();
+            _modsWatcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            // Permission denied / unsupported FS — fall back to
+            // manual Refresh, but don't crash the manager.
+            _modsWatcher = null;
+        }
+    }
+
+    /// <summary>Marshal a debounced rescan onto the UI thread. The
+    /// watcher fires on its own thread; we can't touch UI from
+    /// there. The debounce timer collapses a burst (multi-file
+    /// copy from Explorer = N events in a row) into a single
+    /// rescan after the burst settles.</summary>
+    private void ScheduleAutoRescan()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try
+        {
+            BeginInvoke(new Action(() =>
+            {
+                if (_watcherDebounce == null)
+                {
+                    _watcherDebounce = new System.Windows.Forms.Timer
+                    {
+                        Interval = 800,
+                    };
+                    _watcherDebounce.Tick += (_, _) =>
+                    {
+                        _watcherDebounce!.Stop();
+                        try
+                        {
+                            Rescan();
+                            UpdateModsStatus();
+                            PopulateModsGrid();
+                            _lastConflicts = DetectConflictsForActive();
+                            UpdateConflictsStatus(_lastConflicts);
+                            PopulateConflictsList(_lastConflicts);
+                            _modsLabel.Text =
+                                $"Mods: {_registry.Entries.Count} found "
+                                + "— auto-refreshed (mods folder changed).";
+                        }
+                        catch { /* best-effort */ }
+                    };
+                }
+                _watcherDebounce.Stop();
+                _watcherDebounce.Start();
+            }));
+        }
+        catch { /* BeginInvoke can throw if the form's closing */ }
     }
 
     /// <summary>Saves mod_config.cfg, surfacing failures in a
@@ -169,14 +484,17 @@ public class MainForm : Form
 
         // --- Layer 2: huge faded faux-Cyrillic watermark --------
         // Tilted, drawn with VERY low alpha so UI text reads cleanly
-        // on top.
+        // on top. Visible only in the form's empty-background strips
+        // between/beside controls — the layered-overlay experiment
+        // that tried to paint it on TOP of controls produced solid
+        // pink halos from chroma-key alpha bleed and was reverted.
         var prev = g.SmoothingMode;
         var prevText = g.TextRenderingHint;
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
         var watermark = "★ ВФSТФК ★ МФD ★ МАNАGЕЯ ★";
         using (var wf = new Font("Impact", 110f, FontStyle.Bold))
-        using (var wb = new SolidBrush(Color.FromArgb(22, 200, 200, 220)))
+        using (var wb = new SolidBrush(Color.FromArgb(52, 210, 210, 230)))
         {
             var st = g.Save();
             g.TranslateTransform(50, h * 0.36f);
@@ -188,21 +506,26 @@ public class MainForm : Form
         // --- Layer 3: stencil divider with "★ MOD CATALOG ★" label
         // Just below the title row. The label uses Latin so it stays
         // readable; the faux-Cyrillic is reserved for purely
-        // decorative elements (watermark above).
-        var dividerY = 100f;
-        using (var dp = new Pen(Color.FromArgb(110, 200, 50, 60), 2f))
+        // decorative elements (watermark above). Bumped to ~2x for
+        // weight — at 12pt it read as a fine-print caption rather
+        // than a stencil banner.
+        // Sits in the gap between the title-row baseline and the
+        // first status-label row — overlapped "Mods: N found" at y=102.
+        var dividerY = 86f;
+        using (var dp = new Pen(Color.FromArgb(110, 200, 50, 60), 3f))
             g.DrawLine(dp, 24, dividerY, w - 24, dividerY);
         var label = "★  MOD  CATALOG  ★";
-        using (var lf = new Font("Consolas", 12f, FontStyle.Bold))
+        using (var lf = new Font("Consolas", 24f, FontStyle.Bold))
         using (var bgBrush = new SolidBrush(BackColor))
         using (var lb = new SolidBrush(Color.FromArgb(220, 200, 50, 60)))
         {
             var sz = g.MeasureString(label, lf);
             var labelX = (w - sz.Width) / 2f;
             // Erase the line behind the label so the text floats on
-            // a clean background.
-            g.FillRectangle(bgBrush, labelX - 12, dividerY - sz.Height / 2f,
-                sz.Width + 24, sz.Height);
+            // a clean background. Padding bumped with the font to
+            // keep the same visual breathing room around the label.
+            g.FillRectangle(bgBrush, labelX - 18, dividerY - sz.Height / 2f,
+                sz.Width + 36, sz.Height);
             g.DrawString(label, lf, lb, labelX, dividerY - sz.Height / 2f);
         }
         g.SmoothingMode = prev;
@@ -246,36 +569,42 @@ public class MainForm : Form
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 12f);
+        // Global dark theme for every ContextMenuStrip / popup
+        // ToolStrip the app creates — must run BEFORE any menu
+        // is constructed so the renderer is in place when those
+        // controls cache their parent's renderer.
+        Ui.DarkMenuTheme.Install();
+        // Compose the whole frame off-screen and blit once — without
+        // this the soviet decorations painted in OnPaintBackground are
+        // visibly drawn first, then over-painted by child controls a
+        // moment later, which shows up as flicker on startup/resize
+        // and as ghostly white control-rectangles in intermediate
+        // paint frames. The form itself is fixed here; every child
+        // container needs its own DoubleBuffered turned on (via the
+        // EnableDoubleBufferRecursive reflection helper called from
+        // BuildLayout's tail) for the chain to actually compose
+        // glitch-free.
+        DoubleBuffered = true;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.UserPaint,
+            true);
         // ExtractAssociatedIcon pulls the .exe's own embedded icon
         // (set via <ApplicationIcon> in the .csproj). Wrapped — older
         // Win10 builds occasionally throw IOException on this call.
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch { /* form falls back to the default WinForms icon */ }
-        KeyPreview = true;
-        KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Escape) Close();
-        };
-
-        // Drag-and-drop install: drop one or more .vmz files anywhere
-        // on the window to copy them into the mods folder.
+        // Drag-and-drop install:
+        //   .vmz → copy into mods folder + add to active profile
+        //   .json → treat as a mod pack manifest (ModListImport
+        //           shape); routes through the Import list flow,
+        //           same as picking the file via the toolbar.
+        // Mixed drops act on whichever file types match; unknown
+        // extensions are silently ignored.
         AllowDrop = true;
-        DragEnter += (_, e) =>
-        {
-            if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
-            var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-            if (files.Any(f => f.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase)))
-                e.Effect = DragDropEffects.Copy;
-        };
-        DragDrop += async (_, e) =>
-        {
-            if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
-            var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-            var vmz = files
-                .Where(f => f.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (vmz.Count > 0) await InstallModFilesAsync(vmz);
-        };
+        DragEnter += (_, e) => TryAcceptFileDrag(e);
+        DragDrop += async (_, e) => await HandleFileDropAsync(e);
 
         // Restore last-session size + position if we have one. Validate
         // the saved bounds intersect a current screen so a multi-monitor
@@ -318,6 +647,10 @@ public class MainForm : Form
             if (_conflictsGrid != null) SaveColumnWidths(_conflictsGrid, "conflicts");
             try { _settings.Save(); }
             catch { /* best-effort; don't block app close on a write error */ }
+            // Stop the file-system watcher so the rescan timer
+            // can't fire mid-shutdown and touch disposed controls.
+            try { _modsWatcher?.Dispose(); } catch { }
+            try { _watcherDebounce?.Stop(); _watcherDebounce?.Dispose(); } catch { }
         };
     }
 
@@ -327,13 +660,16 @@ public class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            // 8 rows: title (0), banner (1), Claude/Mods/Updates/
-            // Conflicts/MML status labels (2-6), split (7, fills).
-            RowCount = 8,
+            // 11 rows: title (0), banner (1), Claude/Mods/Updates/
+            // Conflicts/MML/Manager/Drift/Checkpoint status labels
+            // (2-9), split (10, fills). Drift + Checkpoint rows
+            // are hidden by default and only appear when
+            // their condition fires.
+            RowCount = 11,
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
-        for (var i = 0; i < 7; i++)
+        for (var i = 0; i < 10; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
@@ -342,7 +678,7 @@ public class MainForm : Form
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 5,
+            ColumnCount = 7,
             RowCount = 1,
             AutoSize = true,
             BackColor = Color.Transparent,
@@ -351,7 +687,9 @@ public class MainForm : Form
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // star
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f)); // title (fills)
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // launch
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profile selector
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profiles
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // mod packager
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // settings
 
         // Decorative red star ornament next to the title — pure
@@ -398,11 +736,12 @@ public class MainForm : Form
 #else
             Text = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  IИTEGЯATED",
 #endif
-            Font = new Font(Font.FontFamily, 24f, FontStyle.Bold),
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            Cursor = Cursors.Hand,
-            Margin = new Padding(0),
+            Font      = new Font(Font.FontFamily, 24f, FontStyle.Bold),
+            AutoSize  = true,
+            Anchor    = AnchorStyles.Left,
+            Cursor    = Cursors.Hand,
+            Margin    = new Padding(0),
+            BackColor = Color.Transparent,
         };
         var asmVer = System.Reflection.Assembly.GetExecutingAssembly()
             .GetName().Version ?? new Version(0, 0, 0);
@@ -421,6 +760,7 @@ public class MainForm : Form
             Anchor    = AnchorStyles.Left,
             Cursor    = Cursors.Hand,
             Margin    = new Padding(2, 0, 0, 0),
+            BackColor = Color.Transparent,
         };
         var titleTip = new ToolTip();
         titleTip.SetToolTip(title, "Click for version and credits");
@@ -434,13 +774,16 @@ public class MainForm : Form
         // Green-themed Launch Game button. Reuses ThemedButton's
         // FlatStyle + sizing scaffolding then overrides the colours
         // for a forest-green look that visually distinguishes it
-        // from the (slate) Settings button next to it.
+        // from the (slate) Settings button next to it. Sits at col
+        // 2 — leftmost of the action group — so the primary action
+        // ("play the game") is the first thing the user sees in
+        // the right-hand button cluster.
         var launchBtn = ThemedButton("▶ Launch Game");
         launchBtn.Width = 170;
         launchBtn.Height = 40;
         launchBtn.AutoSize = false;
-        launchBtn.Anchor = AnchorStyles.Right;
-        launchBtn.Margin = new Padding(0, 8, 8, 0);
+        launchBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        launchBtn.Margin = new Padding(0, 0, 8, 0);
         launchBtn.BackColor = Color.FromArgb(45, 90, 55);
         launchBtn.ForeColor = Color.FromArgb(225, 240, 230);
         launchBtn.FlatAppearance.BorderColor = Color.FromArgb(90, 160, 100);
@@ -448,6 +791,51 @@ public class MainForm : Form
         launchBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 70, 45);
         launchBtn.Click += (_, _) => LaunchVostok();
         titleRow.Controls.Add(launchBtn, 2, 0);
+
+        // Active-profile selector. Reads "📋 Active: <name> ▾" and
+        // clicking opens a ContextMenuStrip with every known
+        // profile + the migration-prompt entry when no profile is
+        // active yet. Populated lazily on click so the menu always
+        // reflects the latest _allProfiles snapshot. The menu's
+        // Font matches the button so the dropdown items don't
+        // jump to a smaller system menu font when the menu opens.
+        _profileSelector = ThemedButton("📋 (no profile) ▾");
+        _profileSelector.Width    = 220;
+        _profileSelector.Height   = 40;
+        _profileSelector.AutoSize = false;
+        _profileSelector.Anchor   = AnchorStyles.Right | AnchorStyles.Top;
+        _profileSelector.Margin   = new Padding(0, 0, 8, 0);
+        _profileSelector.TextAlign = ContentAlignment.MiddleLeft;
+        // Tinted slate-blue to differentiate from the neutral
+        // Profiles… / Packager / Settings buttons next to it —
+        // this is the only one that reflects current STATE
+        // (which profile is live), not a static action, so it
+        // earns its own accent. Distinct from Launch's forest
+        // green and the destructive-action red elsewhere in the
+        // app.
+        _profileSelector.BackColor = Color.FromArgb(45, 70, 100);
+        _profileSelector.ForeColor = Color.FromArgb(225, 240, 255);
+        _profileSelector.FlatAppearance.BorderColor      = Color.FromArgb(90, 140, 200);
+        _profileSelector.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 90, 130);
+        _profileSelector.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 55, 80);
+        // Explicit Font, not `_profileSelector.Font` — the button
+        // hasn't been parented yet at this point, so its Font
+        // property still returns SystemFonts.DefaultFont (Segoe UI
+        // 9pt). Once the button gets added to titleRow it inherits
+        // the form's Segoe UI 12pt, but the menu was already
+        // constructed with the wrong size. Hard-code to match the
+        // form's font.
+        var profileMenu = new ContextMenuStrip
+        {
+            Font = new Font("Segoe UI", 12f),
+        };
+        _profileSelector.Click += (_, _) =>
+        {
+            RebuildProfileSelectorMenu(profileMenu);
+            profileMenu.Show(_profileSelector,
+                new Point(0, _profileSelector.Height));
+        };
+        titleRow.Controls.Add(_profileSelector, 3, 0);
 
         // Profiles button — sits between Launch and Settings so the
         // user can save / apply mod loadouts without digging through
@@ -457,19 +845,34 @@ public class MainForm : Form
         profilesBtn.Width = 140;
         profilesBtn.Height = 40;
         profilesBtn.AutoSize = false;
-        profilesBtn.Anchor = AnchorStyles.Right;
-        profilesBtn.Margin = new Padding(0, 8, 8, 0);
+        profilesBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        profilesBtn.Margin = new Padding(0, 0, 8, 0);
         profilesBtn.Click += async (_, _) => await OpenProfilesDialogAsync();
-        titleRow.Controls.Add(profilesBtn, 3, 0);
+        titleRow.Controls.Add(profilesBtn, 4, 0);
+
+        // Mod Packager — creator-side tool: takes a folder or
+        // existing .vmz/.zip, lets the author edit manifest fields
+        // + tick required/optional dependencies, then writes a
+        // fresh .vmz with forward-slash entry paths (so the in-game
+        // loader accepts it). Lives in the title row alongside
+        // Profiles so creators discover it without digging.
+        var packagerBtn = ThemedButton("🔨 Mod Packager…");
+        packagerBtn.Width = 180;
+        packagerBtn.Height = 40;
+        packagerBtn.AutoSize = false;
+        packagerBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        packagerBtn.Margin = new Padding(0, 0, 8, 0);
+        packagerBtn.Click += (_, _) => OpenModPackagerDialog();
+        titleRow.Controls.Add(packagerBtn, 5, 0);
 
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
         settingsBtn.Height = 40;
         settingsBtn.AutoSize = false;
-        settingsBtn.Anchor = AnchorStyles.Right;
-        settingsBtn.Margin = new Padding(0, 8, 0, 0);
+        settingsBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        settingsBtn.Margin = new Padding(0, 0, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn, 4, 0);
+        titleRow.Controls.Add(settingsBtn, 6, 0);
 
         root.Controls.Add(titleRow, 0, 0);
 
@@ -506,7 +909,40 @@ public class MainForm : Form
         _mmlLabel.Click += async (_, _) => await HandleMmlClickAsync();
         root.Controls.Add(_mmlLabel, 0, 6);
 
-        var split = new SplitContainer
+        // Mod-manager self-update indicator. Same data flow as the
+        // per-mod update column — polls ModWorkshop /mods/versions
+        // with our own modid (ManagerModWorkshopId) and compares
+        // against the assembly version. Clickable: opens the mod page
+        // so the user can grab the new .exe.
+        _managerLabel = NewStatus("Manager: checking …");
+        _managerLabel.Cursor = Cursors.Hand;
+        _managerLabel.Click += async (_, _) => await HandleManagerLabelClickAsync();
+        root.Controls.Add(_managerLabel, 0, 7);
+
+        // Live-vs-active-profile drift indicator. Hidden by
+        // default; UpdateDriftStatus toggles it visible whenever
+        // the live registry's enable / priority / version state
+        // diverges from the active profile. Click to commit the
+        // live state back into the profile so they re-converge.
+        _driftLabel = NewStatus("");
+        _driftLabel.Visible = false;
+        _driftLabel.Cursor = Cursors.Hand;
+        _driftLabel.Click += (_, _) => SyncLiveStateIntoActiveProfile();
+        root.Controls.Add(_driftLabel, 0, 8);
+
+        // Pre-launch checkpoint indicator. Visible only when a
+        // checkpoint exists on disk (set by LaunchVostok before
+        // each launch). Click to restore the snapshot — useful
+        // when the game crashed or behaved oddly after a launch
+        // and the user wants to undo whatever cfg / profile
+        // change preceded it.
+        _checkpointLabel = NewStatus("");
+        _checkpointLabel.Visible = false;
+        _checkpointLabel.Cursor = Cursors.Hand;
+        _checkpointLabel.Click += (_, _) => RestoreCheckpoint();
+        root.Controls.Add(_checkpointLabel, 0, 9);
+
+        _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Vertical,
@@ -517,7 +953,7 @@ public class MainForm : Form
         // Left: interactive mods grid + toolbar (filter, bulk, refresh).
         _modsGrid = BuildModsGrid();
         ApplyColumnWidths(_modsGrid, "mods");
-        split.Panel1.Controls.Add(
+        _split.Panel1.Controls.Add(
             WrapInPanel("Installed mods", _modsGrid, BuildModsToolbar()));
 
         // Right: interactive conflicts grid with Resolve button.
@@ -534,8 +970,13 @@ public class MainForm : Form
             Height = 48,
             BackColor = Color.Transparent,
         };
-        split.Panel2.Controls.Add(
+        _split.Panel2.Controls.Add(
             WrapInPanel("Conflicts", _conflictsGrid, conflictsSpacer));
+        // Apply persisted sidebar visibility. Panel2Collapsed hides the
+        // panel and the splitter; the SplitterDistance underneath is
+        // preserved so re-showing restores the same ratio.
+        _split.Panel2Collapsed = !_settings.ConflictsVisible;
+        SyncConflictsToggleLabel();
 
         // Mods is the primary view — give it ~62% of the width by
         // default, or whatever ratio the user dragged it to last
@@ -564,31 +1005,38 @@ public class MainForm : Form
         var formShown = false;
         void ApplySplit()
         {
-            if (split.Width > 100)
+            // Don't fight the ratio while the sidebar is collapsed —
+            // the SplitContainer ignores SplitterDistance changes in
+            // that state, and re-asserting them would also generate
+            // spurious SplitterMoved events when toggling visibility.
+            if (_split.Panel2Collapsed) return;
+            if (_split.Width > 100)
             {
-                var dist = (int)(split.Width * ratio);
+                var dist = (int)(_split.Width * ratio);
                 // Clamp inside the SplitContainer's allowed range so
                 // a small window can't crash with an out-of-range
                 // SplitterDistance.
-                var min = split.Panel1MinSize;
-                var max = split.Width - split.Panel2MinSize - split.SplitterWidth;
+                var min = _split.Panel1MinSize;
+                var max = _split.Width - _split.Panel2MinSize - _split.SplitterWidth;
                 if (max > min)
-                    split.SplitterDistance = Math.Clamp(dist, min, max);
+                    _split.SplitterDistance = Math.Clamp(dist, min, max);
             }
         }
-        split.Resize += (_, _) => ApplySplit();
-        split.SplitterMoved += (_, _) =>
+        _applySplit = ApplySplit;   // captured for the toggle-button handler
+        _split.Resize += (_, _) => ApplySplit();
+        _split.SplitterMoved += (_, _) =>
         {
             if (!formShown) return;
-            if (split.Width <= 100) return;
-            var observed = (double)split.SplitterDistance / split.Width;
+            if (_split.Panel2Collapsed) return;
+            if (_split.Width <= 100) return;
+            var observed = (double)_split.SplitterDistance / _split.Width;
             // 0.005 = half a percent — well above float drift /
             // int-truncation noise, well below any deliberate drag.
             if (Math.Abs(observed - ratio) < 0.005) return;
             ratio = observed;
             _settings.SplitterRatio = ratio;
         };
-        root.Controls.Add(split, 0, 7);
+        root.Controls.Add(_split, 0, 10);
         Shown += (_, _) =>
         {
             ApplySplit();
@@ -599,14 +1047,57 @@ public class MainForm : Form
             // drag from the user.
             BeginInvoke(() => formShown = true);
         };
+
+        // Once the whole tree is built, flip DoubleBuffered on every
+        // container we own. The form's own DoubleBuffered (set in
+        // InitializeWindow) buffers the FORM's paint surface; every
+        // child container (TableLayoutPanel, Panel, SplitContainer
+        // panels, ...) still paints directly unless its own
+        // DoubleBuffered is true — and the property is protected, so
+        // the only way in from outside is reflection.
+        EnableDoubleBufferRecursive(this);
+    }
+
+    /// <summary>Walks the control tree and forces DoubleBuffered = true
+    /// on every container. Skips DataGridView (which has its own
+    /// internal double-buffering toggle and gets unhappy if the parent
+    /// trick is applied to it). The property is protected on Control,
+    /// so we reach it via reflection — standard WinForms workaround,
+    /// safe because the property has no side effects beyond toggling
+    /// the OptimizedDoubleBuffer style bit.</summary>
+    private static void EnableDoubleBufferRecursive(Control root)
+    {
+        var prop = typeof(Control).GetProperty(
+            "DoubleBuffered",
+            System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Instance);
+        void Walk(Control c)
+        {
+            if (c is not DataGridView)
+            {
+                try { prop?.SetValue(c, true, null); }
+                catch { /* control type doesn't expose the setter — fine */ }
+            }
+            foreach (Control child in c.Controls) Walk(child);
+        }
+        Walk(root);
     }
 
     private static Label NewStatus(string text) => new()
     {
-        Text = text,
-        AutoSize = true,
-        Margin = new Padding(0, 2, 0, 2),
+        Text      = text,
+        AutoSize  = true,
+        Margin    = new Padding(0, 2, 0, 2),
         ForeColor = Color.FromArgb(180, 190, 210),
+        // Explicit Transparent so the form's soviet decorations
+        // (watermark, noise, MOD CATALOG divider) show through the
+        // status row instead of being masked by an opaque label
+        // rectangle. Without this the labels render with the system
+        // default Control color (a light gray that reads as white on
+        // our dark theme) for the brief window before parent BackColor
+        // inheritance kicks in — which is what produces the white-bar
+        // intermediate paint state.
+        BackColor = Color.Transparent,
     };
 
     /// <summary>Themed Button factory — by default WinForms paints
@@ -614,6 +1105,43 @@ public class MainForm : Form
     /// parent form's BackColor/ForeColor, which renders our text in
     /// near-white on near-white. FlatStyle=Flat with explicit colors
     /// keeps everything readable against the dark slate panel.</summary>
+    /// <summary>Inspects a DragEnter / DragOver event for a file
+    /// drop. If at least one path is acceptable (.vmz or .json),
+    /// sets the effect to Copy so the drop cursor lights up.
+    /// Shared between the form-level drop and the mods-grid drop so
+    /// dropping ON the grid works as obviously as dropping on the
+    /// title bar.</summary>
+    private void TryAcceptFileDrag(DragEventArgs e)
+    {
+        if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+        if (files.Any(IsAcceptedDropPath))
+            e.Effect = DragDropEffects.Copy;
+    }
+
+    /// <summary>Handles the file-drop body for both the form and
+    /// the mods grid: .vmz files install via the toolbar's installer
+    /// flow, .json files each kick off their own Import-list session.
+    /// </summary>
+    private async Task HandleFileDropAsync(DragEventArgs e)
+    {
+        if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) return;
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+        var vmz = files
+            .Where(f => f.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var jsons = files
+            .Where(f => f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (vmz.Count > 0) await InstallModFilesAsync(vmz);
+        // Each .json gets its own Import list session — multiple
+        // packs at once would otherwise serialise their plan
+        // dialogs into a single mega-list, which makes the
+        // accept/cancel decision less granular.
+        foreach (var json in jsons)
+            await ImportModListFromFilePickerAsync(json);
+    }
+
     public static Button ThemedButton(string text)
     {
         var b = new Button
@@ -624,6 +1152,18 @@ public class MainForm : Form
             ForeColor = Color.FromArgb(225, 230, 240),
             AutoSize = true,
             UseVisualStyleBackColor = false,
+            // Universal safety net for high-DPI / non-100%-scaling
+            // displays. Most callers set AutoSize=false + an explicit
+            // Width (e.g. 110, 140) because the layouts assume those
+            // pixel sizes. On a 125%/150% DPI screen the system font
+            // scales up but the explicit Width doesn't, so rendered
+            // text can exceed the client rect. Without AutoEllipsis
+            // WinForms doesn't truncate — it clips, and on certain
+            // combos of font scaling vs. button height the text gets
+            // clipped to nothing visible (the "buttons with no text"
+            // bug). AutoEllipsis=true makes the worst case "Br…"
+            // instead of blank.
+            AutoEllipsis = true,
         };
         b.FlatAppearance.BorderColor = Color.FromArgb(85, 100, 120);
         b.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 80, 105);
@@ -664,7 +1204,12 @@ public class MainForm : Form
             AllowUserToResizeRows = false,
             ReadOnly = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
+            // Ctrl/Shift-click ranges so the user can sweep up a
+            // batch of mods to delete in one operation. The
+            // checkbox-toggle column (Cells["On"]) still acts on a
+            // single row at a time — bulk enable/disable already
+            // has its own toolbar buttons.
+            MultiSelect = true,
             RowHeadersVisible = false,
             BackgroundColor = Color.FromArgb(18, 22, 30),
             BorderStyle = BorderStyle.FixedSingle,
@@ -702,10 +1247,13 @@ public class MainForm : Form
             ReadOnly = false,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
-        // Single icon-style Update column. Three cell states:
-        //   "⬆"  in orange — outdated, click to update
-        //   "✓"  in green  — current
-        //   "—"  muted     — no MW link / unknown
+        // Single icon-style Update column. Five cell states:
+        //   "⬆"  in orange    — outdated, click to update
+        //   "✓"  in green     — current
+        //   "↑"  in cool blue — local is newer than ModWorkshop
+        //   "≠"  in lavender  — same release, version strings differ
+        //                       in format (mod.txt vs MW listing)
+        //   "—"  muted        — no MW link / unknown
         // Using a LinkColumn gets the hand cursor + visited-color
         // semantics for free; non-link states are styled per-cell in
         // PopulateModsGrid. Font is bumped so the single-char icons
@@ -820,7 +1368,11 @@ public class MainForm : Form
         };
         _modsContextMenu.Opening += (_, e) =>
         {
-            if (_modsContextRow < 0 || _modsContextRow >= _displayed.Count)
+            // Skip the context menu for pack-header rows — they're
+            // not mods and have no per-mod actions to offer.
+            if (_modsContextRow < 0
+                || _modsContextRow >= _modsGrid.Rows.Count
+                || ModAtRow(_modsContextRow) == null)
             {
                 e.Cancel = true;
                 return;
@@ -832,10 +1384,33 @@ public class MainForm : Form
         // capture even when the click lands in a checkbox/link cell.
         grid.MouseDown += (_, e) =>
         {
-            if (e.Button != MouseButtons.Right) return;
             var hit = grid.HitTest(e.X, e.Y);
+            // Left-click on a pack-header row → toggle collapse.
+            // Header rows have row.Tag = "pack:<name>" set by
+            // PopulateModsGrid; ModAtRow returns null for them.
+            if (e.Button == MouseButtons.Left
+                && hit.RowIndex >= 0
+                && hit.RowIndex < grid.Rows.Count
+                && ModAtRow(hit.RowIndex) == null)
+            {
+                var pack = PackHeaderAt(hit.RowIndex);
+                if (!string.IsNullOrEmpty(pack))
+                {
+                    TogglePackCollapse(pack);
+                    return;
+                }
+            }
+            if (e.Button != MouseButtons.Right) return;
             _modsContextRow = hit.RowIndex;
-            if (hit.RowIndex >= 0 && hit.RowIndex < grid.Rows.Count)
+            if (hit.RowIndex < 0 || hit.RowIndex >= grid.Rows.Count) return;
+            // If the right-clicked row is ALREADY part of a multi-
+            // selection (the user built up a batch with Ctrl/Shift-
+            // click), keep the whole selection so the context menu's
+            // bulk actions act on all of them. Right-clicking a row
+            // OUTSIDE the existing selection collapses to that row
+            // alone — matches Explorer's behaviour and avoids
+            // accidentally deleting an unrelated batch.
+            if (!grid.Rows[hit.RowIndex].Selected)
             {
                 grid.ClearSelection();
                 grid.Rows[hit.RowIndex].Selected = true;
@@ -846,10 +1421,106 @@ public class MainForm : Form
         // No-op for mods without a ModWorkshop ID.
         grid.CellDoubleClick += (_, e) =>
         {
-            if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+            var entry = ModAtRow(e.RowIndex);
+            if (entry == null) return;
             if (grid.Columns[e.ColumnIndex].Name != "Name") return;
-            var entry = _displayed[e.RowIndex];
             if (entry.ModWorkshopId > 0) OpenModPage(entry);
+        };
+
+        // Drag-reorder priority: press a row + drag up or down,
+        // release → the row's priority is set so its visible
+        // position matches the drop. We arm the drag on left-
+        // mouse-down outside the "On" checkbox column (so the
+        // checkbox still toggles cleanly), then DoDragDrop once
+        // the user moves past WinForms' standard drag deadzone.
+        // The Move semantics make the cursor read "I'm moving
+        // this row", which matches the intent.
+        int? dragArmedRow = null;
+        var dragStart = Point.Empty;
+        grid.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left) return;
+            var hit = grid.HitTest(e.X, e.Y);
+            // Only arm drag on a real mod row — header rows are
+            // collapse toggles, not drag handles.
+            if (ModAtRow(hit.RowIndex) == null) return;
+            if (hit.ColumnIndex >= 0
+                && grid.Columns[hit.ColumnIndex].Name == "On") return;
+            dragArmedRow = hit.RowIndex;
+            dragStart = new Point(e.X, e.Y);
+        };
+        grid.MouseUp += (_, _) => dragArmedRow = null;
+        grid.MouseMove += (_, e) =>
+        {
+            if (dragArmedRow == null) return;
+            if ((e.Button & MouseButtons.Left) == 0)
+            {
+                dragArmedRow = null;
+                return;
+            }
+            var dx = Math.Abs(e.X - dragStart.X);
+            var dy = Math.Abs(e.Y - dragStart.Y);
+            if (dx + dy < SystemInformation.DragSize.Width) return;
+            var idx = dragArmedRow.Value;
+            dragArmedRow = null;
+            grid.DoDragDrop(new ModGridReorderPayload(idx),
+                DragDropEffects.Move);
+        };
+        grid.AllowDrop = true;
+        // DragEnter is fired before DragOver and matters for the OS
+        // to register the cursor as a drop target at all. Without an
+        // explicit DragEnter the grid sometimes refuses external-file
+        // drops outright (the form's DragEnter doesn't fire when the
+        // cursor is over a child control with AllowDrop = true).
+        grid.DragEnter += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(typeof(ModGridReorderPayload)) == true)
+            {
+                e.Effect = DragDropEffects.Move;
+                return;
+            }
+            // Fall through to the same file-drop accept logic the
+            // form uses, so dropping a .vmz / .json directly on the
+            // mods list works instead of bouncing off.
+            TryAcceptFileDrag(e);
+        };
+        grid.DragOver += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(typeof(ModGridReorderPayload)) == true)
+            {
+                e.Effect = DragDropEffects.Move;
+                return;
+            }
+            TryAcceptFileDrag(e);
+        };
+        grid.DragDrop += async (_, e) =>
+        {
+            // External file drop (.vmz install / .json import) —
+            // route through the same handler the form uses so the
+            // grid is a valid drop target instead of swallowing the
+            // event. Checked FIRST so a foreign payload never gets
+            // misinterpreted as a reorder.
+            if (e.Data?.GetDataPresent(DataFormats.FileDrop) == true)
+            {
+                await HandleFileDropAsync(e);
+                return;
+            }
+            if (e.Data?.GetDataPresent(typeof(ModGridReorderPayload)) != true) return;
+            var payload = (ModGridReorderPayload)
+                e.Data.GetData(typeof(ModGridReorderPayload))!;
+            var pt = grid.PointToClient(new Point(e.X, e.Y));
+            var hit = grid.HitTest(pt.X, pt.Y);
+            // The payload + hit indexes are GRID-row indexes, but
+            // DragReorderPriority works on _displayed indexes.
+            // Convert: walk to the nearest mod-row above the
+            // dropped position (header rows can't be drop
+            // targets in their own right).
+            var srcDisplayedIdx = GridRowToDisplayedIndex(payload.SourceRowIndex);
+            var tgtDisplayedIdx = hit.RowIndex >= 0
+                ? GridRowToDisplayedIndex(hit.RowIndex, nearestMod: true)
+                : _displayed.Count - 1;
+            if (srcDisplayedIdx < 0 || tgtDisplayedIdx < 0) return;
+            DragReorderPriority(srcDisplayedIdx, tgtDisplayedIdx);
         };
 
         // Checkbox-cell plumbing: by default DataGridView only fires
@@ -863,6 +1534,14 @@ public class MainForm : Form
                 grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
         };
         grid.CellValueChanged += (_, e) => OnGridCellValueChanged(e);
+        // Cross-grid highlight: selecting a mod in the Installed
+        // mods grid auto-selects every conflict row that mod
+        // appears in. Helps the user trace "which conflicts does
+        // this mod participate in" without scanning the Mods
+        // column by hand. Implementation handles its own
+        // re-entrancy via SyncConflictsHighlight so a chain of
+        // SelectionChanged events doesn't loop.
+        grid.SelectionChanged += (_, _) => SyncConflictsHighlight();
         return grid;
     }
 
@@ -878,8 +1557,113 @@ public class MainForm : Form
     private void PopulateModsContextMenu(ContextMenuStrip menu, int rowIndex)
     {
         menu.Items.Clear();
-        if (rowIndex < 0 || rowIndex >= _displayed.Count) return;
-        var entry = _displayed[rowIndex];
+        // rowIndex is a GRID row index, not a _displayed index — the
+        // two diverge whenever pack-header rows are present (each
+        // header shifts the mod rows below it down by one). Validate
+        // against the grid + ModAtRow, NOT _displayed.Count, or the
+        // last mods in a packed/filtered list bail out here with an
+        // empty menu (and an empty ContextMenuStrip silently refuses
+        // to open). A filter shrinks _displayed, which made the
+        // off-by-headers mismatch trip far more often.
+        if (rowIndex < 0
+            || rowIndex >= _modsGrid.Rows.Count
+            || ModAtRow(rowIndex) == null) return;
+
+        // Multi-select branch: when the user has 2+ rows selected
+        // (Ctrl/Shift-click), the per-row actions (Open MW page,
+        // Set MW id, etc.) don't make sense — we surface only the
+        // batch operations. Right now that's a single "Delete N
+        // mods…" item; future bulk actions plug in here too.
+        var selectedEntries = GetSelectedModEntries();
+        if (selectedEntries.Count > 1)
+        {
+            var label = $"Delete {selectedEntries.Count} selected mods…";
+            var batchDeleteItem = new ToolStripMenuItem(label)
+            {
+                ToolTipText = "Send every selected mod's file (or directory) "
+                    + "to the Recycle Bin and clear its mod_config.cfg + "
+                    + "active-profile entries. Single confirmation up "
+                    + "front — no per-mod prompts mid-batch.",
+                ForeColor = Color.FromArgb(245, 130, 120),
+            };
+            batchDeleteItem.Click += (_, _) => DeleteMods(selectedEntries);
+            menu.Items.Add(batchDeleteItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            // Bulk enable / disable on the selection — same as the
+            // toolbar's "Enable all / Disable all" but scoped to
+            // the rows the user picked. Mixed-state selections
+            // show both items; uniform selections show only the
+            // useful one.
+            int enabledCount = selectedEntries.Count(e => e.IsEnabled);
+            int disabledCount = selectedEntries.Count - enabledCount;
+            if (disabledCount > 0)
+            {
+                var enableSelItem = new ToolStripMenuItem(
+                    $"✓ Enable {disabledCount} selected");
+                enableSelItem.Click += (_, _) =>
+                    BulkToggleSelected(selectedEntries, enable: true);
+                menu.Items.Add(enableSelItem);
+            }
+            if (enabledCount > 0)
+            {
+                var disableSelItem = new ToolStripMenuItem(
+                    $"✗ Disable {enabledCount} selected");
+                disableSelItem.Click += (_, _) =>
+                    BulkToggleSelected(selectedEntries, enable: false);
+                menu.Items.Add(disableSelItem);
+            }
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            // Bulk lock / unlock — useful when you want to pin a
+            // batch of mods so Enable all / Disable all / profile
+            // apply skip them all. Mixed-state selections (some
+            // locked, some not) show both items so the user can
+            // pick the action they want.
+            int lockedCount = selectedEntries.Count(IsLocked);
+            int unlockedCount = selectedEntries.Count - lockedCount;
+            if (unlockedCount > 0)
+            {
+                var bulkLockItem = new ToolStripMenuItem(
+                    $"🔒 Lock {unlockedCount} selected")
+                {
+                    ToolTipText = "Add these mods to the lock list — "
+                        + "they'll survive profile switches and skip "
+                        + "Enable all / Disable all bulk actions.",
+                };
+                bulkLockItem.Click += (_, _) => BulkSetLocked(selectedEntries, true);
+                menu.Items.Add(bulkLockItem);
+            }
+            if (lockedCount > 0)
+            {
+                var bulkUnlockItem = new ToolStripMenuItem(
+                    $"🔓 Unlock {lockedCount} selected")
+                {
+                    ToolTipText = "Remove the lock from these mods.",
+                };
+                bulkUnlockItem.Click += (_, _) => BulkSetLocked(selectedEntries, false);
+                menu.Items.Add(bulkUnlockItem);
+            }
+
+            // Bulk priority — one number applied to every selected
+            // mod. Saves the typing for "set this group to load
+            // priority 100" workflows.
+            var bulkPriorityItem = new ToolStripMenuItem(
+                $"Set priority for {selectedEntries.Count} selected…")
+            {
+                ToolTipText = "Prompt for a load-order number; "
+                    + "applies to every selected mod.",
+            };
+            bulkPriorityItem.Click += (_, _) => BulkSetPriority(selectedEntries);
+            menu.Items.Add(bulkPriorityItem);
+
+            return;
+        }
+
+        var entry = ModAtRow(rowIndex);
+        if (entry == null) return; // pack-header row — no per-mod menu
         var hasMw = entry.ModWorkshopId > 0;
 
         var open = new ToolStripMenuItem("Open ModWorkshop page")
@@ -905,6 +1689,14 @@ public class MainForm : Form
         };
         showDescItem.Click += (_, _) => ShowDescription(entry);
         menu.Items.Add(showDescItem);
+
+        var showInFolderItem = new ToolStripMenuItem("Show mod in folder")
+        {
+            ToolTipText = "Open Windows Explorer with this mod's file "
+                + "selected (or its folder, for directory mods).",
+        };
+        showInFolderItem.Click += (_, _) => ShowModInFolder(entry);
+        menu.Items.Add(showInFolderItem);
 
         var setLabel = hasMw ? "Change ModWorkshop ID…" : "Set ModWorkshop ID…";
         var setItem = new ToolStripMenuItem(setLabel)
@@ -964,6 +1756,85 @@ public class MainForm : Form
         lockItem.Click += (_, _) => ToggleLock(entry);
         menu.Items.Add(lockItem);
 
+        // 🧪 Testing flag — purely a visual marker so the user can
+        // spot mods they're currently evaluating. Yellow row tint
+        // applies on the next grid repopulate. State persists in
+        // settings.json so it survives restarts.
+        var testing = IsTesting(entry);
+        var testItem = new ToolStripMenuItem(
+            testing ? "🧪 Clear Testing flag" : "🧪 Mark as Testing Mod")
+        {
+            Checked = testing,
+            ToolTipText = testing
+                ? "Currently flagged for testing — the row is highlighted "
+                + "yellow. Click to clear the flag and remove the highlight."
+                : "Highlight this row yellow so you can spot the mod "
+                + "you're shaking out at a glance. Doesn't change enable, "
+                + "lock, or priority — purely a visual marker.",
+        };
+        testItem.Click += (_, _) => ToggleTesting(entry);
+        menu.Items.Add(testItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+        // Revert to an earlier on-disk snapshot of this mod. Backups
+        // are created automatically by UpdateModAsync before each
+        // overwrite, plus once more at the start of the revert
+        // itself (so the revert is reversible). Disabled when no
+        // backups exist on disk.
+        var backups = string.IsNullOrEmpty(entry.ModId)
+            ? new List<ModBackup.BackupEntry>()
+            : ModBackup.ListBackups(ModsDir, entry.ModId);
+        var revertLabel = backups.Count > 0
+            ? $"Revert to previous version… ({backups.Count})"
+            : "Revert to previous version…";
+        var revertItem = new ToolStripMenuItem(revertLabel)
+        {
+            Enabled = backups.Count > 0,
+            ToolTipText = backups.Count > 0
+                ? $"Pick one of {backups.Count} on-disk snapshot(s) and "
+                  + "roll back this mod's .vmz to that version. The "
+                  + "current version is auto-backed-up first so the "
+                  + "revert is itself reversible."
+                : "No backups on disk yet. Backups are created "
+                  + "automatically the next time the manager updates "
+                  + "this mod from ModWorkshop.",
+        };
+        revertItem.Click += async (_, _) =>
+            await RevertModFromBackupAsync(entry, backups);
+        menu.Items.Add(revertItem);
+
+        // Changelog viewer — reads CHANGELOG.md (or README.md /
+        // CHANGES.md as fallbacks) from inside the .vmz and shows
+        // it in a small dialog. Enabled only when the mod is an
+        // archive AND has one of those files.
+        var changelogItem = new ToolStripMenuItem("Show changelog…")
+        {
+            ToolTipText = "Reads CHANGELOG.md / README.md from the mod's "
+                + ".vmz and displays it. No network call — pure local read.",
+            Enabled = entry.IsArchive && HasInternalChangelog(entry),
+        };
+        changelogItem.Click += (_, _) => ShowChangelogDialog(entry);
+        menu.Items.Add(changelogItem);
+
+        // Per-mod note — free-form text persisted in settings.json,
+        // surfaced as a tooltip on the Mod-name cell so the user
+        // sees their own note when scanning the grid. Label shifts
+        // between "Add" and "Edit" based on whether a note exists.
+        var hasNote = !string.IsNullOrEmpty(entry.ModId)
+            && _settings.ModNotes.ContainsKey(entry.ModId);
+        var noteItem = new ToolStripMenuItem(
+            hasNote ? "Edit note…" : "Add note…")
+        {
+            Enabled = !string.IsNullOrEmpty(entry.ModId),
+            ToolTipText = hasNote
+                ? "Edit the personal note attached to this mod. "
+                  + "Stored in settings.json, shown as a tooltip on the row."
+                : "Attach a personal note to this mod — appears as a "
+                  + "tooltip on the Mod-name cell.",
+        };
+        noteItem.Click += (_, _) => EditModNote(entry);
+        menu.Items.Add(noteItem);
+
         menu.Items.Add(new ToolStripSeparator());
         var deleteItem = new ToolStripMenuItem("Delete mod…")
         {
@@ -975,6 +1846,459 @@ public class MainForm : Form
         };
         deleteItem.Click += (_, _) => DeleteMod(entry);
         menu.Items.Add(deleteItem);
+    }
+
+    // ── Changelog viewer ───────────────────────────────────────
+
+    /// <summary>True when the archive has any of the conventional
+    /// changelog filenames at the root. Checked at menu-build time
+    /// so the "Show changelog…" item disables for mods that don't
+    /// ship one — saves the user a useless click.</summary>
+    private static bool HasInternalChangelog(ModEntry e)
+    {
+        if (!e.IsArchive) return false;
+        foreach (var name in _changelogCandidates)
+            if (e.Files.Any(f => string.Equals(
+                    f, name, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        return false;
+    }
+
+    /// <summary>File names checked in priority order — CHANGELOG.md
+    /// first because it's the conventional name, README.md as a
+    /// fallback for mods that put everything in one file, CHANGES.md
+    /// for older conventions.</summary>
+    private static readonly string[] _changelogCandidates =
+    {
+        "CHANGELOG.md", "CHANGELOG.txt",
+        "README.md", "README.txt",
+        "CHANGES.md", "CHANGES.txt",
+    };
+
+    private void ShowChangelogDialog(ModEntry entry)
+    {
+        if (!entry.IsArchive) return;
+        string? body = null;
+        string? source = null;
+        foreach (var name in _changelogCandidates)
+        {
+            // Files in the archive may be case-different from our
+            // candidate list (CHANGELOG.md vs changelog.md). Match
+            // case-insensitive and use the actual stored name when
+            // calling ReadFileText so the ZipArchive's exact-match
+            // lookup hits.
+            var match = entry.Files.FirstOrDefault(f =>
+                string.Equals(f, name, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(match)) continue;
+            try
+            {
+                var text = entry.ReadFileText(match);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    body   = text;
+                    source = match;
+                    break;
+                }
+            }
+            catch { /* try the next candidate */ }
+        }
+        if (string.IsNullOrEmpty(body))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"`{entry.DisplayName}` doesn't ship a CHANGELOG / README "
+                + "file the manager can find. Try the mod's ModWorkshop "
+                + "page for release notes.",
+                "No changelog",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        using var dlg = new Ui.ChangelogDialog(
+            entry.DisplayName, source!, body!);
+        dlg.ShowDialog(this);
+    }
+
+    // ── Mod notes ──────────────────────────────────────────────
+
+    private void EditModNote(ModEntry entry)
+    {
+        if (string.IsNullOrEmpty(entry.ModId)) return;
+        var current = _settings.ModNotes.TryGetValue(entry.ModId, out var n)
+            ? n : "";
+        var prompt =
+            $"Personal note for `{entry.DisplayName}`. Stored locally in "
+            + "settings.json; appears as a tooltip on the Mod column. "
+            + "Leave blank and click OK to remove an existing note.";
+        var input = Ui.TextInputDialog.PromptMultiline(
+            this, "Edit mod note", prompt, current);
+        if (input == null) return; // Cancel
+        var trimmed = input.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            _settings.ModNotes.Remove(entry.ModId);
+        else
+            _settings.ModNotes[entry.ModId] = trimmed;
+        try { _settings.Save(); } catch { /* best-effort */ }
+        PopulateModsGrid();
+    }
+
+    /// <summary>Returns the ModEntry for every currently-selected
+    /// row in the mods grid, in display order, deduped. Wraps
+    /// _modsGrid.SelectedRows (which is an unstable enumeration —
+    /// the underlying selection is a HashSet that doesn't track
+    /// click order) into a list indexed by `_displayed`.</summary>
+    private List<ModEntry> GetSelectedModEntries()
+    {
+        var rows = new List<(int gridIdx, ModEntry mod)>();
+        foreach (DataGridViewRow r in _modsGrid.SelectedRows)
+        {
+            // Skip pack-header rows — they're selectable visually
+            // but don't correspond to a mod. ModAtRow returns
+            // null for them.
+            if (r.Tag is ModEntry mod) rows.Add((r.Index, mod));
+        }
+        rows.Sort((a, b) => a.gridIdx.CompareTo(b.gridIdx));
+        return rows.Select(x => x.mod).ToList();
+    }
+
+    /// <summary>Batch-delete N selected mods. ONE confirmation up
+    /// front (with a preview list of names — capped so a 50-mod
+    /// selection doesn't produce a wall of text), then iterates
+    /// each and sends to Recycle Bin + clears cfg + drops from
+    /// active profile. Per-mod failures are collected and shown
+    /// in a single report at the end; one mod failing doesn't
+    /// abort the rest of the batch.
+    ///
+    /// Library copies are KEPT (same default as single-mod
+    /// delete) — bulk-prompting per mod for the library-cleanup
+    /// stage would be obnoxious mid-batch. The user can delete
+    /// library copies individually afterward if they want.</summary>
+    /// <summary>Add or remove every entry's mod_id from the lock
+    /// list and persist once. Skips entries with empty mod_id (lock
+    /// state is keyed on it; nothing to add). Refreshes the grid
+    /// so the 🔒 indicator and priority cells update.</summary>
+    private void BulkSetLocked(List<ModEntry> entries, bool lockThem)
+    {
+        if (entries.Count == 0) return;
+        var changed = 0;
+        var skipped = 0;
+        foreach (var e in entries)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) { skipped++; continue; }
+            var isLocked = _settings.LockedMods.Contains(e.ModId);
+            if (lockThem)
+            {
+                if (isLocked) continue;
+                _settings.LockedMods.Add(e.ModId);
+                changed++;
+            }
+            else
+            {
+                if (!isLocked) continue;
+                _settings.LockedMods.Remove(e.ModId);
+                changed++;
+            }
+        }
+        if (changed == 0)
+        {
+            _modsLabel.Text = lockThem
+                ? "All selected mods were already locked."
+                : "No selected mods were locked.";
+            return;
+        }
+        try { _settings.Save(); } catch { /* best-effort */ }
+        PopulateModsGrid();
+        var skipNote = skipped > 0 ? $" ({skipped} skipped — no mod_id)" : "";
+        _modsLabel.Text = lockThem
+            ? $"Locked {changed} mod(s){skipNote}."
+            : $"Unlocked {changed} mod(s){skipNote}.";
+    }
+
+    /// <summary>Prompt once for a priority value, apply it to
+    /// every selected mod via mod_config.cfg. Same write path as
+    /// the single-mod SetModPriorityAsync — we don't touch mod.txt
+    /// because the in-game loader's cfg overrides it. One save at
+    /// the end of the batch.</summary>
+    private void BulkSetPriority(List<ModEntry> entries)
+    {
+        if (entries.Count == 0) return;
+        // Use the first selected mod's current priority as the
+        // default — most useful when the user already has one mod
+        // at the priority they want others to inherit.
+        var defaultStr = entries[0].Priority.ToString();
+        var prompt =
+            $"Enter the load-order priority to apply to {entries.Count} "
+            + "selected mod(s).\n\n"
+            + "Lower numbers load earlier; default is 0. Negative "
+            + "values are fine (e.g. -100 to pin above everything else).\n\n"
+            + "Writes to mod_config.cfg's "
+            + $"[profile.{_modConfig.ActiveProfile}.priority] block — "
+            + "the same key the in-game loader UI edits.";
+        var input = Ui.TextInputDialog.Prompt(
+            this, "Set priority for selected mods", prompt, defaultStr);
+        if (input == null) return;
+        if (!int.TryParse(input.Trim(), out var newPriority))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"Couldn't parse `{input}` as an integer. Priority "
+                + "must be a whole number.",
+                "Invalid input",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var changed = 0;
+        var skipped = 0;
+        foreach (var e in entries)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) { skipped++; continue; }
+            _modConfig.SetPriority(e.ModId, e.Version, newPriority);
+            changed++;
+        }
+        if (changed == 0)
+        {
+            _modsLabel.Text = "No mods updated (selected entries have no mod_id).";
+            return;
+        }
+        if (!SaveModConfigSafely()) return;
+
+        // Mirror into the active profile so the profile.json
+        // matches cfg — same pattern SetModPriorityAsync uses for
+        // the single-mod case.
+        if (_activeProfile != null)
+        {
+            var dirty = false;
+            foreach (var e in entries)
+            {
+                if (string.IsNullOrEmpty(e.ModId)) continue;
+                var pm = _activeProfile.Mods.FirstOrDefault(m =>
+                    string.Equals(m.ModId, e.ModId,
+                        StringComparison.OrdinalIgnoreCase));
+                if (pm == null) continue;
+                if (pm.Priority != newPriority) { pm.Priority = newPriority; dirty = true; }
+            }
+            if (dirty)
+            {
+                _activeProfile.UpdatedAt = DateTime.UtcNow;
+                try { _activeProfile.SaveMetadataOnly(); } catch { }
+            }
+        }
+
+        Rescan();
+        PopulateModsGrid();
+        var skipNote = skipped > 0 ? $" ({skipped} skipped — no mod_id)" : "";
+        _modsLabel.Text = $"Set priority = {newPriority} on {changed} mod(s){skipNote}.";
+    }
+
+    /// <summary>Drag-drop payload: the source row's index in the
+    /// _displayed list at drag-start time. Sent through
+    /// DoDragDrop's IDataObject so the DragDrop handler can read
+    /// it back and compute the move.</summary>
+    private sealed record ModGridReorderPayload(int SourceRowIndex);
+
+    /// <summary>Move the row at `sourceIdx` to land at `targetIdx`
+    /// in the currently-displayed sort order. Sets the moved
+    /// row's priority to fit between its new neighbours. If the
+    /// neighbours leave no integer gap, shifts downstream rows up
+    /// by 1 until there's room — touches O(cluster size) rows
+    /// rather than the whole grid, so manual priorities on
+    /// unrelated mods (e.g. -100 on a high-load pin) survive.</summary>
+    private void DragReorderPriority(int sourceIdx, int targetIdx)
+    {
+        if (sourceIdx < 0 || sourceIdx >= _displayed.Count) return;
+        if (targetIdx < 0) targetIdx = _displayed.Count - 1;
+        if (targetIdx >= _displayed.Count) targetIdx = _displayed.Count - 1;
+        if (sourceIdx == targetIdx) return;
+
+        var moved = _displayed[sourceIdx];
+        if (string.IsNullOrEmpty(moved.ModId))
+        {
+            _modsLabel.Text = "Can't reorder — mod has no mod_id.";
+            return;
+        }
+
+        // Build the post-move visible order.
+        var newOrder = new List<ModEntry>(_displayed);
+        newOrder.RemoveAt(sourceIdx);
+        // When dragging DOWN (source < target), removing the
+        // source shifts every index above it up by 1, so the
+        // index we want to insert AT becomes targetIdx (which
+        // was the row's pre-move position, now identifies the
+        // row that used to sit ABOVE it).
+        var insertAt = sourceIdx < targetIdx ? targetIdx : targetIdx;
+        insertAt = Math.Clamp(insertAt, 0, newOrder.Count);
+        newOrder.Insert(insertAt, moved);
+
+        // Pick a priority that fits between the neighbours.
+        int? aboveP = insertAt > 0 ? newOrder[insertAt - 1].Priority : (int?)null;
+        int? belowP = insertAt + 1 < newOrder.Count
+            ? newOrder[insertAt + 1].Priority
+            : (int?)null;
+
+        int newP;
+        if (aboveP == null && belowP == null)        newP = 0;
+        else if (aboveP == null)                     newP = belowP!.Value - 1;
+        else if (belowP == null)                     newP = aboveP.Value + 1;
+        else if (aboveP.Value + 1 < belowP.Value)    newP = aboveP.Value + 1;
+        else                                          newP = aboveP.Value + 1;
+
+        // Write the moved row's priority + downstream shift if
+        // needed. wantP increments as we walk so any row whose
+        // current priority is below wantP gets bumped to it.
+        _modConfig.SetPriority(moved.ModId, moved.Version, newP);
+        moved.Priority = newP;
+        int wantP = newP + 1;
+        for (int i = insertAt + 1; i < newOrder.Count; i++)
+        {
+            var e = newOrder[i];
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            if (e.Priority >= wantP) break;
+            _modConfig.SetPriority(e.ModId, e.Version, wantP);
+            e.Priority = wantP;
+            wantP++;
+        }
+        if (!SaveModConfigSafely()) return;
+
+        // Mirror into the active profile so cfg + profile.json
+        // agree (same convention as SetModPriorityAsync).
+        if (_activeProfile != null)
+        {
+            var dirty = false;
+            foreach (var e in newOrder)
+            {
+                if (string.IsNullOrEmpty(e.ModId)) continue;
+                var pm = _activeProfile.Mods.FirstOrDefault(m =>
+                    string.Equals(m.ModId, e.ModId,
+                        StringComparison.OrdinalIgnoreCase));
+                if (pm != null && pm.Priority != e.Priority)
+                {
+                    pm.Priority = e.Priority;
+                    dirty = true;
+                }
+            }
+            if (dirty)
+            {
+                _activeProfile.UpdatedAt = DateTime.UtcNow;
+                try { _activeProfile.SaveMetadataOnly(); } catch { }
+            }
+        }
+
+        Rescan();
+        PopulateModsGrid();
+        _modsLabel.Text =
+            $"Reordered `{moved.DisplayName}` to priority {newP}.";
+    }
+
+    private void DeleteMods(List<ModEntry> entries)
+    {
+        if (entries.Count == 0) return;
+        if (entries.Count == 1) { DeleteMod(entries[0]); return; }
+
+        var hasActive = _activeProfile != null;
+        const int previewMax = 10;
+        var preview = string.Join("\n",
+            entries.Take(previewMax).Select(e => $"  • {e.DisplayName}"));
+        if (entries.Count > previewMax)
+            preview += $"\n  …and {entries.Count - previewMax} more";
+
+        var lines = new List<string>
+        {
+            $"Send the following {entries.Count} mods to the Recycle Bin?",
+            "",
+            preview,
+            "",
+            hasActive
+                ? $"For each: drops the profile '{_activeProfile!.Name}' "
+                  + "entry, recycles the file, clears its mod_config.cfg "
+                  + "entry, removes its lock (if any). Library copies are "
+                  + "KEPT — delete those individually if you want them gone."
+                : "For each: recycles the file and clears its "
+                  + "mod_config.cfg entry. Recoverable from the Recycle Bin.",
+        };
+        var dr = Ui.ThemedMessageBox.Show(this,
+            string.Join("\n", lines),
+            $"Delete {entries.Count} mods — confirm",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (dr != DialogResult.Yes) return;
+
+        var failures = new List<(string Name, string Reason)>();
+        var deleted  = 0;
+        var profileDirty = false;
+        var cfgDirty     = false;
+        foreach (var e in entries)
+        {
+            try
+            {
+                if (File.Exists(e.Path))
+                {
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                        e.Path,
+                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                }
+                else if (Directory.Exists(e.Path))
+                {
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                        e.Path,
+                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                }
+                // else: stale row, treat as already-gone — no error.
+
+                if (!string.IsNullOrEmpty(e.ModId))
+                {
+                    _modConfig.RemoveEntry(e.ModId, e.Version);
+                    cfgDirty = true;
+                    if (_settings.LockedMods.Remove(e.ModId))
+                    {
+                        try { _settings.Save(); } catch { }
+                    }
+                    if (hasActive)
+                    {
+                        var removed = _activeProfile!.Mods.RemoveAll(m =>
+                            string.Equals(m.ModId, e.ModId,
+                                StringComparison.OrdinalIgnoreCase));
+                        if (removed > 0) profileDirty = true;
+                    }
+                }
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add((e.DisplayName, ex.Message));
+            }
+        }
+        if (cfgDirty) SaveModConfigSafely();
+        if (profileDirty && _activeProfile != null)
+        {
+            _activeProfile.UpdatedAt = DateTime.UtcNow;
+            try { _activeProfile.SaveMetadataOnly(); } catch { }
+        }
+
+        _modsLabel.Text = failures.Count == 0
+            ? $"Deleted {deleted} mod{(deleted == 1 ? "" : "s")} (sent to Recycle Bin)."
+            : $"Deleted {deleted} mod{(deleted == 1 ? "" : "s")}; {failures.Count} failed.";
+
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
+        if (failures.Count > 0)
+        {
+            var failPreview = string.Join("\n",
+                failures.Take(previewMax)
+                    .Select(f => $"  • {f.Name}: {f.Reason}"));
+            if (failures.Count > previewMax)
+                failPreview += $"\n  …and {failures.Count - previewMax} more";
+            Ui.ThemedMessageBox.Show(this,
+                $"{deleted} deleted; {failures.Count} failed.\n\n{failPreview}",
+                "Batch delete report",
+                MessageBoxButtons.OK,
+                deleted > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Error);
+        }
     }
 
     /// <summary>Sends the mod's .vmz / directory to the Recycle Bin
@@ -996,17 +2320,35 @@ public class MainForm : Form
         }
         catch { /* size is decorative */ }
 
-        var dr = MessageBox.Show(this,
-            $"Delete `{e.DisplayName}`{sizeNote}?\n\n"
-            + $"  • Sends `{fileName}` to the Recycle Bin\n"
-            + "  • Removes its entries from mod_config.cfg\n"
-            + (IsLocked(e) ? "  • Removes its lock\n" : "")
-            + "\nRecoverable from the Recycle Bin if you change your mind. "
-            + "The .bak files (if any) are NOT deleted.",
-            "Delete mod — confirm",
+        // ── Stage 1: remove from the active profile + live folder.
+        // Pre-migration (no active profile) the prompt copy collapses
+        // to a single-stage "send to Recycle Bin" the way it did
+        // before profiles existed. Post-migration the user gets a
+        // two-stage flow: profile-remove now, optional library-
+        // remove second.
+        var hasActive = _activeProfile != null;
+        var stage1Lines = new List<string>();
+        if (hasActive)
+            stage1Lines.Add($"  • Drops the entry from profile '{_activeProfile!.Name}'");
+        stage1Lines.Add($"  • Sends `{fileName}` to the Recycle Bin");
+        stage1Lines.Add("  • Clears its mod_config.cfg entry");
+        if (IsLocked(e)) stage1Lines.Add("  • Removes its lock");
+        var stage1Tail = hasActive
+            ? "\nThe Library copy is KEPT (asked separately after) so "
+              + "other profiles can still reference this version."
+            : "\nRecoverable from the Recycle Bin if you change your mind. "
+              + "The .bak files (if any) are NOT deleted.";
+
+        var title = hasActive
+            ? $"Remove `{e.DisplayName}` from profile '{_activeProfile!.Name}'?"
+            : $"Delete `{e.DisplayName}`{sizeNote}?";
+        var dr = Ui.ThemedMessageBox.Show(this,
+            title + "\n\n"
+            + string.Join("\n", stage1Lines)
+            + stage1Tail,
+            hasActive ? "Remove from active profile" : "Delete mod — confirm",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning,
-            // Default to No so a stray Enter cancels.
             MessageBoxDefaultButton.Button2);
         if (dr != DialogResult.Yes) return;
 
@@ -1032,7 +2374,7 @@ public class MainForm : Form
             }
             else
             {
-                MessageBox.Show(this,
+                Ui.ThemedMessageBox.Show(this,
                     $"Couldn't find `{e.Path}` on disk — nothing to "
                     + "recycle. Refreshing the registry to clean up "
                     + "the stale grid entry.",
@@ -1059,11 +2401,65 @@ public class MainForm : Form
             }
         }
 
-        _modsLabel.Text = $"Deleted `{e.DisplayName}` (sent to Recycle Bin).";
+        // Drop from the active profile's Mods list + persist. The
+        // library is intentionally untouched at this stage.
+        if (hasActive && !string.IsNullOrEmpty(e.ModId))
+        {
+            var removed = _activeProfile!.Mods.RemoveAll(m =>
+                string.Equals(m.ModId, e.ModId,
+                    StringComparison.OrdinalIgnoreCase));
+            if (removed > 0)
+            {
+                _activeProfile.UpdatedAt = DateTime.UtcNow;
+                try { _activeProfile.SaveMetadataOnly(); }
+                catch { /* best-effort */ }
+            }
+        }
+
+        // ── Stage 2: library cleanup (post-migration only, and only
+        // when the library actually has a copy of this version).
+        if (hasActive && !string.IsNullOrEmpty(e.ModId))
+        {
+            var libPath = Domain.ModLibrary.Find(ModsDir, e.ModId, e.Version);
+            if (!string.IsNullOrEmpty(libPath))
+            {
+                var dr2 = Ui.ThemedMessageBox.Show(this,
+                    $"Also delete `{e.DisplayName}` v{e.Version} from the Library?\n\n"
+                    + "  • Removes the canonical .vmz copy from "
+                    + $"{Path.GetFileName(Domain.ModLibrary.LibraryDir(ModsDir))}/ "
+                    + "(Recycle Bin)\n"
+                    + "  • Other profiles referencing this version "
+                    + "won't be able to add the mod back without "
+                    + "re-downloading from ModWorkshop.\n\n"
+                    + "Say NO if you might want this version back later.",
+                    "Delete from Library?",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                if (dr2 == DialogResult.Yes)
+                {
+                    try
+                    {
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                            libPath,
+                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowError("Couldn't delete library copy", ex);
+                    }
+                }
+            }
+        }
+
+        _modsLabel.Text = hasActive
+            ? $"Removed `{e.DisplayName}` from profile '{_activeProfile!.Name}'."
+            : $"Deleted `{e.DisplayName}` (sent to Recycle Bin).";
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
     }
@@ -1104,7 +2500,7 @@ public class MainForm : Form
             // No mod_id in mod.txt — we'd have nothing to key the
             // lock state on. Surface the issue rather than silently
             // doing nothing.
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"`{Path.GetFileName(e.Path)}` has no mod_id in its "
                 + "mod.txt — can't lock without an ID to key off.",
                 "Can't lock",
@@ -1115,6 +2511,35 @@ public class MainForm : Form
             _settings.LockedMods.Remove(e.ModId);
         else
             _settings.LockedMods.Add(e.ModId);
+        _settings.Save();
+        PopulateModsGrid();
+    }
+
+    /// <summary>True when the mod is currently flagged "Testing Mod"
+    /// — purely a visual marker (yellow row tint). Like IsLocked,
+    /// keyed on mod_id so a no-id mod can never be in the set.</summary>
+    private bool IsTesting(ModEntry e)
+        => !string.IsNullOrEmpty(e.ModId)
+            && _settings.TestingMods.Contains(e.ModId);
+
+    /// <summary>Adds or removes the mod from the testing list and
+    /// persists. Triggers a grid repopulate so the yellow tint
+    /// updates immediately.</summary>
+    private void ToggleTesting(ModEntry e)
+    {
+        if (string.IsNullOrEmpty(e.ModId))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"`{Path.GetFileName(e.Path)}` has no mod_id in its "
+                + "mod.txt — can't flag without an ID to key off.",
+                "Can't flag as testing",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (_settings.TestingMods.Contains(e.ModId))
+            _settings.TestingMods.Remove(e.ModId);
+        else
+            _settings.TestingMods.Add(e.ModId);
         _settings.Save();
         PopulateModsGrid();
     }
@@ -1131,7 +2556,10 @@ public class MainForm : Form
             AllowUserToResizeRows = false,
             ReadOnly = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
+            // MultiSelect = true so the cross-grid highlight (selecting
+            // a row in Installed mods auto-selects every conflict row
+            // that mod appears in) can select more than one row.
+            MultiSelect = true,
             RowHeadersVisible = false,
             BackgroundColor = Color.FromArgb(18, 22, 30),
             BorderStyle = BorderStyle.FixedSingle,
@@ -1185,27 +2613,23 @@ public class MainForm : Form
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold),
             },
         });
+        // "What" — plain-English description of the conflict.
+        // Two-line cells: title (what + key) on line 1, type +
+        // resolution hint on line 2. Replaces the raw `Type` + `Key`
+        // columns of the previous design. Fill absorbs leftover width
+        // so the Mods/Wins columns can sit at fixed sensible widths.
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "Type",
-            HeaderText = "Type",
-            Width = 180,
+            Name = "What",
+            HeaderText = "What",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 100,
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Mods",
             HeaderText = "Mods",
             Width = 220,
-        });
-        // Key (Fill) absorbs whatever leftover width remains so the
-        // Wins column can sit at the right edge with a fixed
-        // sensible size.
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "Key",
-            HeaderText = "Key",
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 100,
         });
         // "Wins" — which mod currently wins this conflict given the
         // load order. Last column on the right (per user preference).
@@ -1219,18 +2643,67 @@ public class MainForm : Form
             HeaderText = "Wins",
             Width = 260,
         });
-        // Suppress the button chrome on empty Resolve cells so
-        // non-resolvable conflict rows (everything except
-        // file_overlap) don't render as a column of empty white
-        // tiles against the dark grid.
+        // Combined painter:
+        //   - Banner rows (row.Tag is Severity) → suppress per-cell
+        //     rendering; the banner visual is drawn in RowPrePaint.
+        //   - Resolve column → suppress button chrome on empty cells
+        //     and paint the tier-color gutter stripe at the left edge
+        //     of every data row.
         grid.CellPainting += (_, e) =>
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            var row = grid.Rows[e.RowIndex];
+            if (row.Tag is Severity)
+            {
+                e.Handled = true;
+                return;
+            }
             if (grid.Columns[e.ColumnIndex].Name != "Resolve") return;
             var s = e.Value as string;
-            if (!string.IsNullOrEmpty(s)) return;
-            e.PaintBackground(e.ClipBounds, true);
+            if (string.IsNullOrEmpty(s))
+                e.PaintBackground(e.ClipBounds, true);
+            else
+                e.Paint(e.ClipBounds, e.PaintParts);
+            if (row.Tag is ConflictDetector.Conflict cf)
+            {
+                var (gutter, _, _, _) = TierStyle(SeverityOf(cf.Type), 0);
+                using var b = new SolidBrush(gutter);
+                e.Graphics!.FillRectangle(b,
+                    e.CellBounds.X, e.CellBounds.Y, 4, e.CellBounds.Height);
+            }
             e.Handled = true;
+        };
+        // Banner row visual: solid tier-tinted background, 4px gutter
+        // stripe, severity label centered vertically. Drawn before
+        // cell painting; CellPainting then no-ops for these rows.
+        grid.RowPrePaint += (_, e) =>
+        {
+            if (e.RowIndex < 0) return;
+            var row = grid.Rows[e.RowIndex];
+            if (row.Tag is not Severity sev) return;
+            var label = row.Cells["What"].Value as string ?? "";
+            var (gutter, bannerBg, bannerFg, _) = TierStyle(sev, 0);
+            using (var bg = new SolidBrush(bannerBg))
+                e.Graphics.FillRectangle(bg, e.RowBounds);
+            using (var gut = new SolidBrush(gutter))
+                e.Graphics.FillRectangle(gut,
+                    e.RowBounds.X, e.RowBounds.Y, 4, e.RowBounds.Height);
+            using var font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            TextRenderer.DrawText(e.Graphics, label, font,
+                new Rectangle(e.RowBounds.X + 14, e.RowBounds.Y,
+                              e.RowBounds.Width - 14, e.RowBounds.Height),
+                bannerFg,
+                TextFormatFlags.Left
+                | TextFormatFlags.VerticalCenter
+                | TextFormatFlags.NoPrefix);
+        };
+        // Banner rows aren't selectable — bounce selection off them
+        // so a stray click on a banner doesn't leave it highlighted
+        // (and so keyboard navigation skips over them naturally).
+        grid.SelectionChanged += (_, _) =>
+        {
+            foreach (DataGridViewRow r in grid.SelectedRows)
+                if (r.Tag is Severity) r.Selected = false;
         };
         grid.CellContentClick += async (_, e) => await OnConflictsCellClickedAsync(e);
         return grid;
@@ -1343,60 +2816,510 @@ public class MainForm : Form
             // column headers vertically line up with the mods grid's.
             Height = 48,
             Dock = DockStyle.Top,
-            ColumnCount = 6,
+            // 10 columns: [Filter label][textbox(fill)][× clear][Install]
+            // [Import list][Enable all][Disable all][Refresh][Dependencies][Conflicts toggle].
+            // The × button used to live inside a nested TableLayoutPanel
+            // alongside the textbox — that nest's Dock=Fill + sub-column
+            // sizing kept rendering the × invisible. It's promoted to a
+            // first-class toolbar column here so it renders by the same
+            // rules every other button does.
+            ColumnCount = 10,
             RowCount = 1,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 4, 0, 4),
         };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Filter:
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));       // textbox (fills)
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,  32f));      // × clear
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Install
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Import list
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Enable all
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Disable all
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Refresh
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Dependencies
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Conflicts toggle
 
+        // Filter label. Anchor with no Top/Bottom = vertically centred
+        // in the cell, so it sits on the same horizontal midline as the
+        // textbox and the buttons regardless of their individual
+        // natural heights.
         bar.Controls.Add(new Label
         {
-            Text = "Filter:",
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            ForeColor = Color.FromArgb(180, 190, 210),
-            Margin = new Padding(0, 6, 4, 0),
+            Text      = "Filter:",
+            AutoSize  = true,
+            Anchor    = AnchorStyles.Left,
+            ForeColor = Color.FromArgb(220, 225, 235),
+            BackColor = Color.Transparent,
+            Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
+            Margin    = new Padding(4, 0, 6, 0),
         }, 0, 0);
 
+        // Filter textbox — natural height (TextBox can't stretch
+        // vertically), centred in its cell via Anchor=Left|Right
+        // (horizontal fill, no Top/Bottom = vertical centre).
         _filterBox = new TextBox
         {
-            Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(30, 36, 48),
-            ForeColor = Color.FromArgb(220, 225, 235),
+            Anchor      = AnchorStyles.Left | AnchorStyles.Right,
+            BackColor   = Color.FromArgb(30, 36, 48),
+            ForeColor   = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
             PlaceholderText = "filter by name, id, or filename",
-            Margin = new Padding(0, 4, 8, 4),
+            Margin      = new Padding(0),
         };
-        _filterBox.TextChanged += (_, _) => PopulateModsGrid();
         bar.Controls.Add(_filterBox, 1, 0);
+
+        // × clear chip. Explicit Size matching the textbox height
+        // (~24px for our Segoe UI 12 + FixedSingle), centred in its
+        // cell via the same anchorless-vertical trick. AutoSize=false
+        // so the explicit Height isn't overwritten on layout.
+        var fgActive = Color.FromArgb(235, 240, 250);
+        var fgDim    = Color.FromArgb(120, 132, 156);
+        var clearFilter = new Label
+        {
+            Text        = "×",
+            Font        = new Font("Segoe UI", 12f, FontStyle.Bold),
+            TextAlign   = ContentAlignment.MiddleCenter,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor   = Color.FromArgb(60, 72, 92),
+            ForeColor   = fgDim,
+            Anchor      = AnchorStyles.Left | AnchorStyles.Right,
+            Margin      = new Padding(0, 0, 8, 0),
+            Cursor      = Cursors.Hand,
+            AutoSize    = false,
+            Height      = _filterBox.PreferredHeight,
+        };
+        clearFilter.Click += (_, _) =>
+        {
+            _filterBox.Clear();
+            _filterBox.Focus();
+        };
+        clearFilter.MouseEnter += (_, _) =>
+            clearFilter.BackColor = Color.FromArgb(85, 100, 130);
+        clearFilter.MouseLeave += (_, _) =>
+            clearFilter.BackColor = Color.FromArgb(60, 72, 92);
+        bar.Controls.Add(clearFilter, 2, 0);
+
+        _filterBox.TextChanged += (_, _) =>
+        {
+            clearFilter.ForeColor = _filterBox.Text.Length > 0
+                ? fgActive
+                : fgDim;
+            PopulateModsGrid();
+        };
+        // Esc inside the filter clears it (without bubbling — main form
+        // doesn't trap Esc any more, but suppressing the key also
+        // silences the system "ding").
+        _filterBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Escape) return;
+            _filterBox.Clear();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        };
 
         var install = ThemedButton("Install mod…");
         install.Margin = new Padding(0, 2, 4, 2);
         install.Click += async (_, _) => await InstallModFromFilePickerAsync();
-        bar.Controls.Add(install, 2, 0);
+        bar.Controls.Add(install, 3, 0);
+
+        // Batch-add from a JSON mod-list file (a "I want these mods
+        // plus their deps" manifest the user dropped in). Adds to
+        // the CURRENT active profile — never creates / replaces a
+        // profile, never wipes anything. Each entry's
+        // mod_workshop_id drives the download. Distinct enough from
+        // Install mod… that it gets its own button rather than a
+        // dropdown — the user shouldn't have to dig through a menu
+        // to grab a 50-mod bundle a friend shared as JSON.
+        var importList = ThemedButton("Import list…");
+        importList.Margin = new Padding(0, 2, 4, 2);
+        importList.Click += async (_, _) => await ImportModListFromFilePickerAsync();
+        // Right-click on Import list… → save a hand-editable JSON
+        // template. Keeps the template feature discoverable without
+        // adding another toolbar column; the tooltip below tells
+        // the user about both actions.
+        var importMenu = new ContextMenuStrip
+        {
+            Font = new Font("Segoe UI", 11f),
+        };
+        var saveTemplateItem = new ToolStripMenuItem("📝 Save sample template…")
+        {
+            ToolTipText = "Write a starter JSON file you can edit by hand "
+                        + "to list the mods you want bundled.",
+        };
+        saveTemplateItem.Click += (_, _) => SaveSampleModListTemplate();
+        importMenu.Items.Add(saveTemplateItem);
+        importList.ContextMenuStrip = importMenu;
+        var importTip = new ToolTip();
+        importTip.SetToolTip(importList,
+            "Import a mod-pack JSON into the active profile.\n"
+            + "Right-click for a starter template.");
+        bar.Controls.Add(importList, 4, 0);
 
         var enableAll = ThemedButton("Enable all");
         enableAll.Margin = new Padding(0, 2, 4, 2);
         enableAll.Click += (_, _) => BulkToggle(enable: true);
-        bar.Controls.Add(enableAll, 3, 0);
+        bar.Controls.Add(enableAll, 5, 0);
 
         var disableAll = ThemedButton("Disable all");
         disableAll.Margin = new Padding(0, 2, 4, 2);
         disableAll.Click += (_, _) => BulkToggle(enable: false);
-        bar.Controls.Add(disableAll, 4, 0);
+        bar.Controls.Add(disableAll, 6, 0);
 
         var refresh = ThemedButton("Refresh");
-        refresh.Margin = new Padding(0, 2, 0, 2);
+        refresh.Margin = new Padding(0, 2, 4, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
-        bar.Controls.Add(refresh, 5, 0);
+        bar.Controls.Add(refresh, 7, 0);
+
+        // Dependencies rollup for the active profile. Opens a read-
+        // only dialog listing every mod in the profile that declares
+        // a [dependencies] section, with each declared dep paired
+        // with its live state (✓ enabled / ⚠ disabled / ✗ missing).
+        // Per-mod dependency dialog still lives in the row's right-
+        // click menu — this button is the profile-wide rollup.
+        var deps = ThemedButton("Dependencies");
+        deps.Margin = new Padding(0, 2, 4, 2);
+        deps.Click += (_, _) => ShowProfileDependenciesDialog();
+        bar.Controls.Add(deps, 8, 0);
+
+        // Sidebar toggle. Label flips between "Hide conflicts" and
+        // "Show conflicts" via SyncConflictsToggleLabel so the text
+        // always reflects the current Panel2Collapsed state. Saved to
+        // Settings.ConflictsVisible so the choice persists across
+        // sessions.
+        _conflictsToggle = ThemedButton("Hide conflicts");
+        _conflictsToggle.Margin = new Padding(0, 2, 0, 2);
+        _conflictsToggle.Click += (_, _) =>
+        {
+            var nowVisible = _split.Panel2Collapsed; // about to flip
+            _split.Panel2Collapsed = !nowVisible;
+            _settings.ConflictsVisible = nowVisible;
+            _settings.Save();
+            // Re-snap the splitter to the saved ratio when re-showing —
+            // SplitContainer keeps SplitterDistance across a collapse,
+            // but the value may be stale if the panel was hidden at
+            // startup (ApplySplit no-ops while collapsed).
+            if (nowVisible) _applySplit();
+            SyncConflictsToggleLabel();
+        };
+        bar.Controls.Add(_conflictsToggle, 9, 0);
 
         return bar;
+    }
+
+    /// <summary>True when `path` is a file extension we can act on
+    /// from a drag-drop: .vmz (install) or .json (import list).
+    /// Used by the form-level DragEnter so the cursor only lights
+    /// up "drop ok" for payloads we'll actually handle.</summary>
+    private static bool IsAcceptedDropPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        return path.EndsWith(".vmz",  StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Picks (or accepts a pre-supplied path for) a .json
+    /// mod-list file and hands it off to ImportModListDialog. The
+    /// `preselectedPath` parameter lets the drag-drop handler skip
+    /// the file picker — drop a .json on the form and it routes
+    /// straight here. Bails early with a friendly message when
+    /// there's no active profile (the dialog needs a target to
+    /// merge into; we don't want to silently create one).</summary>
+    private async Task ImportModListFromFilePickerAsync(string preselectedPath = "")
+    {
+        if (_activeProfile == null)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Import adds mods to the ACTIVE profile, but no profile "
+                + "is active yet.\n\nOpen Profiles… to create or activate "
+                + "a profile first, then try Import list… again.",
+                "No active profile",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        string filePath;
+        if (!string.IsNullOrEmpty(preselectedPath) && File.Exists(preselectedPath))
+        {
+            filePath = preselectedPath;
+        }
+        else
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title       = "Import mod list (JSON)",
+                Filter      = "Mod list (*.json)|*.json|All files (*.*)|*.*",
+                Multiselect = false,
+                CheckFileExists = true,
+            };
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(home))
+            {
+                var downloads = Path.Combine(home, "Downloads");
+                if (Directory.Exists(downloads)) dlg.InitialDirectory = downloads;
+            }
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            filePath = dlg.FileName;
+        }
+
+        Domain.ModListImport import;
+        try
+        {
+            import = Domain.ModListImport.LoadFromFile(filePath);
+        }
+        catch (Exception ex)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"Couldn't parse `{Path.GetFileName(filePath)}`:\n\n{ex.Message}\n\n"
+                + "Expected shape:\n"
+                + "{\n"
+                + "  \"mods\": [\n"
+                + "    { \"mod_id\": \"x\", \"mod_workshop_id\": 12345 }\n"
+                + "  ]\n"
+                + "}",
+                "Import failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (import.Mods.Count == 0)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "The JSON parsed cleanly but contained no entries under "
+                + "`mods`. Nothing to import.",
+                "Empty mod list",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        bool applied;
+        List<string> importedIds;
+        // Pass the JSON's directory as the companion dir so the
+        // dialog scans alongside .vmz files for fallback MW ids
+        // when the JSON itself omits them. Covers the common
+        // "drop the JSON next to the .vmz files" flow.
+        var companionDir = Path.GetDirectoryName(filePath) ?? "";
+        using (var importDlg = new Ui.ImportModListDialog(
+            import, _activeProfile, _registry, _mw, ModsDir, companionDir))
+        {
+            importDlg.ShowDialog(this);
+            applied = importDlg.Applied;
+            importedIds = importDlg.InstalledModIds.ToList();
+        }
+
+        // Always rescan + refresh — even when Applied is false the
+        // user might have partially-imported via Cancel, and we want
+        // the grid to reflect whatever DID land on disk.
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        if (applied) await CheckUpdatesAsync();
+
+        // Scan declared deps for every imported mod and prompt to
+        // resolve any that aren't yet installed.
+        if (importedIds.Count > 0)
+            await CheckAndPromptMissingDepsAsync(importedIds);
+    }
+
+    /// <summary>Writes a hand-editable mod-pack JSON template to a
+    /// path the user picks. The file is structured as a working
+    /// example with 4 sample mods, comments explaining each field,
+    /// and `mod_workshop_id` placeholders the user replaces with
+    /// real numbers — exactly what you'd hand to a friend so they
+    /// can drop the file on the manager and merge your pack into
+    /// their active profile.
+    ///
+    /// Triggered from the Import list… button's right-click menu;
+    /// see the toolbar wiring for that hookup.</summary>
+    private void SaveSampleModListTemplate()
+    {
+        using var dlg = new SaveFileDialog
+        {
+            Title    = "Save mod pack template",
+            Filter   = "Mod pack (*.json)|*.json",
+            FileName = "my-mod-pack.json",
+            OverwritePrompt = true,
+        };
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(home))
+        {
+            var docs = Path.Combine(home, "Documents");
+            if (Directory.Exists(docs)) dlg.InitialDirectory = docs;
+        }
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        // Plain text — System.Text.Json's serializer would strip
+        // // comments, so the file is built as a string literal.
+        // Indented with two spaces, JSON-conformant after the
+        // /* … */ comment block at the top is left in (System.Text.
+        // Json's reader ignores them by virtue of our
+        // ReadCommentHandling = Skip option in ModListImport).
+        var template =
+@"{
+  /* Mod pack manifest — drop this file on the mod manager (or use
+     Import list…) to merge every listed mod into your ACTIVE profile.
+
+     • mod_workshop_id (numeric, from the modworkshop.net/mod/<n> URL)
+       drives the download. REQUIRED for any mod the recipient
+       doesn't already have installed.
+     • mod_id is the manifest mod_id (slug, from mod.txt). If
+       you don't know it, leave it as a hint and we'll reconcile
+       to the real id after the download.
+     • display_name is just for the import-plan dialog header.
+     • version, is_enabled, priority are optional.
+     • The `dependencies` array nests the same shape; the
+       importer flattens it so you can structure related mods
+       hierarchically OR list them all top-level — either works. */
+  ""name"": ""My mod pack"",
+  ""description"": ""Description shown at the top of the import dialog."",
+  ""mods"": [
+    {
+      ""mod_id"": ""my-first-mod"",
+      ""display_name"": ""My First Mod"",
+      ""mod_workshop_id"": 00000,
+      ""version"": ""1.0.0"",
+      ""is_enabled"": true,
+      ""priority"": 0
+    },
+    {
+      ""mod_id"": ""my-second-mod"",
+      ""display_name"": ""My Second Mod"",
+      ""mod_workshop_id"": 00000
+    },
+    {
+      ""mod_id"": ""my-third-mod"",
+      ""display_name"": ""My Third Mod"",
+      ""mod_workshop_id"": 00000
+    },
+    {
+      ""mod_id"": ""my-fourth-mod"",
+      ""display_name"": ""My Fourth Mod"",
+      ""mod_workshop_id"": 00000
+    }
+  ]
+}
+";
+        try
+        {
+            File.WriteAllText(dlg.FileName, template);
+            Ui.ThemedMessageBox.Show(this,
+                $"Saved a starter template to:\n\n{dlg.FileName}\n\n"
+                + "Edit the file in any text editor — replace the "
+                + "00000 placeholders with real mod_workshop_id "
+                + "numbers (the digits from each mod's ModWorkshop "
+                + "URL: https://modworkshop.net/mod/<NUMBER>).\n\n"
+                + "Then either drop the .json on this window or "
+                + "use Import list… to bring those mods into your "
+                + "active profile.",
+                "Template saved",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"Couldn't write the template:\n\n{ex.Message}",
+                "Save failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>Opens the Mod Packager — passes the live registry
+    /// so the dependency picker can offer ticks against currently-
+    /// installed mods. Modal because the source/output paths are
+    /// per-session intent; cancellation by closing is fine. Doesn't
+    /// trigger a rescan on close — packing writes a NEW .vmz at the
+    /// user's chosen output path, which by convention lives outside
+    /// the live mods folder.</summary>
+    private void OpenModPackagerDialog()
+    {
+        // Pass the active profile too — its ProfileMod entries
+        // carry mod_workshop_id values that the live mod.txt may
+        // be missing, so the dep grid + Export JSON can surface
+        // MW ids for mods that were originally added via JSON
+        // import / install-list flows.
+        using var dlg = new Ui.ModPackagerDialog(_registry, _activeProfile);
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>Opens the profile-wide dependency rollup. Passes the
+    /// active ModProfile (may be null — the dialog handles that with
+    /// a friendly empty state), the registry for live state, and the
+    /// lock list so locked-but-not-in-profile mods are surfaced too
+    /// (same bypass rule the main grid uses).
+    ///
+    /// Side-effect: while the dialog is open, the main grid is
+    /// filtered to only the mods that participate in dependency
+    /// relationships (dependents + their declared deps). Restored
+    /// on close, including a failure path via try/finally so an
+    /// exception inside the dialog can't leave the grid stuck in
+    /// the narrower view.</summary>
+    private void ShowProfileDependenciesDialog()
+    {
+        _dependencyFilter = BuildDependencyFilterSet();
+        PopulateModsGrid();
+        try
+        {
+            using var dlg = new Ui.ProfileDependenciesDialog(
+                _activeProfile, _registry, _settings.LockedMods);
+            dlg.ShowDialog(this);
+        }
+        finally
+        {
+            _dependencyFilter = null;
+            PopulateModsGrid();
+        }
+    }
+
+    /// <summary>Builds the mod-id set the grid narrows to while the
+    /// Dependencies dialog is open: every mod that declares a
+    /// `[dependencies]` section, plus every mod those entries
+    /// reference. Profile + lock scopes are layered on top by
+    /// PopulateModsGrid — this set is purely the "participates in a
+    /// dep relationship" axis.</summary>
+    private HashSet<string> BuildDependencyFilterSet()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var profileIds = _activeProfile != null
+            ? new HashSet<string>(
+                _activeProfile.Mods.Select(m => m.ModId),
+                StringComparer.OrdinalIgnoreCase)
+            : null;
+        foreach (var entry in _registry.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.ModId)) continue;
+            // Only consider mods the dialog would also consider —
+            // those in the active profile (or all when there's no
+            // active profile, matching the dialog's empty-profile
+            // path which is "do nothing").
+            if (profileIds != null && !profileIds.Contains(entry.ModId)) continue;
+            var required = entry.RequiredDependencies;
+            var optional = entry.OptionalDependencies;
+            if (required.Count == 0 && optional.Count == 0) continue;
+            // The dependent itself + each declared dep id. Deps may
+            // or may not be installed — if they're not, they simply
+            // don't appear in the grid (the dialog already surfaces
+            // the missing-dep status, which is the right place for
+            // that signal).
+            set.Add(entry.ModId);
+            foreach (var d in required) set.Add(d);
+            foreach (var d in optional) set.Add(d);
+        }
+        return set;
+    }
+
+    /// <summary>Keeps the toolbar button label in sync with
+    /// Panel2Collapsed. Called both at startup (after the initial
+    /// collapse state is applied) and on every toggle click. Safe to
+    /// call before the button is constructed — early returns if so,
+    /// since InitializeWindow's first call lands before
+    /// BuildModsToolbar runs.</summary>
+    private void SyncConflictsToggleLabel()
+    {
+        if (_conflictsToggle is null) return;
+        _conflictsToggle.Text = _split.Panel2Collapsed
+            ? "Show conflicts"
+            : "Hide conflicts";
     }
 
     private async Task RunStartupAsync()
@@ -1432,16 +3355,204 @@ public class MainForm : Form
                 "Is the game installed at the default Steam path?";
             return;
         }
+        // Resolve the active profile (if any) and refresh the
+        // title-row selector BEFORE populating the mods grid, so
+        // the grid's profile filter sees the right value on its
+        // first paint instead of flashing the full mod list and
+        // then filtering down.
+        ReloadProfiles();
+        // Now that _activeProfile is resolved, run orphan adoption
+        // explicitly. The first Rescan() above ran with no active
+        // profile (it hadn't been loaded yet) so AutoAdopt
+        // short-circuited; this catch-up pass picks up any .vmz
+        // the user dropped manually in Explorer between sessions.
+        AutoAdoptOrphansIntoActiveProfile();
+        // Arm the live file-system watcher so future Explorer-side
+        // drops + deletes auto-refresh the grid without the user
+        // clicking Refresh. Wired here (after profile resolution)
+        // so the first auto-triggered rescan has the right
+        // active-profile context.
+        InitModsFolderWatcher();
         UpdateModsStatus();
+        UpdateCheckpointStatus();
         PopulateModsGrid();
 
         _conflictsLabel.Text = "Conflicts: detecting (deep analysis) ...";
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
 
+        // Phase-6 migration prompt — fires when:
+        //   • No active profile name yet (new model hasn't been
+        //     adopted on this install)
+        //   • User hasn't already declined the prompt
+        //   • There ARE installed archive mods worth migrating
+        // Runs on the UI thread after the first scan paints, so
+        // the user sees the populated grid behind the modal and
+        // can correlate "found N mods" with their own setup.
+        if (string.IsNullOrEmpty(_settings.ActiveProfileName)
+            && !_settings.MigrationDeclined
+            && _registry.Entries.Any(e => e.IsArchive))
+        {
+            OfferProfileMigration();
+        }
+
         await CheckUpdatesAsync();
         await CheckMmlVersionAsync();
+        // Force-fresh on launch — the cached value is fine for mid-
+        // session refreshes (the 24h TTL keeps the toolbar from
+        // hammering the API), but on a cold start the user expects
+        // the status row to reflect what's actually published, not
+        // what was on the server yesterday. Especially important
+        // when a release ships and the user wants to know there's
+        // an update available immediately.
+        await CheckManagerUpdateAsync(forceFresh: true);
+
+        // First-run welcome — runs AFTER scan + update checks so the
+        // dialog appears on top of a fully-populated form (the user
+        // gets context for what's about to be backed up), and the
+        // backup itself reflects the disk state we just observed. We
+        // Save() unconditionally afterwards so the next launch sees us
+        // as non-first-run regardless of which button was picked
+        // (including X-close → DialogResult.Cancel).
+        if (_isFirstRun)
+        {
+            await OfferFirstRunBackupAsync();
+            try { _settings.Save(); } catch { /* best-effort */ }
+        }
+    }
+
+    /// <summary>Shows the welcome dialog and, if the user accepts,
+    /// writes a .zip of the mods folder + mod_config.cfg to
+    /// Documents\Road to Vostok Mod Manager Backups\. Surfaces both
+    /// success (path + Open folder button) and any IO errors via
+    /// themed message boxes. Best-effort: a missing mods folder or
+    /// missing mod_config.cfg is logged in the success message rather
+    /// than treated as a hard failure.</summary>
+    private async Task OfferFirstRunBackupAsync()
+    {
+        var mcmDir = Path.Combine(
+            Path.GetDirectoryName(ModConfig.DefaultPath) ?? "",
+            "MCM");
+        using var dlg = new Ui.WelcomeDialog(
+            ModsDir, ModConfig.DefaultPath, mcmDir);
+        if (dlg.ShowDialog(this) != DialogResult.Yes) return;
+
+        var backupsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Road to Vostok Mod Manager Backups");
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var zipPath = Path.Combine(backupsDir, $"backup-{stamp}.zip");
+
+        var summary = new System.Text.StringBuilder();
+        try
+        {
+            Directory.CreateDirectory(backupsDir);
+            await Task.Run(() => WriteFirstRunBackup(zipPath, summary));
+            Ui.ThemedMessageBox.Show(this,
+                $"Backup written to:\n\n{zipPath}\n\n{summary}",
+                "Backup complete",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // Open the folder so the user can see / copy / move it.
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName        = backupsDir,
+                    UseShellExecute = true,
+                });
+            }
+            catch { /* user can navigate manually */ }
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't write backup", ex);
+        }
+    }
+
+    /// <summary>Writes the actual zip. Adds each .vmz (and any non-
+    /// hidden file) under `mods/` plus the bare mod_config.cfg at
+    /// the root. Forward slashes in entry paths so the archive opens
+    /// cleanly on every extractor (Windows Explorer, 7-Zip, Linux
+    /// unzip). Summary lines are appended for the success dialog so
+    /// the user can verify what got captured.</summary>
+    private void WriteFirstRunBackup(string zipPath, System.Text.StringBuilder summary)
+    {
+        using var fs = File.Create(zipPath);
+        using var zip = new System.IO.Compression.ZipArchive(
+            fs, System.IO.Compression.ZipArchiveMode.Create);
+
+        // mods folder ------------------------------------------------
+        if (Directory.Exists(ModsDir))
+        {
+            var files = Directory.GetFiles(ModsDir, "*", SearchOption.TopDirectoryOnly);
+            foreach (var f in files)
+            {
+                var name = Path.GetFileName(f);
+                var entry = zip.CreateEntry(
+                    "mods/" + name,
+                    System.IO.Compression.CompressionLevel.Optimal);
+                using var es = entry.Open();
+                using var rs = File.OpenRead(f);
+                rs.CopyTo(es);
+            }
+            summary.AppendLine($"• mods/ — {files.Length} file(s)");
+        }
+        else
+        {
+            summary.AppendLine($"• mods/ — skipped (folder not found at {ModsDir})");
+        }
+
+        // mod_config.cfg --------------------------------------------
+        var cfg = ModConfig.DefaultPath;
+        if (File.Exists(cfg))
+        {
+            var entry = zip.CreateEntry(
+                "mod_config.cfg",
+                System.IO.Compression.CompressionLevel.Optimal);
+            using var es = entry.Open();
+            using var rs = File.OpenRead(cfg);
+            rs.CopyTo(es);
+            summary.AppendLine("• mod_config.cfg");
+        }
+        else
+        {
+            summary.AppendLine("• mod_config.cfg — skipped (no file yet)");
+        }
+
+        // MCM per-mod settings -------------------------------------
+        // Mod Configuration Menu writes to user://MCM/, which in
+        // Godot 4 with the game's project name resolves to
+        // %APPDATA%\Road to Vostok\MCM\. Mirror the whole tree so
+        // every registered mod's saved config is captured, not just
+        // the top-level files. Skipped silently if MCM isn't
+        // installed (the directory doesn't exist).
+        var mcmDir = Path.Combine(
+            Path.GetDirectoryName(cfg) ?? "",
+            "MCM");
+        if (Directory.Exists(mcmDir))
+        {
+            var mcmFiles = Directory.GetFiles(
+                mcmDir, "*", SearchOption.AllDirectories);
+            foreach (var f in mcmFiles)
+            {
+                // Preserve sub-folder structure under MCM/. Replace
+                // backslashes with forward slashes so the archive
+                // opens cleanly in every extractor.
+                var rel = Path.GetRelativePath(mcmDir, f).Replace('\\', '/');
+                var entry = zip.CreateEntry(
+                    "MCM/" + rel,
+                    System.IO.Compression.CompressionLevel.Optimal);
+                using var es = entry.Open();
+                using var rs = File.OpenRead(f);
+                rs.CopyTo(es);
+            }
+            summary.AppendLine($"• MCM/ — {mcmFiles.Length} file(s)");
+        }
+        else
+        {
+            summary.AppendLine("• MCM/ — skipped (MCM not installed)");
+        }
     }
 
     /// <summary>Updates the MML status row: detects the installed
@@ -1540,6 +3651,342 @@ public class MainForm : Form
         }
     }
 
+    // --- mod-manager self-update check ----------------------------
+
+    /// <summary>Cache-first check of the manager's own ModWorkshop
+    /// listing. Reuses _mw.CheckVersionsAsync (the same endpoint we
+    /// hit for every other mod) with a single-id batch. Updates
+    /// _managerLabel + persists the freshly-fetched version into
+    /// Settings.ManagerLatestVersion so a re-launch within 24h skips
+    /// the network call entirely.</summary>
+    private async Task CheckManagerUpdateAsync(bool forceFresh = false)
+    {
+        var installed = ManagerInstalledVersion();
+        string latest = "";
+        bool fromCache = false;
+
+        if (!forceFresh && _settings.IsManagerCacheFresh)
+        {
+            latest = _settings.ManagerLatestVersion;
+            fromCache = true;
+        }
+        else
+        {
+            _managerLabel.Text = "Manager: checking for update …";
+            try
+            {
+                var versions = await _mw.CheckVersionsAsync(
+                    new[] { ManagerModWorkshopId });
+                if (versions.TryGetValue(ManagerModWorkshopId, out var v)
+                    && !string.IsNullOrEmpty(v))
+                {
+                    latest = v;
+                    _settings.ManagerLatestVersion = v;
+                    _settings.ManagerCheckedAt = DateTime.UtcNow.ToString("o");
+                    try { _settings.Save(); } catch { /* best-effort */ }
+                }
+                else if (!string.IsNullOrEmpty(_settings.ManagerLatestVersion))
+                {
+                    // ModWorkshop returned no row for our id (page
+                    // missing / temporarily 404). Fall back to the
+                    // last good value rather than blanking the row.
+                    latest = _settings.ManagerLatestVersion;
+                    fromCache = true;
+                }
+            }
+            catch
+            {
+                if (!string.IsNullOrEmpty(_settings.ManagerLatestVersion))
+                {
+                    latest = _settings.ManagerLatestVersion;
+                    fromCache = true;
+                }
+            }
+        }
+        RenderManagerLabel(installed, latest, fromCache);
+    }
+
+    /// <summary>Reads the running assembly's Version (Major.Minor.
+    /// Build, matching the csproj &lt;Version&gt; tag) so the status
+    /// row's "installed" side is the truth on disk, not whatever was
+    /// last cached. Falls back to "0.0.0" if reflection fails for
+    /// some reason — defensive against trimming/AOT edge cases.</summary>
+    private static string ManagerInstalledVersion()
+    {
+        var v = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version;
+        return v == null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+    }
+
+    private void RenderManagerLabel(string installed, string latest, bool fromCache)
+    {
+        // Reset visual emphasis each call — falls back to the
+        // default status-row look unless the state below escalates
+        // it (outdated → bold + amber).
+        _managerLabel.Font = new Font("Segoe UI", 11f);
+        _managerLabel.ForeColor = Color.FromArgb(180, 190, 210);
+
+        var freshness = fromCache ? " (cached)" : "";
+        if (string.IsNullOrEmpty(latest))
+        {
+            _managerLabel.Text =
+                $"Manager: installed v{installed}; update check failed — "
+                + "click to open ModWorkshop page.";
+            return;
+        }
+        var cmp = CompareVersions(installed, latest);
+        if (cmp == 0)
+        {
+            // Up-to-date: muted green, normal weight — confirms
+            // the state without competing for attention.
+            _managerLabel.ForeColor = Color.FromArgb(120, 180, 130);
+            _managerLabel.Text =
+                $"Manager: v{installed} ✓ up to date{freshness}";
+            return;
+        }
+        if (cmp > 0)
+        {
+            // Ahead of release (running a local build newer than
+            // what's published) — informational blue.
+            _managerLabel.ForeColor = Color.FromArgb(150, 180, 230);
+            _managerLabel.Text =
+                $"Manager: v{installed}  ↑ ahead of published v{latest}{freshness}";
+            return;
+        }
+        // Outdated — escalate. Bold + amber so the row stands out
+        // against the other muted status lines. Glyph repeated +
+        // version delta foregrounded so the user reads "you have
+        // an update" before the surrounding text.
+        _managerLabel.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+        _managerLabel.ForeColor = Color.FromArgb(255, 200, 80);
+        _managerLabel.Text =
+            $"⬆ UPDATE AVAILABLE — Mod Manager v{installed} → v{latest}{freshness}  "
+            + "·  click to auto-update";
+    }
+
+    private void OpenManagerModWorkshopPage()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = $"https://modworkshop.net/mod/{ManagerModWorkshopId}",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't open browser", ex);
+        }
+    }
+
+    /// <summary>Click handler for the Manager status row. When an
+    /// update is available, prompts the user to either auto-
+    /// install (downloads the new .exe and swaps it via a tiny
+    /// batch script) or open the MW page. When up-to-date, just
+    /// opens the page (so the user can still browse / report
+    /// issues).</summary>
+    private async Task HandleManagerLabelClickAsync()
+    {
+        var installed = ManagerInstalledVersion();
+        var latest = _settings.ManagerLatestVersion;
+        var outdated = !string.IsNullOrEmpty(latest)
+                    && CompareVersions(installed, latest) < 0;
+        if (!outdated)
+        {
+            OpenManagerModWorkshopPage();
+            return;
+        }
+        var dr = Ui.ThemedMessageBox.Show(this,
+            $"A newer version of the mod manager is available "
+            + $"(installed v{installed}, latest v{latest}).\n\n"
+            + "Yes → download the new build, swap the .exe in place, "
+            + "relaunch automatically.\n"
+            + "No → just open the ModWorkshop page in your browser.",
+            "Update mod manager",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button1);
+        if (dr == DialogResult.Cancel) return;
+        if (dr == DialogResult.No) { OpenManagerModWorkshopPage(); return; }
+        await AutoUpdateManagerAsync();
+    }
+
+    /// <summary>Download + replace + relaunch flow. Steps:
+    ///   1. Download the latest from ModWorkshop into a temp file.
+    ///   2. If it's a .zip / .vmz, extract; look for an .exe whose
+    ///      name matches our edition (VostokModManagerAI.exe /
+    ///      VostokModManagerIntegrated.exe). Fall back to the
+    ///      first .exe found if no name match.
+    ///   3. Write a small .bat that waits for our process to exit,
+    ///      copies the new .exe over the current one (with retry
+    ///      so a slow shutdown doesn't fail the copy), launches
+    ///      the new .exe, then deletes itself.
+    ///   4. Start the batch and Application.Exit. Windows handles
+    ///      the rest.</summary>
+    private async Task AutoUpdateManagerAsync()
+    {
+        var currentExe = System.Reflection.Assembly.GetExecutingAssembly()
+            .Location;
+        // GetExecutingAssembly().Location is empty for single-file
+        // bundles — fall back to Process MainModule path which
+        // does return the .exe even after self-extraction.
+        if (string.IsNullOrEmpty(currentExe) || !File.Exists(currentExe))
+        {
+            try
+            {
+                currentExe = System.Diagnostics.Process
+                    .GetCurrentProcess().MainModule?.FileName ?? "";
+            }
+            catch { }
+        }
+        if (string.IsNullOrEmpty(currentExe) || !File.Exists(currentExe))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Couldn't locate the running .exe path — auto-update "
+                + "can't proceed. Open the ModWorkshop page and grab "
+                + "the new build manually.",
+                "Auto-update aborted",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var tempDir = Path.Combine(Path.GetTempPath(),
+            "VostokModManagerUpdate_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tempDir);
+        var downloadPath = Path.Combine(tempDir, "download.bin");
+
+        _managerLabel.Text = $"Manager: downloading update …";
+        try
+        {
+            await Task.Run(() =>
+                _mw.DownloadLatestAsync(ManagerModWorkshopId, downloadPath));
+        }
+        catch (Exception ex)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"Couldn't download the update:\n\n{ex.Message}",
+                "Download failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            try { Directory.Delete(tempDir, true); } catch { }
+            return;
+        }
+
+        // Locate the new .exe inside whatever the upload looks like.
+        var newExe = FindUpdateExe(downloadPath, tempDir, currentExe);
+        if (string.IsNullOrEmpty(newExe))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Downloaded the update, but couldn't find a .exe inside "
+                + "the package. Open the ModWorkshop page and install "
+                + "manually.\n\nThe download is at:\n  " + downloadPath,
+                "Update format not recognised",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // Write a swap-and-relaunch batch script and run it.
+        var batPath = Path.Combine(tempDir, "swap.bat");
+        var script =
+            "@echo off\r\n"
+            + ":wait\r\n"
+            + "timeout /t 1 /nobreak >nul\r\n"
+            + $"copy /y \"{newExe}\" \"{currentExe}\" >nul\r\n"
+            + "if errorlevel 1 goto wait\r\n"
+            + $"start \"\" \"{currentExe}\"\r\n"
+            // Self-delete trick: redirect the goto-error to nul,
+            // then chain a del so cmd processes the del AFTER
+            // the script's done parsing this line.
+            + "(goto) 2>nul & del \"%~f0\"\r\n";
+        try { File.WriteAllText(batPath, script); }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't write update script", ex);
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = "cmd.exe",
+                Arguments       = $"/c \"\"{batPath}\"\"",
+                UseShellExecute = true,
+                WindowStyle     = System.Diagnostics.ProcessWindowStyle.Hidden,
+                CreateNoWindow  = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't launch update script", ex);
+            return;
+        }
+        // Hand over to the script. Application.Exit unwires WinForms
+        // cleanly so file handles on the .exe drop, letting the
+        // copy in the script succeed.
+        Application.Exit();
+    }
+
+    /// <summary>Find a .exe inside the downloaded payload that
+    /// matches our edition's assembly name, falling back to any
+    /// .exe when no name match is possible. Returns empty string
+    /// when nothing usable was found.</summary>
+    private static string FindUpdateExe(string downloadPath, string workDir, string currentExe)
+    {
+        // Heuristic 1: payload IS an .exe (author uploaded the
+        // binary directly). Validate via a magic-byte sniff
+        // (MZ header) since the file might just have a wrong
+        // extension.
+        try
+        {
+            if (LooksLikeExe(downloadPath))
+            {
+                var targetName = Path.GetFileName(currentExe);
+                var renamed = Path.Combine(workDir, targetName);
+                File.Copy(downloadPath, renamed, overwrite: true);
+                return renamed;
+            }
+        }
+        catch { /* fall through to zip handling */ }
+
+        // Heuristic 2: zip-shaped payload. Try to extract.
+        var extractDir = Path.Combine(workDir, "extracted");
+        try
+        {
+            Directory.CreateDirectory(extractDir);
+            System.IO.Compression.ZipFile.ExtractToDirectory(
+                downloadPath, extractDir, overwriteFiles: true);
+        }
+        catch { return ""; }
+
+        var exes = Directory.GetFiles(
+            extractDir, "*.exe", SearchOption.AllDirectories);
+        if (exes.Length == 0) return "";
+
+        // Prefer an exe whose filename matches our currently-
+        // running .exe — that's how the user knows the build
+        // matches the edition they're running.
+        var preferred = Path.GetFileName(currentExe);
+        var match = exes.FirstOrDefault(p =>
+            string.Equals(Path.GetFileName(p), preferred,
+                StringComparison.OrdinalIgnoreCase));
+        return match ?? exes[0];
+    }
+
+    /// <summary>Quick "is this an MZ-headed .exe" probe so we
+    /// don't try to ZIP-extract a single .exe upload.</summary>
+    private static bool LooksLikeExe(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            int b0 = fs.ReadByte();
+            int b1 = fs.ReadByte();
+            return b0 == 'M' && b1 == 'Z';
+        }
+        catch { return false; }
+    }
+
     /// <summary>Click on the MML status row: when MML is outdated,
     /// prompt to update; Yes runs the auto-update flow, No falls
     /// through to opening the releases page in the browser.
@@ -1556,7 +4003,7 @@ public class MainForm : Form
             return;
         }
 
-        var dr = MessageBox.Show(this,
+        var dr = Ui.ThemedMessageBox.Show(this,
             $"MML v{installed} is installed; latest is v{latest}.\n\n"
             + $"Download v{latest}'s `modloader.gd` and `override.cfg` "
             + "and replace the files in your game folder?\n\n"
@@ -1650,7 +4097,7 @@ public class MainForm : Form
             var bakNote = backups.Count > 0
                 ? $"\n\nBackups: {string.Join(", ", backups)}"
                 : "\n\n(No prior install — nothing to back up.)";
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"MML updated to v{tag}.\n\n"
                 + "Restart Road to Vostok if it's running for the new "
                 + "loader to take effect."
@@ -1713,6 +4160,416 @@ public class MainForm : Form
         var total = _registry.Entries.Count;
         _modsLabel.Text =
             $"Mods: {total} found  ({enabled} enabled, {total - enabled} disabled)";
+        UpdateDriftStatus();
+    }
+
+    /// <summary>One specific drift between the active profile
+    /// and the live registry. Surfaced to the user in the drift
+    /// dialog before they commit a sync.</summary>
+    private record DriftItem(
+        string ModId,
+        string DisplayName,
+        string Description);
+
+    /// <summary>Compute every drift point between the active
+    /// profile and the live registry. Categories:
+    ///   • toggle    — enabled/disabled flipped
+    ///   • priority  — load-order number changed
+    ///   • version   — file on disk is a different version than
+    ///                 profile.json records
+    ///   • missing   — profile lists a mod that isn't live (Apply
+    ///                 would have to re-fetch it)
+    ///   • adopted   — live mod that isn't in profile (orphan
+    ///                 not yet absorbed)
+    /// Empty list = profile and live state agree.</summary>
+    private List<DriftItem> ComputeDrift()
+    {
+        var result = new List<DriftItem>();
+        if (_activeProfile == null) return result;
+
+        var liveById = new Dictionary<string, ModEntry>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _registry.Entries)
+            if (!string.IsNullOrEmpty(e.ModId)) liveById[e.ModId] = e;
+
+        foreach (var pm in _activeProfile.Mods)
+        {
+            if (string.IsNullOrEmpty(pm.ModId)) continue;
+            var name = !string.IsNullOrEmpty(pm.DisplayName) ? pm.DisplayName : pm.ModId;
+            if (!liveById.TryGetValue(pm.ModId, out var live))
+            {
+                result.Add(new DriftItem(pm.ModId, name,
+                    "in profile but not currently live (Apply will re-fetch)"));
+                continue;
+            }
+            if (pm.IsEnabled != live.IsEnabled)
+                result.Add(new DriftItem(pm.ModId, name,
+                    pm.IsEnabled ? "live: disabled (profile: enabled)"
+                                 : "live: enabled (profile: disabled)"));
+            if (pm.Priority != live.Priority)
+                result.Add(new DriftItem(pm.ModId, name,
+                    $"priority: profile {pm.Priority} → live {live.Priority}"));
+            if (!string.IsNullOrEmpty(pm.Version)
+                && !string.IsNullOrEmpty(live.Version)
+                && !string.Equals(pm.Version, live.Version,
+                       StringComparison.Ordinal))
+                result.Add(new DriftItem(pm.ModId, name,
+                    $"version: profile v{pm.Version} → live v{live.Version}"));
+        }
+        // Live mods not in profile — orphans. Rescan normally
+        // adopts them, but the check surfaces the gap before
+        // that runs.
+        var profileIds = new HashSet<string>(
+            _activeProfile.Mods.Select(m => m.ModId),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _registry.Entries)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            if (profileIds.Contains(e.ModId)) continue;
+            var name = !string.IsNullOrEmpty(e.DisplayName) ? e.DisplayName : e.ModId;
+            result.Add(new DriftItem(e.ModId, name,
+                "live mod not in profile (will be added on sync)"));
+        }
+        result.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName,
+            StringComparison.OrdinalIgnoreCase));
+        return result;
+    }
+
+    /// <summary>Show or hide the drift status row + write a
+    /// short summary line listing the first 2 specific changes
+    /// so the user knows WHAT changed without opening the
+    /// dialog. Clicking the row opens the full list dialog.
+    /// </summary>
+    private void UpdateDriftStatus()
+    {
+        if (_driftLabel == null) return;
+        if (_activeProfile == null) { _driftLabel.Visible = false; return; }
+
+        var drift = ComputeDrift();
+        if (drift.Count == 0)
+        {
+            _driftLabel.Visible = false;
+            return;
+        }
+        _driftLabel.Visible = true;
+        _driftLabel.ForeColor = Color.FromArgb(255, 200, 80);
+        // Inline summary: first 2 specific changes, then "+N more"
+        // if there are more. Gives the user enough context to
+        // decide whether to open the dialog without making the
+        // status bar a wall of text.
+        var preview = string.Join("; ",
+            drift.Take(2).Select(d => $"{d.DisplayName} ({d.Description})"));
+        if (drift.Count > 2)
+            preview += $"; +{drift.Count - 2} more";
+        _driftLabel.Text =
+            $"⚠ Drift ({drift.Count}) vs '{_activeProfile.Name}': "
+            + preview + "  —  click for details.";
+    }
+
+    /// <summary>Toggle the checkpoint status row's visibility +
+    /// text based on which slots have snapshots on disk:
+    ///   • Last-launch only — "🔁 Last-launch checkpoint (Xm ago)
+    ///                        — click to undo your most recent
+    ///                        cfg/profile change."
+    ///   • Last-known-good only — "🔁 Last-known-good (Yh ago) —
+    ///                        click to roll back to last clean
+    ///                        session's state."
+    ///   • Both — "🔁 Checkpoints: last-launch (Xm) + last-known-
+    ///                        good (Yh) — click to choose."
+    ///
+    /// Click handler routes to either a direct restore (single
+    /// slot) or a picker dialog (both).</summary>
+    private void UpdateCheckpointStatus()
+    {
+        if (_checkpointLabel == null) return;
+        var hasLaunch = Domain.CrashCheckpoint.Exists(
+            Domain.CheckpointSlot.LastLaunch);
+        var hasGood = Domain.CrashCheckpoint.Exists(
+            Domain.CheckpointSlot.LastKnownGood);
+        if (!hasLaunch && !hasGood)
+        {
+            _checkpointLabel.Visible = false;
+            return;
+        }
+        _checkpointLabel.Visible = true;
+        _checkpointLabel.ForeColor = Color.FromArgb(170, 200, 240);
+        if (hasLaunch && hasGood)
+        {
+            _checkpointLabel.Text =
+                $"🔁 Checkpoints: last-launch {FormatAge(Domain.CheckpointSlot.LastLaunch)} "
+                + $"+ last-known-good {FormatAge(Domain.CheckpointSlot.LastKnownGood)} "
+                + "— click to choose which to restore.";
+        }
+        else if (hasLaunch)
+        {
+            _checkpointLabel.Text =
+                $"🔁 Last-launch checkpoint {FormatAge(Domain.CheckpointSlot.LastLaunch)} "
+                + "— click to undo your most recent cfg / profile change.";
+        }
+        else
+        {
+            _checkpointLabel.Text =
+                $"🔁 Last-known-good checkpoint {FormatAge(Domain.CheckpointSlot.LastKnownGood)} "
+                + "— click to roll back to your last clean session's state.";
+        }
+    }
+
+    private static string FormatAge(Domain.CheckpointSlot slot)
+    {
+        var marker = Domain.CrashCheckpoint.ReadMarker(slot);
+        if (marker == null) return "";
+        var age = DateTime.UtcNow - marker.CreatedAt;
+        if (age.TotalMinutes < 60) return $"({(int)age.TotalMinutes}m ago)";
+        if (age.TotalHours   < 48) return $"({(int)age.TotalHours}h ago)";
+        return $"({(int)age.TotalDays}d ago)";
+    }
+
+    /// <summary>Click handler for the checkpoint status row.
+    /// Picks a slot (auto when only one exists, picker dialog
+    /// when both) and runs the restore.</summary>
+    private void RestoreCheckpoint()
+    {
+        var hasLaunch = Domain.CrashCheckpoint.Exists(
+            Domain.CheckpointSlot.LastLaunch);
+        var hasGood = Domain.CrashCheckpoint.Exists(
+            Domain.CheckpointSlot.LastKnownGood);
+        if (!hasLaunch && !hasGood) return;
+
+        Domain.CheckpointSlot slot;
+        if (hasLaunch && hasGood)
+        {
+            using var picker = new Ui.CheckpointPickerDialog(
+                Domain.CrashCheckpoint.ReadMarker(Domain.CheckpointSlot.LastLaunch),
+                Domain.CrashCheckpoint.ReadMarker(Domain.CheckpointSlot.LastKnownGood));
+            if (picker.ShowDialog(this) != DialogResult.OK) return;
+            slot = picker.Choice;
+        }
+        else if (hasLaunch) slot = Domain.CheckpointSlot.LastLaunch;
+        else slot = Domain.CheckpointSlot.LastKnownGood;
+
+        DoRestore(slot);
+    }
+
+    private void DoRestore(Domain.CheckpointSlot slot)
+    {
+        var marker = Domain.CrashCheckpoint.ReadMarker(slot);
+        var slotName = slot == Domain.CheckpointSlot.LastLaunch
+            ? "last-launch"
+            : "last-known-good";
+        var msg = marker != null
+            ? $"Restore the {slotName} checkpoint taken "
+              + $"{marker.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}?\n\n"
+              + $"Active profile at snapshot time: '{marker.ActiveProfileName}'.\n\n"
+            : $"Restore the {slotName} checkpoint?\n\n";
+        msg += "Overwrites mod_config.cfg + the active profile's "
+             + "profile.json with the snapshot. Mods themselves on "
+             + "disk aren't touched — only the enabled/priority/"
+             + "version metadata rolls back.";
+        var dr = Ui.ThemedMessageBox.Show(this, msg,
+            $"Restore {slotName} checkpoint",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button1);
+        if (dr != DialogResult.Yes) return;
+
+        var ok = Domain.CrashCheckpoint.Restore(slot,
+            Domain.ModConfig.DefaultPath,
+            _activeProfile?.FolderPath);
+        if (!ok)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Couldn't restore the checkpoint — file write failed. "
+                + "The snapshot is still on disk; check folder permissions.",
+                "Restore failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        // Clear only the restored slot. The OTHER slot still
+        // represents a valid anchor (e.g. restoring last-launch
+        // doesn't invalidate last-known-good).
+        Domain.CrashCheckpoint.Clear(slot);
+        ReloadProfiles();
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+        UpdateCheckpointStatus();
+        _modsLabel.Text = $"{slotName} checkpoint restored.";
+    }
+
+    /// <summary>Best-effort game-process watcher. Polls for a
+    /// process whose name starts with "RoadToVostok" or contains
+    /// "Vostok" (Godot exports vary by build target). If one
+    /// appears within ~60s of launch and later exits with a
+    /// non-zero code OR exits within 30s (likely-crash signal),
+    /// prompt to restore the checkpoint. Silently no-ops when no
+    /// candidate process is found — Steam launches under various
+    /// names and we'd rather miss a crash than annoy the user
+    /// with false positives.</summary>
+    private async Task WatchForCrashAsync()
+    {
+        const int findTimeoutMs = 60_000;
+        const int pollMs = 1_000;
+        var launchTime = DateTime.UtcNow;
+        System.Diagnostics.Process? game = null;
+        var elapsed = 0;
+        while (elapsed < findTimeoutMs && !IsDisposed)
+        {
+            try
+            {
+                foreach (var p in System.Diagnostics.Process.GetProcesses())
+                {
+                    var n = p.ProcessName ?? "";
+                    if (n.StartsWith("RoadToVostok",
+                            StringComparison.OrdinalIgnoreCase)
+                        || (n.IndexOf("vostok",
+                                StringComparison.OrdinalIgnoreCase) >= 0
+                            && !n.Contains("Manager",
+                                StringComparison.OrdinalIgnoreCase)))
+                    {
+                        game = p;
+                        break;
+                    }
+                }
+            }
+            catch { /* permission denied on some processes — keep polling */ }
+            if (game != null) break;
+            await Task.Delay(pollMs);
+            elapsed += pollMs;
+        }
+        if (game == null) return;
+
+        try
+        {
+            await Task.Run(() => game.WaitForExit());
+            var sessionSec = (DateTime.UtcNow - launchTime).TotalSeconds;
+            var exitCode = -1;
+            try { exitCode = game.ExitCode; } catch { /* may throw if process gone */ }
+            // Clean session: exit code 0 AND session was long
+            // enough to be a real play (60s is the threshold —
+            // quick quit-out under a minute is more likely "I
+            // just tested launch / bounced out" than a real
+            // session worth anchoring as last-known-good).
+            var cleanExit = exitCode == 0 && sessionSec >= 60;
+            var likelyCrash = exitCode != 0 || sessionSec < 60;
+            if (cleanExit)
+            {
+                // Promote last-launch → last-known-good. The
+                // current cfg state has been validated by a real
+                // play session.
+                Domain.CrashCheckpoint.PromoteToKnownGood();
+                if (!IsDisposed)
+                    BeginInvoke(new Action(UpdateCheckpointStatus));
+                return;
+            }
+            if (!likelyCrash) return;
+            if (IsDisposed) return;
+            BeginInvoke(new Action(() =>
+            {
+                var hasGood = Domain.CrashCheckpoint.Exists(
+                    Domain.CheckpointSlot.LastKnownGood);
+                var msg =
+                    $"Road to Vostok exited after {(int)sessionSec}s "
+                    + $"(exit code {exitCode}).\n\n"
+                    + "This looks like a crash. Restore a checkpoint?\n\n"
+                    + "• Last-launch — undo just the change you made "
+                    + "right before this launch.\n"
+                    + (hasGood
+                        ? "• Last-known-good — roll back to the state "
+                          + "from the most recent session that ended "
+                          + "cleanly.\n\n"
+                        : "(no last-known-good available yet)\n\n")
+                    + "Yes opens the restore picker; No leaves things "
+                    + "as-is.";
+                var dr = Ui.ThemedMessageBox.Show(this, msg,
+                    "Possible crash detected",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (dr == DialogResult.Yes) RestoreCheckpoint();
+            }));
+        }
+        catch { /* process gone before we could read state; nothing to do */ }
+        finally
+        {
+            try { game.Dispose(); } catch { }
+        }
+    }
+
+    /// <summary>Snapshot the live registry into the active
+    /// profile — write each live mod's enabled/priority/version
+    /// into the matching ProfileMod (creating new entries for
+    /// adopted orphans). The reverse direction (profile → live)
+    /// is what Apply Profile does; this method is the "I tweaked
+    /// the live state, save it back to the profile" shortcut.
+    /// </summary>
+    private void SyncLiveStateIntoActiveProfile()
+    {
+        if (_activeProfile == null) return;
+
+        // Show the user the EXACT list of drift items first so
+        // they can review before committing the sync. A confused
+        // user clicking "save live state" without knowing what
+        // that means is how state-sync flows go wrong.
+        var drift = ComputeDrift();
+        if (drift.Count == 0)
+        {
+            _modsLabel.Text = "No drift detected — nothing to sync.";
+            UpdateDriftStatus();
+            return;
+        }
+
+        var rows = drift
+            .Select(d => (Name: d.DisplayName, Description: d.Description))
+            .ToList();
+        using var dlg = new Ui.DriftDetailDialog(_activeProfile.Name, rows);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        var changed = 0;
+        var byId = _activeProfile.Mods.ToDictionary(
+            m => m.ModId, StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _registry.Entries)
+        {
+            if (string.IsNullOrEmpty(e.ModId)) continue;
+            if (byId.TryGetValue(e.ModId, out var pm))
+            {
+                if (pm.IsEnabled != e.IsEnabled) { pm.IsEnabled = e.IsEnabled; changed++; }
+                if (pm.Priority  != e.Priority)  { pm.Priority  = e.Priority;  changed++; }
+                if (!string.IsNullOrEmpty(e.Version)
+                    && !string.Equals(pm.Version, e.Version, StringComparison.Ordinal))
+                { pm.Version = e.Version; changed++; }
+            }
+            else
+            {
+                _activeProfile.Mods.Add(new Domain.ProfileMod
+                {
+                    ModId         = e.ModId,
+                    DisplayName   = e.DisplayName,
+                    Version       = e.Version,
+                    IsEnabled     = e.IsEnabled,
+                    Priority      = e.Priority,
+                    ModWorkshopId = e.ModWorkshopId,
+                });
+                changed++;
+            }
+        }
+        if (changed == 0)
+        {
+            _modsLabel.Text = "No drift detected — nothing to sync.";
+            UpdateDriftStatus();
+            return;
+        }
+        _activeProfile.UpdatedAt = DateTime.UtcNow;
+        try { _activeProfile.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't save profile", ex);
+            return;
+        }
+        _modsLabel.Text = $"Synced {changed} change(s) into '{_activeProfile.Name}'.";
+        UpdateDriftStatus();
     }
 
     private void UpdateConflictsStatus(List<ConflictDetector.Conflict> conflicts)
@@ -1722,10 +4579,18 @@ public class MainForm : Form
             _conflictsLabel.Text = "Conflicts: none detected ✓";
             return;
         }
-        var byType = conflicts
-            .GroupBy(c => c.Type)
-            .Select(g => $"{g.Count()} {g.Key}");
-        _conflictsLabel.Text = "Conflicts: " + string.Join(", ", byType);
+        var byTier = conflicts
+            .GroupBy(c => SeverityOf(c.Type))
+            .ToDictionary(g => g.Key, g => g.Count());
+        var parts = new List<string>();
+        if (byTier.TryGetValue(Severity.Blocking, out var b) && b > 0)
+            parts.Add($"{b} load-blocking");
+        if (byTier.TryGetValue(Severity.Behavior, out var be) && be > 0)
+            parts.Add($"{be} behavior");
+        if (byTier.TryGetValue(Severity.Info, out var i) && i > 0)
+            parts.Add($"{i} info");
+        _conflictsLabel.Text =
+            $"Conflicts: {conflicts.Count} ({string.Join(" · ", parts)})";
     }
 
     private void PopulateModsGrid()
@@ -1748,11 +4613,118 @@ public class MainForm : Form
             return false;
         }
 
+        // Profile scope: when a profile is active, only its mods
+        // appear in the grid. Pre-migration (no active profile),
+        // every installed mod still shows — the behaviour before
+        // Phase 3 / the new model. `InActiveProfile` short-circuits
+        // to "always true" in that case.
+        // LOCKED mods are ALWAYS visible regardless of profile
+        // membership — the lock semantic is "don't modify or hide
+        // this mod"; filtering it out of the grid because the
+        // active profile doesn't list it would surprise the user
+        // (and make it impossible to unlock without switching
+        // profiles first).
+        var activeIds = _activeProfile != null
+            ? new HashSet<string>(
+                _activeProfile.Mods.Select(m => m.ModId),
+                StringComparer.OrdinalIgnoreCase)
+            : null;
+        var lockedIds = new HashSet<string>(
+            _settings.LockedMods,
+            StringComparer.OrdinalIgnoreCase);
+        bool InActiveProfile(ModEntry e)
+        {
+            if (activeIds == null) return true;
+            if (string.IsNullOrEmpty(e.ModId)) return false;
+            if (activeIds.Contains(e.ModId)) return true;
+            // Locked mods bypass the profile filter so the user
+            // always sees what's locked.
+            return lockedIds.Contains(e.ModId);
+        }
+
+        // Dependency-rollup filter (set only while the Dependencies
+        // dialog is open). Same locked-bypass rule as the profile
+        // filter — locks always show regardless of the narrower
+        // dependency scope.
+        var depFilter = _dependencyFilter;
+        bool InDependencyScope(ModEntry e)
+        {
+            if (depFilter == null) return true;
+            if (string.IsNullOrEmpty(e.ModId)) return false;
+            if (depFilter.Contains(e.ModId)) return true;
+            return lockedIds.Contains(e.ModId);
+        }
+
         _displayed = _registry.Entries
+            .Where(InActiveProfile)
+            .Where(InDependencyScope)
             .Where(Matches)
             .OrderBy(e => e.Priority)
             .ThenBy(e => Path.GetFileName(e.Path), StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // Build the row sequence: unpacked mods appear inline at
+        // their natural priority; named packs are CONTIGUOUS
+        // blocks anchored at the minimum priority of any mod in
+        // the pack (so a pack containing the -100-priority MCM
+        // would sit near the top, while a pack of late-loaders
+        // sits near the bottom). The block emits a single header
+        // row + its mods in priority order; collapse hides the
+        // mods but keeps the header in place.
+        var packsByMod = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase);
+        if (_activeProfile != null)
+        {
+            foreach (var pm in _activeProfile.Mods)
+            {
+                if (string.IsNullOrEmpty(pm.ModId)) continue;
+                if (!string.IsNullOrEmpty(pm.PackName))
+                    packsByMod[pm.ModId] = pm.PackName;
+            }
+        }
+
+        // Bucket each displayed mod by pack name (empty → singleton).
+        var packBuckets = new Dictionary<string, List<ModEntry>>(
+            StringComparer.OrdinalIgnoreCase);
+        var unpackedSingles = new List<ModEntry>();
+        foreach (var e in _displayed)
+        {
+            var pack = !string.IsNullOrEmpty(e.ModId)
+                && packsByMod.TryGetValue(e.ModId, out var p)
+                && !string.IsNullOrEmpty(p) ? p : "";
+            if (string.IsNullOrEmpty(pack))
+            {
+                unpackedSingles.Add(e);
+            }
+            else
+            {
+                if (!packBuckets.TryGetValue(pack, out var list))
+                    packBuckets[pack] = list = new List<ModEntry>();
+                list.Add(e);
+            }
+        }
+
+        // Each "unit" is either an unpacked mod (sort key = its
+        // priority) or a pack block (sort key = min priority of
+        // its members). Render order is the unit sequence after
+        // sorting by that key + a stable secondary tiebreak.
+        var units = new List<(int sortKey, string secondary, ModEntry? single, string? packName, List<ModEntry>? packMods)>();
+        foreach (var e in unpackedSingles)
+            units.Add((e.Priority, Path.GetFileName(e.Path), e, null, null));
+        foreach (var kvp in packBuckets)
+        {
+            var minPrio = kvp.Value.Min(m => m.Priority);
+            units.Add((minPrio, kvp.Key, null, kvp.Key, kvp.Value));
+        }
+        units.Sort((a, b) =>
+        {
+            var k = a.sortKey.CompareTo(b.sortKey);
+            if (k != 0) return k;
+            return string.Compare(a.secondary, b.secondary,
+                StringComparison.OrdinalIgnoreCase);
+        });
+        var collapsed = new HashSet<string>(
+            _settings.CollapsedPacks, StringComparer.OrdinalIgnoreCase);
 
         // Capture scroll state before Rows.Clear() so toggling a
         // mod 30 rows down doesn't snap us back to row 0. Both the
@@ -1767,14 +4739,51 @@ public class MainForm : Form
         // from a user click and would re-toggle the mod.
         _populatingMods = true;
         _modsGrid.SuspendLayout();
+        // DataGridView retains a stale CurrentCell after Rows.Clear if
+        // the cell was being edited (checkbox click). On the rebuilt
+        // grid that stale CurrentCell snaps to the new row 0, and its
+        // checkbox visually renders as unchecked even when Value=true.
+        // Symptom the user sees: toggling row N flips row 0 visually
+        // to unchecked until any other row is clicked. Detaching
+        // CurrentCell first, then EndEdit-ing, clears the edit state
+        // entirely so the new rows paint from scratch.
+        try { _modsGrid.CurrentCell = null; } catch { /* no current cell */ }
+        try { _modsGrid.EndEdit();        } catch { /* no active edit */ }
         try
         {
             _modsGrid.Rows.Clear();
             var pos = 0;
-            foreach (var e in _displayed)
+
+            void EmitModRow(ModEntry e, bool inPack = false)
             {
                 var rowIdx = _modsGrid.Rows.Add();
                 var row = _modsGrid.Rows[rowIdx];
+                row.Tag = e;
+                // Tint pack-member rows with a slightly-bluer
+                // background than default so the eye reads them
+                // as visually associated with the header above.
+                // Subtle — doesn't override per-cell colours like
+                // Update column's amber/green tag, but enough to
+                // distinguish a packed row from an unpacked one
+                // sitting just above or below it.
+                if (inPack)
+                {
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(24, 32, 46);
+                    row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(50, 70, 100);
+                }
+                // 🧪 Testing flag — solid yellow tint that wins over
+                // the pack-row blue. Dark text so it stays legible
+                // against the bright background (the default light-
+                // grey foreground would wash out). Applied last so
+                // it overrides any earlier style above.
+                var testing = IsTesting(e);
+                if (testing)
+                {
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(180, 150, 30);
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(20, 20, 20);
+                    row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(210, 175, 50);
+                    row.DefaultCellStyle.SelectionForeColor = Color.FromArgb(20, 20, 20);
+                }
                 row.Cells["Enabled"].Value = e.IsEnabled;
                 StyleUpdateCell(row.Cells["Update"], e);
                 row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
@@ -1785,13 +4794,81 @@ public class MainForm : Form
                 // 🔒 prefix on the cell text gives an at-a-glance
                 // signal — same as the Lock/Unlock context-menu state,
                 // but visible without right-clicking each row.
-                row.Cells["Name"].Value = locked ? $"🔒 {name}" : name;
-                row.Cells["Name"].ToolTipText = locked
-                    ? $"id: {e.ModId}\npath: {e.Path}\n"
-                      + "🔒 Locked — Enable all / Disable all skip this mod."
-                    : $"id: {e.ModId}\npath: {e.Path}";
+                // Personal note suffix: 📝 sigil after the name so
+                // the user sees at a glance which rows have notes.
+                // The actual note text lands in the tooltip below.
+                // 🧪 prefix for testing mods — a second at-a-glance
+                // cue in addition to the yellow row tint so the
+                // flag is obvious in screenshots / shared captures
+                // too, not only by colour.
+                var hasNote = !string.IsNullOrEmpty(e.ModId)
+                    && _settings.ModNotes.TryGetValue(e.ModId, out var noteRaw)
+                    && !string.IsNullOrWhiteSpace(noteRaw);
+                var noteSigil = hasNote ? "  📝" : "";
+                var prefix = (testing ? "🧪 " : "") + (locked ? "🔒 " : "");
+                row.Cells["Name"].Value = $"{prefix}{name}{noteSigil}";
+                var tip = $"id: {e.ModId}\npath: {e.Path}";
+                if (locked)
+                    tip += "\n🔒 Locked — Enable all / Disable all skip this mod.";
+                if (testing)
+                    tip += "\n🧪 Flagged as Testing Mod (yellow highlight).";
+                if (hasNote)
+                    tip += $"\n\n📝 Note:\n{_settings.ModNotes[e.ModId!]}";
+                row.Cells["Name"].ToolTipText = tip;
                 row.Cells["Version"].Value = e.Version;
                 row.Cells["Priority"].Value = e.Priority.ToString();
+            }
+
+            foreach (var unit in units)
+            {
+                if (unit.single != null)
+                {
+                    // Unpacked mod — emit as a normal row inline,
+                    // no header.
+                    EmitModRow(unit.single);
+                    continue;
+                }
+                // Named pack block — header row + (if expanded)
+                // its mods. Header sits at the pack's anchor
+                // priority slot in the load order.
+                var packName = unit.packName!;
+                var mods = unit.packMods!;
+                var isCollapsed = collapsed.Contains(packName);
+
+                var hdrIdx = _modsGrid.Rows.Add();
+                var hdr = _modsGrid.Rows[hdrIdx];
+                hdr.Tag = $"pack:{packName}";
+                var glyph = isCollapsed ? "▶" : "▼";
+                // The Enabled column is a CheckBoxColumn for data
+                // rows; for pack headers we swap in a TextBoxCell
+                // showing the chevron, since the checkbox would
+                // be meaningless here AND the column slot is
+                // exactly where the eye expects an interactive
+                // control. Click anywhere on the header row still
+                // toggles collapse via the MouseDown handler.
+                var chevronCell = new DataGridViewTextBoxCell { Value = glyph };
+                chevronCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                chevronCell.Style.Font = new Font("Segoe UI Symbol", 14f, FontStyle.Bold);
+                chevronCell.Style.ForeColor = Color.FromArgb(170, 200, 240);
+                hdr.Cells["Enabled"] = chevronCell;
+                hdr.Cells["Pos"].Value = "";
+                hdr.Cells["Update"].Value = "";
+                hdr.Cells["Update"].ToolTipText = "";
+                hdr.Cells["Version"].Value = "";
+                hdr.Cells["Priority"].Value = "";
+                hdr.Cells["Name"].Value =
+                    $"{packName}  ({mods.Count} mod{(mods.Count == 1 ? "" : "s")})";
+                hdr.Cells["Name"].ToolTipText =
+                    $"Pack '{packName}' — {mods.Count} mod(s). Click to "
+                    + (isCollapsed ? "expand." : "collapse.");
+                hdr.DefaultCellStyle.BackColor = Color.FromArgb(34, 42, 58);
+                hdr.DefaultCellStyle.ForeColor = Color.FromArgb(170, 200, 240);
+                hdr.DefaultCellStyle.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+                hdr.DefaultCellStyle.SelectionBackColor = Color.FromArgb(48, 58, 80);
+                hdr.DefaultCellStyle.SelectionForeColor = Color.FromArgb(220, 235, 255);
+
+                if (isCollapsed) continue;
+                foreach (var e in mods) EmitModRow(e, inPack: true);
             }
         }
         finally
@@ -1814,6 +4891,13 @@ public class MainForm : Form
             _modsGrid.ClearSelection();
             _modsGrid.Rows[selectedRowBefore].Selected = true;
         }
+        // Synchronous full repaint as the final step. Comes after the
+        // scroll/selection restore so any paint events those triggered
+        // can't overwrite freshly-set cell visuals. Refresh() (vs
+        // Invalidate()) forces the paint NOW rather than queueing it,
+        // which is what we need to defeat the "row 0 checkbox stays
+        // visually wrong" quirk.
+        _modsGrid.Refresh();
     }
 
     private bool IsOutdated(ModEntry e)
@@ -1826,7 +4910,41 @@ public class MainForm : Form
         // is strictly older than REMOTE. String inequality fired
         // false positives when local was newer (e.g. local "1.14"
         // ≠ remote "1.13" but local is newer, not outdated).
+        // Ambiguous-format versions (e.g. "0.0.420" vs "0.4.20_R")
+        // can't be reliably ordered because the underlying compare
+        // falls back to ordinal string compare for non-numeric
+        // segments, which lies. Surface those as the ≠ "version
+        // mismatch" state in StyleUpdateCell instead of "outdated"
+        // so we don't keep re-downloading the same file each time
+        // the user clicks ⬆.
+        if (VersionsAreAmbiguous(e.Version, latest)) return false;
         return CompareVersions(e.Version, latest) < 0;
+    }
+
+    /// <summary>True when two version strings can't be reliably
+    /// ordered because their formats disagree — at least one segment
+    /// on either side isn't an integer. Pure-numeric vs pure-numeric
+    /// is NEVER ambiguous (CompareVersions handles that correctly
+    /// even when the strings differ). Used to surface a ≠ glyph in
+    /// the Update column instead of a false ⬆ "outdated" when the
+    /// author's mod.txt and the ModWorkshop listing format the same
+    /// release differently (the headline example is `0.0.420`
+    /// vs `0.4.20_R` — same release, two encodings).</summary>
+    internal static bool VersionsAreAmbiguous(string? a, string? b)
+    {
+        a = (a ?? "").Trim().TrimStart('v', 'V');
+        b = (b ?? "").Trim().TrimStart('v', 'V');
+        if (a == b) return false;
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+        var aParts = a.Split('.');
+        var bParts = b.Split('.');
+        static bool AllNumeric(string[] parts)
+        {
+            foreach (var p in parts)
+                if (!int.TryParse(p, out _)) return false;
+            return true;
+        }
+        return !(AllNumeric(aParts) && AllNumeric(bParts));
     }
 
     /// <summary>Numeric-aware version comparison.
@@ -1902,6 +5020,26 @@ public class MainForm : Form
                 color = green;
                 tip = $"Up to date (v{latest}).";
             }
+            else if (VersionsAreAmbiguous(e.Version, latest))
+            {
+                // mod.txt and ModWorkshop list the version in
+                // formats that can't be reliably ordered (e.g.
+                // "0.0.420" vs "0.4.20_R"). The two strings are
+                // almost certainly the same release written two
+                // ways; we surface a ≠ glyph so the user knows
+                // the file IS the latest one MW serves, the
+                // author's mod.txt just doesn't agree with the
+                // listing's version string.
+                text = "≠";
+                color = Color.FromArgb(200, 160, 220); // soft lavender
+                tip = $"Version mismatch: mod.txt v{e.Version}, "
+                    + $"ModWorkshop reports v{latest}.\n\n"
+                    + "The two strings format differently and can't "
+                    + "be reliably ordered — likely the same release "
+                    + "written two ways. The local file matches "
+                    + "what ModWorkshop currently serves; the author "
+                    + "just hasn't matched mod.txt to the listing.";
+            }
             else if (cmp > 0)
             {
                 // Local is newer than ModWorkshop's reported version
@@ -1937,13 +5075,13 @@ public class MainForm : Form
 
     private void PopulateConflictsList(List<ConflictDetector.Conflict> conflicts)
     {
-        // Sort conflicts by the load-order priority of their
-        // earliest-loading involved mod, ascending — so conflicts
-        // affecting low-priority (early-loading) mods come first.
-        // Within the same priority, group by type then key for
-        // stable ordering. Mods we can't resolve to a registry
-        // entry (e.g. duplicate_mod_id ModIds are filenames, not
-        // mod IDs) sort to the end via int.MaxValue.
+        // Sort conflicts by severity tier first (Blocking → Behavior
+        // → Info), then by load-order priority of their earliest-
+        // loading involved mod (so within-tier rows surface early-
+        // loading mods first), then by type/key for stable ordering.
+        // Mods we can't resolve to a registry entry (e.g.
+        // duplicate_mod_id ModIds are filenames, not mod IDs) sort to
+        // the end via int.MaxValue.
         int PrioOf(string modIdOrFile)
         {
             var hit = _registry.Entries.FirstOrDefault(
@@ -1954,30 +5092,170 @@ public class MainForm : Form
         int EarliestPrio(ConflictDetector.Conflict c)
             => c.ModIds.Count == 0 ? int.MaxValue : c.ModIds.Min(PrioOf);
 
-        _displayedConflicts = conflicts
-            .OrderBy(EarliestPrio)
+        var ordered = conflicts
+            .OrderBy(c => (int)SeverityOf(c.Type))
+            .ThenBy(EarliestPrio)
             .ThenBy(c => c.Type, StringComparer.Ordinal)
             .ThenBy(c => c.Key, StringComparer.Ordinal)
             .ToList();
+
         _conflictsGrid.SuspendLayout();
         _conflictsGrid.Rows.Clear();
-        foreach (var c in _displayedConflicts)
+        // Walk groups in tier order; emit a banner row before each
+        // new tier, then the data rows for that tier.
+        foreach (var tierGroup in ordered.GroupBy(c => SeverityOf(c.Type))
+                                          .OrderBy(g => (int)g.Key))
         {
-            var rowIdx = _conflictsGrid.Rows.Add();
-            var row = _conflictsGrid.Rows[rowIdx];
-            row.Cells["Resolve"].Value = IsButtonRow(c) ? "Resolve" : "";
-            row.Cells["Resolve"].ToolTipText = ResolveButtonTooltip(c);
-            row.Cells["Type"].Value = c.Type;
-            row.Cells["Key"].Value = c.Key;
-            row.Cells["Mods"].Value = string.Join(", ", OrderedModNames(c.ModIds));
-            var (winnerText, winnerColor, winnerTip) = DetermineWinner(c);
-            row.Cells["Wins"].Value = winnerText;
-            row.Cells["Wins"].ToolTipText = winnerTip;
-            row.Cells["Wins"].Style.ForeColor = winnerColor;
-            row.Cells["Wins"].Style.SelectionForeColor = winnerColor;
+            var sev = tierGroup.Key;
+            var bucket = tierGroup.ToList();
+            // Banner row: row.Tag = Severity (marks it as banner);
+            // What cell holds the rendered label so RowPrePaint can
+            // read it.
+            var bannerIdx = _conflictsGrid.Rows.Add();
+            var bannerRow = _conflictsGrid.Rows[bannerIdx];
+            bannerRow.Tag = sev;
+            bannerRow.ReadOnly = true;
+            bannerRow.Cells["What"].Value = TierStyle(sev, bucket.Count).label;
+            // Banner-row hover tip. CellPainting suppresses the cells'
+            // own rendering for these rows, but ToolTipText is honoured
+            // independently — DataGridView fires the tooltip from cell
+            // hover regardless of paint state. Set it on every cell so
+            // the tip appears wherever the user hovers along the row.
+            var tip = TierTooltip(sev);
+            foreach (DataGridViewCell cell in bannerRow.Cells)
+                cell.ToolTipText = tip;
+            foreach (var c in bucket)
+            {
+                var rowIdx = _conflictsGrid.Rows.Add();
+                var row = _conflictsGrid.Rows[rowIdx];
+                row.Tag = c;     // click handler resolves conflict via row.Tag
+                row.Cells["Resolve"].Value = IsButtonRow(c) ? "Resolve" : "";
+                row.Cells["Resolve"].ToolTipText = ResolveButtonTooltip(c);
+                var (title, subtitle) = DescribeConflict(c);
+                row.Cells["What"].Value = title + "\n" + subtitle;
+                row.Cells["What"].ToolTipText = $"[{c.Type}]  key: {c.Key}";
+                // One mod name per line. The grid's DefaultCellStyle
+                // has WrapMode=True and AutoSizeRowsMode=DisplayedCells,
+                // so the row height grows to fit the wrapped names —
+                // no extra layout wiring needed.
+                row.Cells["Mods"].Value = string.Join("\n", OrderedModNames(c.ModIds));
+                var (winnerText, winnerColor, winnerTip) = DetermineWinner(c);
+                row.Cells["Wins"].Value = winnerText;
+                row.Cells["Wins"].ToolTipText = winnerTip;
+                row.Cells["Wins"].Style.ForeColor = winnerColor;
+                row.Cells["Wins"].Style.SelectionForeColor = winnerColor;
+            }
         }
         _conflictsGrid.ResumeLayout();
     }
+
+    // --- conflict severity tiering -----------------------------------
+
+    /// <summary>Three tiers used to visually group the conflicts grid.
+    /// Blocking = game refuses to load (class_name) or a mod is inert
+    /// until the user acts (missing_dependency); Behavior = a winner
+    /// silently overrides others (file_overlap, autoload, hook,
+    /// script_extend, take_over, duplicate_mod_id); Info = advisory
+    /// load-order constraints that aren't necessarily wrong
+    /// (dependency_order, super_chain_constraint).</summary>
+    private enum Severity { Blocking, Behavior, Info }
+
+    private static Severity SeverityOf(string type) => type switch
+    {
+        ConflictDetector.TYPE_CLASS_NAME_COLLISION   => Severity.Blocking,
+        ConflictDetector.TYPE_MISSING_DEPENDENCY     => Severity.Blocking,
+        ConflictDetector.TYPE_DEPENDENCY_ORDER       => Severity.Info,
+        ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT => Severity.Info,
+        _ => Severity.Behavior,
+    };
+
+    /// <summary>Plain-English description shown in the "What" cell —
+    /// title goes on line 1, the technical type + resolution hint on
+    /// line 2. The raw type/key remain accessible via the cell
+    /// tooltip for power users.</summary>
+    private static (string title, string subtitle) DescribeConflict(
+        ConflictDetector.Conflict c)
+    {
+        var key = c.Key;
+        return c.Type switch
+        {
+            ConflictDetector.TYPE_CLASS_NAME_COLLISION
+                => ($"Two mods declare class `{key}`",
+                    "class_name collision · project will not load"),
+            ConflictDetector.TYPE_FILE_OVERLAP
+                => ($"Both modify `{key}`",
+                    "file overlap · mergeable"),
+            ConflictDetector.TYPE_AUTOLOAD_COLLISION
+                => ($"Both register autoload `{key}`",
+                    "autoload collision · last to load wins"),
+            ConflictDetector.TYPE_HOOK_COLLISION
+                => ($"Two mods hook `{key}`",
+                    "hook collision · last to load wins the chain"),
+            ConflictDetector.TYPE_SCRIPT_EXTEND_COLLISION
+                => ($"Both extend `{key}`",
+                    "script_extend collision · last applies"),
+            ConflictDetector.TYPE_TAKE_OVER_COLLISION
+                => ($"Two mods take_over `{key}`",
+                    "take-over collision · only one applies"),
+            ConflictDetector.TYPE_DUPLICATE_MOD_ID
+                => ($"Two .vmz files share mod_id `{key}`",
+                    "duplicate mod_id · loader picks one, ignores the rest"),
+            ConflictDetector.TYPE_MISSING_DEPENDENCY
+                => (c.Details.TryGetValue("required", out var dep)
+                        ? $"Missing dependency: `{dep}`"
+                        : "Missing dependency",
+                    "missing dependency · dependent mod won't function"),
+            ConflictDetector.TYPE_DEPENDENCY_ORDER
+                => ($"Load-order constraint on `{key}`",
+                    "dependency order · raise dependent's priority above its dependency"),
+            ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT
+                => ($"Super-chain constraint on `{key}`",
+                    "super_chain · replacer must load before chainer"),
+            _ => (c.Type, c.Key),
+        };
+    }
+
+    /// <summary>Per-tier visual palette: gutter colour for data rows
+    /// + banner backgrounds/foregrounds + the banner header label.
+    /// Centralised so RowPrePaint and CellPainting agree on colours
+    /// and the SVG mockup's three-tier accent (red / amber / blue) is
+    /// the single source of truth.</summary>
+    private static (Color gutter, Color bannerBg, Color bannerFg, string label)
+        TierStyle(Severity s, int count) => s switch
+    {
+        Severity.Blocking => (
+            Color.FromArgb(220,  67,  80),
+            Color.FromArgb( 40,  22,  26),
+            Color.FromArgb(232, 144, 152),
+            $"●  LOAD-BLOCKING ({count})"),
+        Severity.Behavior => (
+            Color.FromArgb(224, 176,  64),
+            Color.FromArgb( 37,  31,  16),
+            Color.FromArgb(232, 204, 128),
+            $"●  BEHAVIOR-AFFECTING ({count})"),
+        Severity.Info => (
+            Color.FromArgb( 78, 132, 208),
+            Color.FromArgb( 16,  26,  36),
+            Color.FromArgb(136, 180, 232),
+            $"●  INFO ({count})"),
+        _ => (Color.Gray, Color.Black, Color.White, ""),
+    };
+
+    /// <summary>Plain-English explanation of what each severity tier
+    /// means in practice — shown as the hover tip on banner rows so
+    /// the colored ●  LOAD-BLOCKING / BEHAVIOR-AFFECTING / INFO
+    /// labels are self-documenting on first encounter.</summary>
+    private static string TierTooltip(Severity s) => s switch
+    {
+        Severity.Blocking =>
+            "Load-blocking — game refuses to start until you fix it.",
+        Severity.Behavior =>
+            "Behavior-affecting — game runs, but one mod overrides "
+            + "another in a way you might not notice.",
+        Severity.Info =>
+            "Info — advisory only; ordering hint, not really wrong.",
+        _ => "",
+    };
 
     /// <summary>Resolves which mod currently "wins" a conflict given
     /// the live load-order priorities. Semantics vary per conflict
@@ -2241,20 +5519,66 @@ public class MainForm : Form
 
     private string SummarizeUpdates()
     {
-        int outdated = 0, current = 0, unknown = 0;
+        int outdated = 0, current = 0, unknown = 0, mismatch = 0;
         foreach (var e in _registry.Enabled())
         {
             var mw = e.ModWorkshopId;
             if (mw <= 0) continue;
             if (!_latestVersions.TryGetValue(mw, out var latest))
             { unknown++; continue; }
-            if (latest == e.Version) current++;
-            else outdated++;
+            if (latest == e.Version) { current++; continue; }
+            // Ambiguous-format pair (e.g. mod.txt 0.0.420 vs MW
+            // 0.4.20_R) — same release, two encodings — is a
+            // separate category from "outdated".
+            if (VersionsAreAmbiguous(e.Version, latest)) { mismatch++; continue; }
+            outdated++;
         }
-        return $"{outdated} outdated, {current} current, {unknown} unknown";
+        return $"{outdated} outdated, {current} current"
+            + (mismatch > 0 ? $", {mismatch} mismatch" : "")
+            + $", {unknown} unknown";
     }
 
     // --- toolbar actions ------------------------------------------
+
+    /// <summary>Bulk enable/disable a specific subset of mods —
+    /// the right-click-on-multi-selection equivalent of the
+    /// toolbar's all-mods BulkToggle. Locked mods in the
+    /// selection are skipped; other already-in-target-state mods
+    /// are no-op. One cfg save + one full refresh per batch
+    /// instead of N partial writes.</summary>
+    private void BulkToggleSelected(List<ModEntry> entries, bool enable)
+    {
+        if (entries.Count == 0) return;
+        var candidates = entries.Where(e => e.IsEnabled != enable).ToList();
+        var targets = candidates.Where(e => !IsLocked(e)).ToList();
+        var skipped = candidates.Where(e => IsLocked(e)).ToList();
+        if (targets.Count == 0)
+        {
+            _modsLabel.Text = enable
+                ? $"Selection: all already enabled"
+                  + (skipped.Count > 0 ? $" ({skipped.Count} locked, skipped)." : ".")
+                : $"Selection: all already disabled"
+                  + (skipped.Count > 0 ? $" ({skipped.Count} locked, skipped)." : ".");
+            return;
+        }
+        var failed = 0;
+        foreach (var e in targets)
+            if (!ToggleModFiles(e)) failed++;
+        SaveModConfigSafely();
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
+        var verb = enable ? "Enabled" : "Disabled";
+        var skipNote = skipped.Count > 0
+            ? $" ({skipped.Count} locked, skipped)"
+            : "";
+        var failNote = failed > 0 ? $" ({failed} failed)" : "";
+        _modsLabel.Text = $"{verb} {targets.Count - failed} mod(s){skipNote}{failNote}.";
+    }
 
     private void BulkToggle(bool enable)
     {
@@ -2296,7 +5620,7 @@ public class MainForm : Form
               + (skipped.Count == 1 ? "" : "s")
               + " — they'll keep their current state."
             : "";
-        var dr = MessageBox.Show(this,
+        var dr = Ui.ThemedMessageBox.Show(this,
             $"{verb} all {targets.Count} {(enable ? "disabled" : "enabled")} mods?\n\n"
             + preview + skippedNote + "\n\n"
             + "Each mod's .vmz will be moved between <mods>/ and <mods>/Disabled/. "
@@ -2320,12 +5644,12 @@ public class MainForm : Form
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
         if (failed > 0)
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"{failed} of {targets.Count} mods couldn't be toggled. "
                 + "(Likely because the .vmz file in mods/Disabled/ is "
                 + "locked, or a mod has no mod_id in its mod.txt.)",
@@ -2339,7 +5663,7 @@ public class MainForm : Form
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
         await CheckUpdatesAsync(forceFresh: true);
@@ -2377,7 +5701,7 @@ public class MainForm : Form
         var modsDir = ModsDir;
         if (!Directory.Exists(modsDir))
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"Mods folder `{modsDir}` doesn't exist. Set a valid "
                 + "Mods folder above before installing.",
                 "Mods folder not found",
@@ -2387,6 +5711,17 @@ public class MainForm : Form
 
         var installed = new List<string>();
         var skipped = new List<(string path, string reason)>();
+        // Manifest mod_ids of the freshly-installed mods — captured
+        // here so the post-batch dependency scan can look them up
+        // in the rescanned registry and grab their declared deps.
+        var installedModIds = new List<string>();
+        // Whether any install touched the active profile — controls
+        // whether we save profile.json at the end of the batch.
+        var profileDirty = false;
+        // Whether any install wrote enable/priority entries into
+        // mod_config.cfg. One save at the end of the batch instead
+        // of N partial writes.
+        var cfgDirty = false;
         // Compute full path of mods dir (case-insensitive comparable)
         // so we can detect "drop a file already in the mods folder."
         var modsDirFull = Path.GetFullPath(modsDir);
@@ -2401,6 +5736,11 @@ public class MainForm : Form
                     throw new InvalidDataException("Not a .vmz file.");
 
                 // Validate: opens as a zip and contains mod.txt.
+                // We need the manifest values (mod_id, version, etc.)
+                // both for the library copy AND for the profile-add
+                // step further down, so capture them here once.
+                string  manifestModId, manifestVersion, manifestDisplayName;
+                int     manifestPriority, manifestMwId;
                 using (var arch = new ModArchive())
                 {
                     if (!arch.Open(src))
@@ -2411,39 +5751,114 @@ public class MainForm : Form
                         throw new InvalidDataException(
                             "No mod.txt inside the archive — doesn't "
                             + "look like a Vostok mod.");
+                    manifestModId       = arch.ModId;
+                    manifestVersion     = arch.ModVersion;
+                    manifestDisplayName = string.IsNullOrEmpty(arch.ModName)
+                                            ? arch.ModId : arch.ModName;
+                    manifestPriority    = arch.ModPriority;
+                    manifestMwId        = arch.ModWorkshopId;
                 }
 
                 var dst = Path.Combine(modsDir, Path.GetFileName(src));
-                // Source already inside mods/? Treat as no-op.
-                if (string.Equals(
-                        Path.GetFullPath(src),
-                        Path.GetFullPath(dst),
-                        StringComparison.OrdinalIgnoreCase))
+                var srcInsideMods = string.Equals(
+                    Path.GetFullPath(src),
+                    Path.GetFullPath(dst),
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (srcInsideMods)
                 {
-                    skipped.Add((src, "already in the mods folder"));
-                    continue;
+                    // Source already lives in `<mods>/`. We don't need
+                    // to copy — but we DO still want to capture it in
+                    // the library and add it to the active profile so
+                    // this file participates in the new model.
+                    installed.Add(Path.GetFileName(src));
+                }
+                else
+                {
+                    if (File.Exists(dst))
+                    {
+                        var dr = Ui.ThemedMessageBox.Show(this,
+                            $"`{Path.GetFileName(src)}` already exists in the "
+                            + "mods folder. Overwrite the existing file?",
+                            "File exists",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning,
+                            MessageBoxDefaultButton.Button2);
+                        if (dr != DialogResult.Yes)
+                        {
+                            skipped.Add((src, "exists, user declined overwrite"));
+                            continue;
+                        }
+                    }
+                    // File.Copy is fast for typical mod sizes (<10MB) but
+                    // run on a thread pool so a slow disk doesn't freeze
+                    // the UI mid-batch.
+                    await Task.Run(() => File.Copy(src, dst, overwrite: true));
+                    installed.Add(Path.GetFileName(src));
                 }
 
-                if (File.Exists(dst))
+                // Track manifest mod_id so the post-install dep
+                // scan can find this mod in the rescanned registry.
+                if (!string.IsNullOrEmpty(manifestModId))
+                    installedModIds.Add(manifestModId);
+
+                // Library capture — idempotent on (mod_id, version).
+                // Failure here doesn't block the install; the live
+                // file is already in place and the mod will still
+                // load. Library will catch up on the next profile
+                // switch's ensure-in-lib pass.
+                try { Domain.ModLibrary.Add(modsDir, dst); }
+                catch { /* best-effort; non-fatal */ }
+
+                // Active-profile auto-add. New mods land enabled with
+                // their manifest's declared priority. Existing entries
+                // (same mod_id) get their Version updated so the
+                // profile points at the freshly-installed copy.
+                if (_activeProfile != null
+                    && !string.IsNullOrEmpty(manifestModId))
                 {
-                    var dr = MessageBox.Show(this,
-                        $"`{Path.GetFileName(src)}` already exists in the "
-                        + "mods folder. Overwrite the existing file?",
-                        "File exists",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Warning,
-                        MessageBoxDefaultButton.Button2);
-                    if (dr != DialogResult.Yes)
+                    var existingPm = _activeProfile.Mods.FirstOrDefault(m =>
+                        string.Equals(m.ModId, manifestModId,
+                            StringComparison.OrdinalIgnoreCase));
+                    if (existingPm == null)
                     {
-                        skipped.Add((src, "exists, user declined overwrite"));
-                        continue;
+                        _activeProfile.Mods.Add(new Domain.ProfileMod
+                        {
+                            ModId         = manifestModId,
+                            DisplayName   = manifestDisplayName,
+                            Version       = manifestVersion,
+                            IsEnabled     = true,
+                            Priority      = manifestPriority,
+                            ModWorkshopId = manifestMwId,
+                        });
                     }
+                    else
+                    {
+                        existingPm.Version     = manifestVersion;
+                        existingPm.DisplayName = manifestDisplayName;
+                        if (manifestMwId > 0) existingPm.ModWorkshopId = manifestMwId;
+                    }
+                    profileDirty = true;
                 }
-                // File.Copy is fast for typical mod sizes (<10MB) but
-                // run on a thread pool so a slow disk doesn't freeze
-                // the UI mid-batch.
-                await Task.Run(() => File.Copy(src, dst, overwrite: true));
-                installed.Add(Path.GetFileName(src));
+
+                // mod_config.cfg WRITE — must be explicit. The
+                // manager's grid uses `fallback=true` when cfg
+                // has no entry for a mod (so a fresh install
+                // displays as enabled), but the in-game loader
+                // does NOT apply that fallback — without a real
+                // [profile.<active>.enabled] mod_id@ver = true
+                // line, MML leaves the mod OFF at runtime.
+                // Result before this fix: the grid shows the
+                // freshly-installed mod as enabled while it
+                // silently stays disabled in-game. Set BOTH
+                // enabled and priority cells so a re-launch
+                // picks the mod up correctly.
+                if (!string.IsNullOrEmpty(manifestModId))
+                {
+                    _modConfig.SetEnabled(manifestModId, manifestVersion, true);
+                    _modConfig.SetPriority(manifestModId, manifestVersion, manifestPriority);
+                    cfgDirty = true;
+                }
             }
             catch (Exception ex)
             {
@@ -2451,10 +5866,24 @@ public class MainForm : Form
             }
         }
 
+        // Persist the active profile once for the whole batch — a
+        // drop of 20 mods is a single profile.json write rather
+        // than 20 partial ones.
+        if (profileDirty && _activeProfile != null)
+        {
+            _activeProfile.UpdatedAt = DateTime.UtcNow;
+            try { _activeProfile.SaveMetadataOnly(); }
+            catch { /* best-effort; in-memory state still reflects the change */ }
+        }
+        // Persist cfg once for the batch. Without this the
+        // freshly-installed mods never appear in mod_config.cfg
+        // and the in-game loader can't see them as enabled.
+        if (cfgDirty) SaveModConfigSafely();
+
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
 
@@ -2474,7 +5903,7 @@ public class MainForm : Form
                 skipped.Take(8).Select(s => $"  • {Path.GetFileName(s.path)}: {s.reason}"));
             if (skipped.Count > 8)
                 preview += $"\n  …and {skipped.Count - 8} more";
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"{installed.Count} installed; {skipped.Count} skipped.\n\n"
                 + preview,
                 "Install report",
@@ -2482,6 +5911,199 @@ public class MainForm : Form
                 installed.Count > 0
                     ? MessageBoxIcon.Information
                     : MessageBoxIcon.Warning);
+        }
+
+        // Dependency follow-up — scan the just-installed mods for
+        // declared [dependencies] entries, auto-copy from library
+        // where possible, prompt for genuinely-missing required/
+        // optional deps.
+        if (installedModIds.Count > 0)
+            await CheckAndPromptMissingDepsAsync(installedModIds);
+    }
+
+    /// <summary>For each freshly-installed mod_id, scan its
+    /// [dependencies] required/optional lists and reconcile the
+    /// gap against the live registry + local library. Library-
+    /// available deps are copied into <mods>/ automatically; the
+    /// remaining missing ones surface via MissingDependenciesDialog
+    /// so the user can paste MW URLs / ids and trigger downloads.
+    ///
+    /// Called from BOTH the install-mod flow (drop / picker) and
+    /// the import-list flow — they're the two entry points where
+    /// new mods land and may carry unsatisfied deps. Profile apply
+    /// has its own dep handling baked into the plan.</summary>
+    public async Task CheckAndPromptMissingDepsAsync(IEnumerable<string> newlyInstalledModIds)
+    {
+        var ids = newlyInstalledModIds
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (ids.Count == 0) return;
+
+        // Index live entries by mod_id for the "is this dep already
+        // installed?" check.
+        var liveById = new Dictionary<string, ModEntry>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _registry.Entries)
+            if (!string.IsNullOrEmpty(e.ModId)) liveById[e.ModId] = e;
+
+        // Library snapshot keyed by mod_id (newest version per id).
+        var libByMod = new Dictionary<string, Domain.ModLibrary.Entry>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var le in Domain.ModLibrary.List(ModsDir))
+        {
+            if (string.IsNullOrEmpty(le.ModId)) continue;
+            if (!libByMod.TryGetValue(le.ModId, out var cur)
+                || Domain.ModRegistry.CompareVersions(le.Version, cur.Version) > 0)
+                libByMod[le.ModId] = le;
+        }
+
+        // Collect every (parent, dep_id, required?) tuple from the
+        // newly-installed set, deduped on dep_id (case-insensitive)
+        // — the first parent that named a dep wins the "needed by"
+        // label, which is fine because we just need ONE attribution
+        // for the user to recognise the chain.
+        //
+        // ALSO collect parents' [dependency_sources] mappings into
+        // a single dep_id → MW id dictionary. This is the bridge
+        // that lets us auto-download a missing dep without round-
+        // tripping to the user for a URL — when a mod was packed
+        // with the Mod Packager, its mod.txt carries the MW ids
+        // of every declared dep. Later parents overwrite earlier
+        // ones (rare collision; last-wins is arbitrary but stable).
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new List<(string DepId, string ParentName, bool Required)>();
+        var knownMwIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var modId in ids)
+        {
+            if (!liveById.TryGetValue(modId, out var entry)) continue;
+            var parentLabel = string.IsNullOrEmpty(entry.DisplayName)
+                ? entry.ModId : entry.DisplayName;
+            foreach (var dep in entry.RequiredDependencies)
+            {
+                if (!seen.Add(dep)) continue;
+                pending.Add((dep, parentLabel, true));
+            }
+            foreach (var dep in entry.OptionalDependencies)
+            {
+                if (!seen.Add(dep)) continue;
+                pending.Add((dep, parentLabel, false));
+            }
+            foreach (var kvp in entry.DependencySources)
+                knownMwIds[kvp.Key] = kvp.Value;
+        }
+        if (pending.Count == 0) return;
+
+        // First pass: auto-resolve from library. Skip any dep that
+        // already has a live entry (a chained dep declared by two
+        // separate parents where one parent already installed it).
+        var libraryResolved = 0;
+        var missing = new List<MissingDependenciesDialog.MissingDep>();
+        foreach (var (depId, parent, required) in pending)
+        {
+            if (liveById.ContainsKey(depId)) continue;
+            if (libByMod.TryGetValue(depId, out var libEntry))
+            {
+                try
+                {
+                    var liveName = $"{Domain.ModProfile.SafeFileName(depId)}.vmz";
+                    var dst      = Path.Combine(ModsDir, liveName);
+                    if (!File.Exists(dst))
+                    {
+                        File.Copy(libEntry.Path, dst, overwrite: false);
+                        libraryResolved++;
+                    }
+                    continue;
+                }
+                catch { /* fall through into "missing" — let user retry */ }
+            }
+            missing.Add(new MissingDependenciesDialog.MissingDep
+            {
+                ModId      = depId,
+                ParentName = parent,
+                Required   = required,
+            });
+        }
+
+        // Refresh the registry if we copied anything from library
+        // so the UI reflects the new files before the dialog opens.
+        if (libraryResolved > 0)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            // Re-check missing: a freshly-library-copied dep might
+            // ALSO satisfy another dep entry that was previously
+            // listed as missing. Rebuild liveById and re-filter.
+            liveById = new Dictionary<string, ModEntry>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var e in _registry.Entries)
+                if (!string.IsNullOrEmpty(e.ModId)) liveById[e.ModId] = e;
+            missing = missing.Where(m => !liveById.ContainsKey(m.ModId)).ToList();
+        }
+
+        if (missing.Count == 0)
+        {
+            if (libraryResolved > 0)
+                _modsLabel.Text =
+                    $"Auto-resolved {libraryResolved} dependency mod"
+                    + (libraryResolved == 1 ? "" : "s")
+                    + " from your library.";
+            return;
+        }
+
+        // Ask first — don't pop a busy dialog at the user without
+        // warning. Lets them keep working if they'd rather sort
+        // deps later. Required-vs-optional shown for triage.
+        int reqCount = missing.Count(m => m.Required);
+        int optCount = missing.Count - reqCount;
+        var prompt = $"The freshly-installed mod"
+                   + (ids.Count == 1 ? "" : "s")
+                   + " declared "
+                   + (reqCount > 0 ? $"{reqCount} required" : "")
+                   + (reqCount > 0 && optCount > 0 ? " + " : "")
+                   + (optCount > 0 ? $"{optCount} optional" : "")
+                   + " dependency mod"
+                   + ((reqCount + optCount) == 1 ? "" : "s")
+                   + " that aren't installed"
+                   + (libraryResolved > 0
+                       ? $" ({libraryResolved} other dep(s) auto-copied from your library)."
+                       : ".")
+                   + "\n\nOpen the Resolve dialog to paste ModWorkshop URLs and download them?";
+        var answer = Ui.ThemedMessageBox.Show(this, prompt,
+            "Missing dependencies",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button1);
+        if (answer != DialogResult.Yes) return;
+
+        bool downloadedAny;
+        using (var dlg = new Ui.MissingDependenciesDialog(
+            _mw, ModsDir, missing, knownMwIds))
+        {
+            dlg.ShowDialog(this);
+            downloadedAny = dlg.AnyDownloaded;
+        }
+
+        if (downloadedAny)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = DetectConflictsForActive();
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+            // Recurse — the newly-downloaded deps may themselves
+            // declare deps. One extra pass keeps the chain
+            // resolving without an infinite loop (the recursion
+            // terminates when ALL declared deps are present).
+            var newIds = _registry.Entries
+                .Where(e => missing.Any(m => string.Equals(
+                    m.ModId, e.ModId, StringComparison.OrdinalIgnoreCase)))
+                .Select(e => e.ModId)
+                .ToList();
+            if (newIds.Count > 0)
+                await CheckAndPromptMissingDepsAsync(newIds);
         }
     }
 
@@ -2518,10 +6140,10 @@ public class MainForm : Form
 
     private async Task OnGridCellClickedAsync(DataGridViewCellEventArgs e)
     {
-        if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+        var entry = ModAtRow(e.RowIndex);
+        if (entry == null) return; // header row or out-of-range
         if (_busy) return;
         var col = _modsGrid.Columns[e.ColumnIndex].Name;
-        var entry = _displayed[e.RowIndex];
         switch (col)
         {
             case "Update":
@@ -2533,6 +6155,23 @@ public class MainForm : Form
                 // link.
                 else if (entry.ModWorkshopId <= 0)
                     await SetModWorkshopIdAsync(entry);
+                // The ≠ state: the local mod.txt and ModWorkshop's
+                // listing format the version differently. Clicking
+                // is informational — show the explainer in the
+                // status row instead of silently doing nothing
+                // (re-downloading the same file would be wasteful).
+                else if (entry.ModWorkshopId > 0
+                    && _latestVersions.TryGetValue(entry.ModWorkshopId, out var latest)
+                    && !string.IsNullOrEmpty(latest)
+                    && VersionsAreAmbiguous(entry.Version, latest))
+                {
+                    _updatesLabel.Text =
+                        $"≠ {entry.DisplayName}: mod.txt v{entry.Version} "
+                        + $"vs ModWorkshop v{latest} — same release written "
+                        + "two ways. Local file matches what MW serves; no "
+                        + "download needed. (Hover the ≠ icon for the long "
+                        + "explanation.)";
+                }
                 break;
         }
     }
@@ -2544,11 +6183,11 @@ public class MainForm : Form
     private void OnGridCellValueChanged(DataGridViewCellEventArgs e)
     {
         if (_populatingMods) return;
-        if (e.RowIndex < 0 || e.RowIndex >= _displayed.Count) return;
+        var entry = ModAtRow(e.RowIndex);
+        if (entry == null) return; // pack-header row — skip
         if (e.ColumnIndex < 0 || e.ColumnIndex >= _modsGrid.Columns.Count) return;
         if (_busy) return;
         var col = _modsGrid.Columns[e.ColumnIndex].Name;
-        var entry = _displayed[e.RowIndex];
 
         if (col == "Enabled")
         {
@@ -2573,7 +6212,7 @@ public class MainForm : Form
                 .Value?.ToString()?.Trim() ?? "";
             if (!int.TryParse(raw, out var newPriority))
             {
-                MessageBox.Show(this,
+                Ui.ThemedMessageBox.Show(this,
                     $"`{raw}` isn't a valid priority. Must be a whole "
                     + "integer (negative is fine). Reverting.",
                     "Invalid priority",
@@ -2591,7 +6230,7 @@ public class MainForm : Form
             // be a no-op against the running game.
             if (string.IsNullOrEmpty(entry.ModId))
             {
-                MessageBox.Show(this,
+                Ui.ThemedMessageBox.Show(this,
                     $"`{Path.GetFileName(entry.Path)}` has no mod_id in "
                     + "its mod.txt — can't write a priority entry without "
                     + "an ID to key off.",
@@ -2616,6 +6255,9 @@ public class MainForm : Form
             _modsLabel.Text =
                 $"`{entry.DisplayName}` priority {oldPriority} → {newPriority}.";
             Rescan();
+            // Push the new priority into the active profile's JSON
+            // so it sticks across profile switches.
+            SyncActiveProfileFromEntry(entry.ModId);
             UpdateModsStatus();
             PopulateModsGrid();
             return;
@@ -2624,6 +6266,10 @@ public class MainForm : Form
 
     private void ToggleMod(ModEntry e)
     {
+        // Capture the direction BEFORE toggling — ToggleModFiles
+        // flips state based on the current e.IsEnabled, which is
+        // still pre-toggle here.
+        var enabling = !e.IsEnabled;
         if (!ToggleModFiles(e))
         {
             ShowError("Toggle failed",
@@ -2633,15 +6279,83 @@ public class MainForm : Form
                     + "then try again."));
             return;
         }
+        // Enabling a mod with dependencies: pull any disabled
+        // required deps on too (transitively), so the user never
+        // ends up with an enabled mod whose prerequisites are off.
+        var autoEnabled = new List<ModEntry>();
+        if (enabling)
+            autoEnabled = EnableRequiredDependencies(e);
         if (!SaveModConfigSafely()) return;
+        if (autoEnabled.Count > 0)
+        {
+            var names = string.Join(", ", autoEnabled.Select(d =>
+                string.IsNullOrEmpty(d.DisplayName) ? d.ModId : d.DisplayName));
+            _modsLabel.Text =
+                $"Enabled `{e.DisplayName}` + {autoEnabled.Count} "
+                + $"required dependenc{(autoEnabled.Count == 1 ? "y" : "ies")}: {names}.";
+        }
         // Rescan + redetect conflicts (different enabled set may have
         // a different conflict set).
         Rescan();
+        // Mirror the new enabled state into the active profile's
+        // JSON so a profile switch later doesn't lose this toggle.
+        SyncActiveProfileFromEntry(e.ModId);
         UpdateModsStatus();
         PopulateModsGrid();
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
+    }
+
+    /// <summary>When a mod is being enabled, walk its declared
+    /// REQUIRED dependencies and flip any that are currently
+    /// installed-but-disabled to enabled too — transitively, so a
+    /// dep-of-a-dep also comes on. Returns the entries that were
+    /// actually flipped (for the caller's status message).
+    ///
+    /// Rules:
+    ///   • Only REQUIRED deps are auto-enabled. Optional deps are
+    ///     "nice to have" by definition — forcing them on would
+    ///     overstep.
+    ///   • Deps that aren't installed locally are skipped silently
+    ///     here; the existing missing-dependency flow (post-install
+    ///     scan) handles fetching those.
+    ///   • LOCKED deps are left untouched — a lock means "don't
+    ///     change this mod's state", which outranks the convenience
+    ///     of auto-enabling.
+    ///   • Doesn't save the cfg — the caller batches that into one
+    ///     SaveModConfigSafely with the root toggle.</summary>
+    private List<ModEntry> EnableRequiredDependencies(ModEntry root)
+    {
+        var byId = new Dictionary<string, ModEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in _registry.Entries)
+            if (!string.IsNullOrEmpty(m.ModId) && !byId.ContainsKey(m.ModId))
+                byId[m.ModId] = m;
+
+        var enabled = new List<ModEntry>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(root.ModId)) visited.Add(root.ModId);
+
+        var queue = new Queue<ModEntry>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var cur = queue.Dequeue();
+            foreach (var depId in cur.RequiredDependencies)
+            {
+                if (string.IsNullOrEmpty(depId)) continue;
+                if (!visited.Add(depId)) continue;      // already handled
+                if (!byId.TryGetValue(depId, out var dep)) continue; // not installed
+                // Recurse regardless of current enabled state so a
+                // chain like A→B(on)→C(off) still reaches C.
+                queue.Enqueue(dep);
+                if (dep.IsEnabled) continue;            // already on
+                if (IsLocked(dep)) continue;            // lock wins
+                if (ToggleModFiles(dep))
+                    enabled.Add(dep);
+            }
+        }
+        return enabled;
     }
 
     /// <summary>Toggles a mod's enabled state via mod_config.cfg
@@ -2742,6 +6456,69 @@ public class MainForm : Form
         }
     }
 
+    /// <summary>Reveal the mod's file (or directory) in Windows
+    /// Explorer. For a .vmz / .zip we open Explorer with the file
+    /// pre-selected (`/select,`); for a mod directory we open the
+    /// folder itself. Falls back to opening the parent directory if
+    /// the exact path no longer exists (e.g. it was deleted out from
+    /// under us between scan and click).</summary>
+    private void ShowModInFolder(ModEntry e)
+    {
+        var path = e.Path;
+        if (string.IsNullOrEmpty(path))
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` has no on-disk path.";
+            return;
+        }
+        try
+        {
+            if (File.Exists(path))
+            {
+                // /select, highlights the file inside its folder. The
+                // path MUST be quoted — spaces in the mods dir (common
+                // under "Program Files") otherwise truncate the arg.
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName  = "explorer.exe",
+                    Arguments = $"/select,\"{path}\"",
+                    UseShellExecute = true,
+                });
+            }
+            else if (Directory.Exists(path))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName  = "explorer.exe",
+                    Arguments = $"\"{path}\"",
+                    UseShellExecute = true,
+                });
+            }
+            else
+            {
+                // Path's gone — open the parent so the user lands
+                // somewhere useful rather than getting an error.
+                var parent = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName  = "explorer.exe",
+                        Arguments = $"\"{parent}\"",
+                        UseShellExecute = true,
+                    });
+                }
+                else
+                {
+                    _modsLabel.Text = $"`{e.DisplayName}` is no longer on disk.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't open Explorer", ex);
+        }
+    }
+
     /// <summary>Opens the description dialog for a mod. Pre-fills
     /// from `_settings.CachedDescriptions` so subsequent opens are
     /// instant; the dialog kicks off a fresh fetch when there's
@@ -2826,7 +6603,7 @@ public class MainForm : Form
         var newId = ManifestEditor.ParseModWorkshopIdInput(input);
         if (newId <= 0)
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"Couldn't parse a ModWorkshop ID from:\n  {input}\n\n"
                 + "Expected a positive integer or a URL like "
                 + "https://modworkshop.net/mod/56398.",
@@ -2876,7 +6653,7 @@ public class MainForm : Form
         if (input == null) return Task.CompletedTask;
         if (!int.TryParse(input.Trim(), out var newPriority))
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"Couldn't parse `{input}` as an integer. Priority must "
                 + "be a whole number (positive, negative, or zero).",
                 "Invalid input",
@@ -2890,7 +6667,7 @@ public class MainForm : Form
         }
         if (string.IsNullOrEmpty(e.ModId))
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"`{Path.GetFileName(e.Path)}` has no mod_id in mod.txt — "
                 + "can't write a priority entry without an ID to key off.",
                 "Can't set priority",
@@ -2904,11 +6681,14 @@ public class MainForm : Form
             $"`{e.DisplayName}` priority {oldPriority} → {newPriority}.";
 
         Rescan();
+        // Mirror to the active profile so the new priority is
+        // captured before any later profile switch wipes the cfg.
+        SyncActiveProfileFromEntry(e.ModId);
         UpdateModsStatus();
         PopulateModsGrid();
         // Re-detect — priority changes can resolve dependency_order
         // conflicts.
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
         return Task.CompletedTask;
@@ -2969,7 +6749,7 @@ public class MainForm : Form
                     blockers
                         .OrderByDescending(d => d.Priority)
                         .Select(d => $"{d.ModId} (prio {d.Priority})"));
-                var dr = MessageBox.Show(this,
+                var dr = Ui.ThemedMessageBox.Show(this,
                     $"`{e.DisplayName}` is at priority {e.Priority}, but "
                     + $"now requires:\n  {blockerNames}\n\n"
                     + "Dependents must load AFTER their dependencies, so "
@@ -3014,9 +6794,111 @@ public class MainForm : Form
         PopulateModsGrid();
         // Re-detect since dependency edits can satisfy or break
         // missing_dependency / dependency_order conflicts elsewhere.
-        _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+        _lastConflicts = DetectConflictsForActive();
         UpdateConflictsStatus(_lastConflicts);
         PopulateConflictsList(_lastConflicts);
+    }
+
+    /// <summary>Opens the revert dialog for `e`, and if the user
+    /// picks a backup, snapshots the CURRENT .vmz first (so the
+    /// revert is reversible), then copies the chosen backup over
+    /// the live file. Migrates cfg state when the reverted .vmz
+    /// declares a different version string in mod.txt — same
+    /// concern that UpdateModAsync handles in the opposite direction.</summary>
+    private async Task RevertModFromBackupAsync(
+        ModEntry e,
+        List<ModBackup.BackupEntry> backups)
+    {
+        if (IsLocked(e))
+        {
+            _updatesLabel.Text =
+                $"🔒 {e.DisplayName} is locked — revert skipped. "
+                + "Unlock it via right-click → Unlock to revert.";
+            return;
+        }
+        if (backups.Count == 0) return;
+        using var dlg = new Ui.RevertModDialog(e, backups, ModsDir);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        var src = dlg.SelectedBackupPath;
+        if (string.IsNullOrEmpty(src) || !File.Exists(src)) return;
+
+        var modId = e.ModId;
+        var oldVersion = e.Version;
+        var oldEnabled = _modConfig.IsEnabled(modId, oldVersion, fallback: true);
+        var hadCfgPriority = _modConfig.HasEntry(modId, oldVersion);
+        var oldCfgPriority = _modConfig.Priority(modId, oldVersion, e.DeclaredPriority);
+
+        _busy = true;
+        _updatesLabel.Text = $"Reverting {e.DisplayName} …";
+        PopulateModsGrid();
+        try
+        {
+            // Snapshot the current version BEFORE overwriting, so
+            // the rollback is itself reversible. Same best-effort
+            // policy as UpdateModAsync — a failure here is logged
+            // but doesn't block the revert.
+            try { ModBackup.MakeBackup(ModsDir, e); } catch { }
+
+            // Replace the live .vmz with the chosen backup.
+            if (File.Exists(e.Path))
+            {
+                try { File.Delete(e.Path); }
+                catch (Exception ex)
+                {
+                    _updatesLabel.Text =
+                        $"Couldn't replace `{Path.GetFileName(e.Path)}` "
+                        + $"({ex.Message}). Quit the game and try again.";
+                    return;
+                }
+            }
+            File.Copy(src, e.Path, overwrite: false);
+
+            // Rescan + cfg migration mirrors UpdateModAsync's
+            // post-download flow, except the version is going
+            // DOWN (or sideways) rather than up.
+            Rescan();
+            var newEntry = _registry.FindById(modId);
+            var newVersion = newEntry?.Version ?? oldVersion;
+            if (!string.IsNullOrEmpty(modId)
+                && !string.Equals(newVersion, oldVersion, StringComparison.Ordinal))
+            {
+                _modConfig.SetEnabled(modId, newVersion, oldEnabled);
+                if (hadCfgPriority)
+                    _modConfig.SetPriority(modId, newVersion, oldCfgPriority);
+                _modConfig.RemoveEntry(modId, oldVersion);
+                SaveModConfigSafely();
+                Rescan();
+            }
+
+            // Library + active-profile sync, same shape as
+            // UpdateModAsync: the reverted version belongs in the
+            // library (might already be there via the backup, but
+            // ModLibrary.Add is idempotent on duplicates) and the
+            // active profile's recorded version needs to reflect
+            // what's actually live.
+            try { Domain.ModLibrary.Add(ModsDir, e.Path); }
+            catch { /* best-effort */ }
+            SyncActiveProfileFromEntry(modId);
+
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = DetectConflictsForActive();
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+
+            _updatesLabel.Text =
+                $"Reverted {e.DisplayName}: v{oldVersion} → v{newVersion}.";
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Revert failed for {e.DisplayName}", ex);
+        }
+        finally
+        {
+            _busy = false;
+            PopulateModsGrid();
+        }
+        await Task.CompletedTask;
     }
 
     private async Task UpdateModAsync(ModEntry e)
@@ -3026,6 +6908,17 @@ public class MainForm : Form
         var label = string.IsNullOrEmpty(e.DisplayName)
             ? Path.GetFileName(e.Path)
             : e.DisplayName;
+        // Locked mods are explicitly protected from being overwritten —
+        // surface the lock in the status line so the user knows why the
+        // download didn't happen (rather than failing silently or
+        // worse, clobbering the locked archive).
+        if (IsLocked(e))
+        {
+            _updatesLabel.Text =
+                $"🔒 {label} is locked — update skipped. "
+                + "Unlock it via right-click → Unlock to update.";
+            return;
+        }
         var modId = e.ModId;
         var oldVersion = e.Version;
         // Capture pre-update cfg state so we can carry the user's
@@ -3048,6 +6941,17 @@ public class MainForm : Form
         {
             // Clean up any leftover from a prior failed attempt.
             if (File.Exists(tempPath)) File.Delete(tempPath);
+
+            // Snapshot the current .vmz BEFORE we touch it. The
+            // backup lives in %APPDATA%\VostokModManager\backups\
+            // and is reachable from the per-mod context menu's
+            // "Revert to previous version…" entry. Best-effort: a
+            // failure here doesn't block the update (the .download
+            // path is unaffected and we still want the new version
+            // to land), it just leaves the rollback unavailable.
+            try { ModBackup.MakeBackup(ModsDir, e); }
+            catch { /* best-effort; revert still works via any
+                       earlier backups for this mod */ }
 
             await _mw.DownloadLatestAsync(mw, tempPath);
 
@@ -3090,6 +6994,21 @@ public class MainForm : Form
                 Rescan();
                 migrated = true;
             }
+
+            // Seed the library with the new version so a later
+            // profile switch can find it via ModLibrary.Find. Without
+            // this step the library still only has the OLD version
+            // of this mod (or nothing if it was first installed
+            // pre-migration), and a switch would either fall through
+            // to ProfileSwitcher's "newest version" fallback or
+            // report missing.
+            try { Domain.ModLibrary.Add(ModsDir, finalPath); }
+            catch { /* best-effort; live file is still in place */ }
+
+            // Mirror the new version into the active profile's
+            // JSON so the next profile switch's lookup uses the
+            // post-update version, not the stale pre-update one.
+            SyncActiveProfileFromEntry(modId);
 
             // Force-refresh the ModWorkshop /mods/versions cache —
             // we just downloaded a new file, and the cached API
@@ -3146,7 +7065,7 @@ public class MainForm : Form
 
     private void ShowError(string title, Exception ex)
     {
-        MessageBox.Show(this, ex.Message, title,
+        Ui.ThemedMessageBox.Show(this, ex.Message, title,
             MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
@@ -3160,10 +7079,30 @@ public class MainForm : Form
     /// Falls back to a clear error message when detection fails.</summary>
     private void LaunchVostok()
     {
+        // Pre-launch checkpoint: snapshot mod_config.cfg + the
+        // active profile's profile.json so any "I launched the
+        // game and it broke" outcome has a one-click rollback
+        // path. Non-fatal if the snapshot fails — better to let
+        // the user launch than block them on a backup write.
+        var captured = Domain.CrashCheckpoint.Capture(
+            Domain.ModConfig.DefaultPath,
+            _activeProfile?.Name ?? "",
+            _activeProfile?.FolderPath ?? "");
+        if (captured) UpdateCheckpointStatus();
+
+        // Watch for crashes by polling for a RoadToVostok-named
+        // process that appears after launch. If one is found and
+        // later exits with a non-zero code, prompt the user to
+        // restore the checkpoint. Steam-launch is fire-and-
+        // forget so we don't get a Process handle directly — the
+        // poll-by-name is best-effort and silently no-ops on a
+        // Steam install that runs under a different name.
+        _ = WatchForCrashAsync();
+
         var appId = SteamLauncher.FindAppId(ModsDir);
         if (appId <= 0)
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 "Couldn't find Road to Vostok's Steam app id.\n\n"
                 + $"Expected an appmanifest_*.acf in:\n  "
                 + $"{Path.GetDirectoryName(Path.GetDirectoryName(ModsDir)) ?? "(unknown)"}\n"
@@ -3177,7 +7116,7 @@ public class MainForm : Form
         }
         if (!SteamLauncher.LaunchAppId(appId))
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"Steam protocol launch failed for app id {appId}. "
                 + "Is Steam installed and running?",
                 "Launch failed",
@@ -3231,7 +7170,7 @@ public class MainForm : Form
         if (!string.IsNullOrEmpty(_settings.ModsDir)
             && !Directory.Exists(_settings.ModsDir))
         {
-            MessageBox.Show(this,
+            Ui.ThemedMessageBox.Show(this,
                 $"`{_settings.ModsDir}` doesn't exist. Reverting Mods "
                 + "folder to the previous value. Pick the `mods/` "
                 + "folder inside your Road to Vostok install.",
@@ -3261,9 +7200,13 @@ public class MainForm : Form
             Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
-            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            _lastConflicts = DetectConflictsForActive();
             UpdateConflictsStatus(_lastConflicts);
             PopulateConflictsList(_lastConflicts);
+            // Repoint the live file-system watcher at the new
+            // folder. Without this it'd keep watching the old
+            // location and miss every change in the new one.
+            InitModsFolderWatcher();
         }
         RefreshSetupBanner();
     }
@@ -3276,24 +7219,373 @@ public class MainForm : Form
         dlg.ShowDialog(this);
     }
 
-    /// <summary>Opens the profile manager dialog. If the user applied a
-    /// profile, rescans the registry and refreshes both grids so the
-    /// result is visible immediately.</summary>
+    /// <summary>Opens the profile manager dialog. On close we
+    /// ALWAYS reload the profiles snapshot + refresh the grid /
+    /// conflict view, even when no profile was applied — Delete,
+    /// Clone, Import, Empty-Slate, and metadata edits all change
+    /// which profiles exist on disk OR which one is active, and
+    /// the title-row selector + filtered grid need to see those
+    /// changes immediately. The full mods-folder Rescan +
+    /// CheckUpdatesAsync only fire when the dialog APPLIED a
+    /// profile (NeedsRescan), since that's the only case where
+    /// the live mods folder + cfg could have changed.</summary>
     private async Task OpenProfilesDialogAsync()
     {
         using var dlg = new Ui.ProfileManagerDialog(
-            _registry, _mw, _modConfig, ModsDir);
+            _registry, _mw, _modConfig, ModsDir, _settings.LockedMods);
         dlg.ShowDialog(this);
+
+        // The dialog can change which profile is active in two ways:
+        //   • a direct Switch button (already updates _settings)
+        //   • Apply Profile on a non-active profile (writes only to
+        //     _modConfig.ActiveProfile)
+        // Mirror cfg → settings so the title-row selector picks up
+        // the new active name and ReloadProfiles re-resolves
+        // _activeProfile against the correct entry.
+        if (!string.Equals(_settings.ActiveProfileName,
+                _modConfig.ActiveProfile,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.ActiveProfileName = _modConfig.ActiveProfile;
+            try { _settings.Save(); } catch { /* best-effort */ }
+        }
+
+        ReloadProfiles();
+        // Re-filter the grid + recompute conflicts against the new
+        // active-profile mod set. Cheap — operates on the existing
+        // _registry.Entries, no disk read.
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
         if (dlg.NeedsRescan)
         {
             Rescan();
             UpdateModsStatus();
+            // Rescan changed the registry; re-filter again now that
+            // _registry.Entries is fresh.
             PopulateModsGrid();
-            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            _lastConflicts = DetectConflictsForActive();
             UpdateConflictsStatus(_lastConflicts);
             PopulateConflictsList(_lastConflicts);
             await CheckUpdatesAsync();
         }
+    }
+
+    // ── Active-profile glue ───────────────────────────────────────
+
+    /// <summary>Reloads every profile from disk and re-resolves the
+    /// active one against Settings.ActiveProfileName. Called once
+    /// at startup and after every profile-manager round trip.
+    /// Always refreshes the title-row selector label.</summary>
+    private void ReloadProfiles()
+    {
+        _allProfiles  = Domain.ModProfile.LoadAll();
+        _activeProfile = _allProfiles.FirstOrDefault(
+            p => string.Equals(p.Name, _settings.ActiveProfileName,
+                StringComparison.OrdinalIgnoreCase));
+        SyncProfileSelectorLabel();
+    }
+
+    /// <summary>Keeps the title-row button text in sync with the
+    /// active profile. "(no profile)" when pre-migration so the
+    /// button reads identically to its initial label.</summary>
+    private void SyncProfileSelectorLabel()
+    {
+        if (_profileSelector is null) return;
+        var label = _activeProfile?.Name ?? "(no profile)";
+        // Crop long names so the title row's selector doesn't
+        // overflow into Launch/Profiles/Settings.
+        if (label.Length > 22) label = label[..21] + "…";
+        _profileSelector.Text = $"📋 Active: {label}  ▾";
+    }
+
+    /// <summary>Rebuilds the dropdown menu from the live
+    /// _allProfiles snapshot. Checked = currently active. The menu
+    /// is shared across opens so .Items needs a Clear each time.</summary>
+    private void RebuildProfileSelectorMenu(ContextMenuStrip menu)
+    {
+        menu.Items.Clear();
+        if (_allProfiles.Count == 0)
+        {
+            menu.Items.Add(new ToolStripMenuItem(
+                "(no profiles yet — open Profiles… to create one)")
+            {
+                Enabled = false,
+            });
+            return;
+        }
+        foreach (var p in _allProfiles)
+        {
+            var isActive = string.Equals(p.Name,
+                _activeProfile?.Name, StringComparison.OrdinalIgnoreCase);
+            var item = new ToolStripMenuItem(p.Name)
+            {
+                Checked = isActive,
+            };
+            // Capture by value — p is the loop variable.
+            var captured = p;
+            item.Click += (_, _) => SwitchActiveProfile(captured);
+            menu.Items.Add(item);
+        }
+    }
+
+    /// <summary>Activates `target` via ProfileSwitcher and refreshes
+    /// the whole UI. No-op when the target is already active. On
+    /// switcher failure (locked files, cfg save error), the result
+    /// is surfaced to the conflicts status row but the partial
+    /// state is left in place — ProfileSwitcher's stages are
+    /// individually best-effort.</summary>
+    private void SwitchActiveProfile(Domain.ModProfile target)
+    {
+        if (target == null) return;
+        if (string.Equals(target.Name, _activeProfile?.Name,
+                StringComparison.OrdinalIgnoreCase))
+            return;
+        Cursor = Cursors.WaitCursor;
+        Domain.ProfileSwitcher.SwitchResult result;
+        try
+        {
+            result = Domain.ProfileSwitcher.SetActive(
+                ModsDir, target, _modConfig, _settings.LockedMods);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+
+        if (!result.Success)
+        {
+            ShowError("Profile switch failed",
+                new Exception(string.Join("\n", result.Errors)));
+            return;
+        }
+
+        _settings.ActiveProfileName = target.Name;
+        try { _settings.Save(); } catch { /* best-effort */ }
+
+        ReloadProfiles();
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
+        var missingNote = result.MissingFromLibrary.Count > 0
+            ? $"  ·  {result.MissingFromLibrary.Count} mod(s) missing from library (skipped)"
+            : "";
+        _conflictsLabel.Text =
+            $"Switched to '{target.Name}'  ·  "
+            + $"{result.CopiedFromLibrary} copied  ·  "
+            + $"{result.KeptLocked} locked kept{missingNote}";
+    }
+
+    /// <summary>Runs ConflictDetector against either every entry
+    /// (pre-migration: no active profile) OR just the entries that
+    /// match the active profile's Mods list (post-migration). Keeps
+    /// conflict scope aligned with what's visible in the grid.</summary>
+    /// <summary>Pushes the live state of `modId` (post-Rescan) into
+    /// the corresponding ProfileMod entry of the active profile,
+    /// then persists. No-op when:
+    ///   • there's no active profile (pre-migration);
+    ///   • the mod isn't tracked by the active profile (e.g. it's
+    ///     locked but not in this profile);
+    ///   • the registry doesn't know about the mod_id any more
+    ///     (deleted between rescan + sync).
+    /// Cheap and best-effort — used after toggle / priority-change
+    /// flows so a switch-then-switch-back round trip preserves
+    /// changes the user made on the main grid.</summary>
+    private void SyncActiveProfileFromEntry(string modId)
+    {
+        if (_activeProfile == null) return;
+        if (string.IsNullOrEmpty(modId)) return;
+        var entry = _registry.FindById(modId);
+        if (entry == null) return;
+        var pm = _activeProfile.Mods.FirstOrDefault(m =>
+            string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase));
+        if (pm == null) return;
+        if (pm.IsEnabled == entry.IsEnabled
+            && pm.Priority == entry.Priority
+            && string.Equals(pm.Version, entry.Version, StringComparison.Ordinal))
+            return;
+        pm.IsEnabled = entry.IsEnabled;
+        pm.Priority  = entry.Priority;
+        pm.Version   = entry.Version;
+        _activeProfile.UpdatedAt = DateTime.UtcNow;
+        try { _activeProfile.SaveMetadataOnly(); }
+        catch { /* best-effort — in-memory state still reflects the change */ }
+    }
+
+    /// <summary>Re-runs whenever the mods-grid selection changes:
+    /// finds the mod_id of the currently-selected mods grid row,
+    /// then walks every data row in the conflicts grid and selects
+    /// it iff the row's Conflict references that mod_id. Banner
+    /// rows (row.Tag is Severity) are skipped automatically because
+    /// they have no Conflict to match against.
+    /// Guarded by `_syncingConflicts` so the conflicts grid's own
+    /// SelectionChanged handler (which deselects banner rows)
+    /// doesn't bounce back into this method mid-loop.</summary>
+    private bool _syncingConflicts;
+    private void SyncConflictsHighlight()
+    {
+        if (_syncingConflicts) return;
+        if (_modsGrid == null || _conflictsGrid == null) return;
+        if (_modsGrid.SelectedRows.Count == 0) return;
+        var rowIdx = _modsGrid.SelectedRows[0].Index;
+        var selectedMod = ModAtRow(rowIdx);
+        if (selectedMod == null) return; // header row selected
+        var modId = selectedMod.ModId;
+        if (string.IsNullOrEmpty(modId)) return;
+
+        _syncingConflicts = true;
+        try
+        {
+            _conflictsGrid.ClearSelection();
+            DataGridViewRow? firstMatch = null;
+            foreach (DataGridViewRow row in _conflictsGrid.Rows)
+            {
+                if (row.Tag is not ConflictDetector.Conflict c) continue;
+                var hit = c.ModIds.Any(id =>
+                    string.Equals(id, modId, StringComparison.OrdinalIgnoreCase));
+                if (!hit) continue;
+                row.Selected = true;
+                firstMatch ??= row;
+            }
+            // Scroll the first matching row into view so the user
+            // doesn't have to find it in a long conflict list.
+            if (firstMatch != null)
+            {
+                try { _conflictsGrid.FirstDisplayedScrollingRowIndex = firstMatch.Index; }
+                catch { /* benign if the grid hasn't laid out yet */ }
+            }
+        }
+        finally
+        {
+            _syncingConflicts = false;
+        }
+    }
+
+    private List<ConflictDetector.Conflict> DetectConflictsForActive()
+    {
+        if (_activeProfile == null)
+            return ConflictDetector.DetectAll(_registry.Entries);
+        // Conflict scope matches what's VISIBLE in the grid: active
+        // profile mods plus any locked mods that aren't in the
+        // profile. Without including locked mods, a locked-mod-vs-
+        // profile-mod conflict would silently vanish on profile
+        // switch, which is exactly the kind of surprise the lock
+        // is supposed to prevent.
+        var allowed = new HashSet<string>(
+            _activeProfile.Mods.Select(m => m.ModId),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var lockId in _settings.LockedMods)
+            allowed.Add(lockId);
+        var scoped = _registry.Entries
+            .Where(e => !string.IsNullOrEmpty(e.ModId)
+                     && allowed.Contains(e.ModId));
+        return ConflictDetector.DetectAll(scoped);
+    }
+
+    // ── First-launch profile-model migration ─────────────────────
+
+    /// <summary>Shows the migration dialog and, on confirm, ingests
+    /// every live .vmz into the Library + builds a profile from the
+    /// current registry state + activates it. Non-destructive: the
+    /// live mods folder, mod_config.cfg, and lock list are all left
+    /// alone — only the Library + a new profile.json appear on
+    /// disk. If the user picks Skip, Settings.MigrationDeclined
+    /// flips so the prompt doesn't return on every launch.</summary>
+    private void OfferProfileMigration()
+    {
+        var modCount = _registry.Entries.Count(
+            e => e.IsArchive && !string.IsNullOrEmpty(e.ModId));
+        // Default the name to whatever mod_config.cfg already calls
+        // the active profile — keeps cfg and profile.json aligned
+        // and matches what the user sees in the in-game loader.
+        var defaultName = string.IsNullOrWhiteSpace(_modConfig.ActiveProfile)
+            ? "Default"
+            : _modConfig.ActiveProfile;
+
+        using var dlg = new Ui.MigrationDialog(modCount, defaultName);
+        var result = dlg.ShowDialog(this);
+        if (result != DialogResult.OK || string.IsNullOrEmpty(dlg.ChosenName))
+        {
+            // Skip / X-close / Esc — remember so we don't re-prompt.
+            _settings.MigrationDeclined = true;
+            try { _settings.Save(); } catch { /* best-effort */ }
+            _modsLabel.Text =
+                "Profile model: migration skipped. You can adopt it "
+                + "later by deleting Settings.json or via a future "
+                + "menu option.";
+            return;
+        }
+
+        var name = dlg.ChosenName!;
+        Cursor = Cursors.WaitCursor;
+        int libAdded = 0;
+        int libSkipped = 0;
+        try
+        {
+            // 1. Ingest every live archive mod into the Library.
+            foreach (var entry in _registry.Entries)
+            {
+                if (!entry.IsArchive) continue;
+                if (string.IsNullOrEmpty(entry.Path) || !File.Exists(entry.Path))
+                    continue;
+                var added = Domain.ModLibrary.Add(ModsDir, entry.Path);
+                if (added != null) libAdded++;
+                else               libSkipped++;
+            }
+
+            // 2. Snapshot current state into a new profile.
+            var profile = Domain.ModProfile.FromRegistry(
+                name,
+                $"Migrated from existing mods folder — {DateTime.Now:yyyy-MM-dd HH:mm}",
+                _registry.Entries);
+            try { profile.SaveMetadataOnly(); }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't write profile metadata", ex);
+                return;
+            }
+
+            // 3. Align cfg's active_profile with the new profile
+            // name (preserves cfg state — we don't ClearProfileEntries
+            // here; that's a deliberate destructive op reserved for
+            // ProfileSwitcher).
+            if (!string.Equals(_modConfig.ActiveProfile, name,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _modConfig.ActiveProfile = name;
+                SaveModConfigSafely();
+            }
+
+            // 4. Record adoption in settings.
+            _settings.ActiveProfileName = name;
+            _settings.MigrationDeclined = false;
+            try { _settings.Save(); } catch { /* best-effort */ }
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+
+        // Refresh state machine — re-resolve _activeProfile, repopulate
+        // the title-row selector, grid, conflicts.
+        ReloadProfiles();
+        PopulateModsGrid();
+        _lastConflicts = DetectConflictsForActive();
+        UpdateConflictsStatus(_lastConflicts);
+        PopulateConflictsList(_lastConflicts);
+
+        var libNote = libSkipped > 0
+            ? $", {libSkipped} skipped (no mod_id)"
+            : "";
+        _modsLabel.Text =
+            $"Migrated to profile '{name}'  ·  "
+            + $"{libAdded} mod(s) added to Library{libNote}.";
     }
 
     private void RefreshSetupBanner()
@@ -3356,7 +7648,11 @@ public class MainForm : Form
 
     private async Task OnConflictsCellClickedAsync(DataGridViewCellEventArgs e)
     {
-        if (e.RowIndex < 0 || e.RowIndex >= _displayedConflicts.Count) return;
+        if (e.RowIndex < 0 || e.RowIndex >= _conflictsGrid.Rows.Count) return;
+        var row = _conflictsGrid.Rows[e.RowIndex];
+        // Banner rows (row.Tag is Severity) carry no conflict — clicks
+        // on them are inert. Data rows store the Conflict in Tag.
+        if (row.Tag is not ConflictDetector.Conflict conflict) return;
         if (_busy)
         {
             _conflictsLabel.Text = "(Busy — wait for the current operation to finish.)";
@@ -3364,7 +7660,6 @@ public class MainForm : Form
         }
         var col = _conflictsGrid.Columns[e.ColumnIndex].Name;
         if (col != "Resolve") return;
-        var conflict = _displayedConflicts[e.RowIndex];
 #if AI_RESOLVER
         if (!IsButtonRow(conflict))
         {
@@ -3433,7 +7728,7 @@ public class MainForm : Form
             Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
-            _lastConflicts = ConflictDetector.DetectAll(_registry.Entries);
+            _lastConflicts = DetectConflictsForActive();
             UpdateConflictsStatus(_lastConflicts);
             PopulateConflictsList(_lastConflicts);
         }

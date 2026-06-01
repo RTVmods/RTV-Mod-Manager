@@ -71,6 +71,42 @@ public class ModEntry
     private List<string> ParseDepList(string key)
         => ParseCsvOrArray(GetSection("dependencies", key));
 
+    /// <summary>Optional sidecar mapping `dep_id → ModWorkshop
+    /// numeric id`, written by the Mod Packager into a
+    /// `[dependency_sources]` section in mod.txt. The in-game
+    /// loader doesn't read this section (Godot's ConfigFile parser
+    /// silently ignores unknown sections), but the manager uses it
+    /// to auto-resolve missing dependencies to a downloadable URL
+    /// without round-tripping to the user for input.
+    ///
+    /// Why this exists: the standard `[dependencies] required`
+    /// list stores manifest mod_id SLUGS only — there's no public
+    /// MW lookup for "find the mod whose manifest id is X", so
+    /// downloading a missing dep blind isn't possible. By
+    /// recording the (slug, mw_id) pair at pack time, the dep is
+    /// resolvable end-to-end on first install.
+    ///
+    /// Format:
+    ///   [dependency_sources]
+    ///   mcm = 56781
+    ///   weapon-rig-api = 56123
+    ///
+    /// Empty when the section is absent or every value parses as
+    /// non-positive.</summary>
+    public Dictionary<string, int> DependencySources
+    {
+        get
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in GetSectionDict("dependency_sources"))
+            {
+                if (int.TryParse(kvp.Value, out var n) && n > 0)
+                    result[kvp.Key] = n;
+            }
+            return result;
+        }
+    }
+
     /// <summary>Parses a value like `a, b, c` or `["a", "b", "c"]`
     /// into a list of trimmed, dequoted, non-empty mod IDs. The
     /// surrounding-quote stripping in ModArchive's parser already

@@ -11,7 +11,7 @@
          dialog via Assembly.GetName().Version. Bumping it here updates
          both editions and the Win32 file-version resource embedded in
          the .exe (Properties → Details in Explorer). -->
-    <Version>0.4.0</Version>
+    <Version>0.5.73</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
     <Authors>Joni</Authors>
     <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>

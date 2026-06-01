@@ -26,7 +26,7 @@ public class MmlVersionChecker
     private const string LATEST_URL =
         "https://api.github.com/repos/ametrocavich/vostok-mod-loader/releases/latest";
     private const string USER_AGENT =
-        "VostokModManager/0.3.0 (+https://modworkshop.net/g/roadtovostok)";
+        "VostokModManager/0.5.73 (+https://modworkshop.net/g/roadtovostok)";
 
     private static readonly HttpClient _http = CreateClient();
 

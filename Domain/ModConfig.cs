@@ -162,6 +162,21 @@ public class ModConfig
             pr.Remove(key);
     }
 
+    /// <summary>Wipes both `[profile.<name>.enabled]` and
+    /// `[profile.<name>.priority]` sections for the given profile.
+    /// Used by ProfileSwitcher to make cfg deterministic from
+    /// profile.json — clear the section, then re-emit each
+    /// ProfileMod's state. Other profiles' sections are NOT touched,
+    /// and unrelated sections (e.g. `settings`) are preserved.</summary>
+    public void ClearProfileEntries(string profileName)
+    {
+        if (string.IsNullOrEmpty(profileName)) return;
+        if (_sections.TryGetValue($"profile.{profileName}.enabled", out var en))
+            en.Clear();
+        if (_sections.TryGetValue($"profile.{profileName}.priority", out var pr))
+            pr.Clear();
+    }
+
     private bool SectionContains(string section, string key)
         => _sections.TryGetValue(section, out var sec) && sec.ContainsKey(key);
 

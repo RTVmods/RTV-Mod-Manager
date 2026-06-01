@@ -144,7 +144,27 @@ public class ModRegistry
             if (sub.Name.StartsWith(".")) continue;
             // Skip Disabled when scanning the top-level — caller handles
             // it as a separate pass with locationEnabled=false.
-            if (locationEnabled && sub.Name == "Disabled") continue;
+            // Skip Backups, Library, and Profiles unconditionally
+            // (case-insensitive) — these are manager-owned subfolders:
+            //   Backups/   Domain/ModBackup.cs   — per-mod rollback snapshots
+            //   Library/   Domain/ModLibrary.cs  — canonical .vmz store backing the profile model
+            //   Profiles/                        — per-profile metadata (profile.json)
+            // None of them contain LIVE mods; treating their files as
+            // live would feed phantom entries into the grid + the
+            // in-game loader.
+            if (locationEnabled
+                && string.Equals(sub.Name, "Disabled",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.Equals(sub.Name, "Backups",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.Equals(sub.Name, "Library",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.Equals(sub.Name, "Profiles",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
             var manifestPath = Path.Combine(sub.FullName, "mod.txt");
             if (!File.Exists(manifestPath)) continue;
             var entry = LoadDirEntry(sub.FullName, locationEnabled);
