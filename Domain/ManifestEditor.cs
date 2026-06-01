@@ -86,6 +86,70 @@ public static class ManifestEditor
     public static string SetModPriority(string modTxt, int priority)
         => SetValue(modTxt, "mod", "priority", priority.ToString());
 
+    /// <summary>Deletes every line that belongs to `[section]` —
+    /// the header line itself plus everything up to the next
+    /// section header (or end-of-file). Used to wipe a section
+    /// before rewriting it from a fresh dictionary, so stale
+    /// entries from an earlier write don't survive. Preserves
+    /// the rest of the file verbatim.</summary>
+    public static string RemoveSection(string modTxt, string section)
+    {
+        var newline = modTxt.Contains("\r\n") ? "\r\n" : "\n";
+        var lines = modTxt.Replace("\r\n", "\n").Split('\n').ToList();
+        var header = $"[{section}]";
+        int start = -1, end = lines.Count;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var t = lines[i].Trim();
+            if (start < 0)
+            {
+                if (string.Equals(t, header, StringComparison.OrdinalIgnoreCase))
+                    start = i;
+            }
+            else if (t.StartsWith("[") && t.EndsWith("]") && t.Length >= 2)
+            {
+                end = i;
+                break;
+            }
+        }
+        if (start < 0) return modTxt;
+        // Also drop one trailing blank line between this section
+        // and the next so we don't accumulate blank padding across
+        // repeated removes.
+        if (end < lines.Count
+            && start > 0
+            && lines[start - 1].Trim().Length == 0)
+            start--;
+        lines.RemoveRange(start, end - start);
+        var result = string.Join(newline, lines);
+        if (modTxt.EndsWith("\n") && !result.EndsWith(newline)) result += newline;
+        return result;
+    }
+
+    /// <summary>Rewrites `[dependency_sources]` from scratch using
+    /// `sources` (mod_id → MW numeric id). Removes the old
+    /// section first so deletions take effect — without that,
+    /// keys removed between packs would stick around. Empty
+    /// `sources` drops the section entirely, keeping mod.txt
+    /// clean when the user hasn't recorded any MW ids for deps.
+    /// </summary>
+    public static string SetDependencySourcesSection(
+        string modTxt,
+        IReadOnlyDictionary<string, int> sources)
+    {
+        modTxt = RemoveSection(modTxt, "dependency_sources");
+        if (sources.Count == 0) return modTxt;
+        // Stable ordering so the file diffs cleanly across packs
+        // — git-friendly + comparison-friendly for the user.
+        foreach (var kvp in sources.OrderBy(
+            k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            modTxt = SetValue(modTxt, "dependency_sources",
+                kvp.Key, kvp.Value.ToString());
+        }
+        return modTxt;
+    }
+
     /// <summary>Convenience wrapper for `[dependencies] required/optional`.
     /// `kind` is "required" or "optional"; mod IDs are written as a
     /// Godot ConfigFile string array — `["a", "b", "c"]` — because
