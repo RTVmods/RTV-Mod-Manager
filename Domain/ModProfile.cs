@@ -47,6 +47,14 @@ public class ProfileMod
     /// profile's `mods/` subfolder. Empty for metadata-only entries —
     /// directory mods, save-failures, or legacy JSON-only profiles.</summary>
     public string ArchiveFileName { get; set; } = "";
+
+    /// <summary>Name of the mod pack this entry came from — set
+    /// by Import list… when a JSON pack is imported. Empty for
+    /// mods added any other way (drag-drop install, manual,
+    /// drag-from-other-profile, etc.). The mods grid groups by
+    /// this field with collapsible headers; an empty PackName
+    /// goes under an "(Unpacked)" group at the top.</summary>
+    public string PackName { get; set; } = "";
 }
 
 public class ModProfile
@@ -320,7 +328,9 @@ public class ModProfile
     }
 
     /// <summary>Zips this profile's folder (profile.json + mods/) into
-    /// a single .vmprofile file at `path`. Used by Export-to-file.</summary>
+    /// a single .vmprofile file at `path`. Used by Export-to-file
+    /// for LEGACY profiles whose `mods/` bundle subfolder still
+    /// holds per-profile .vmz copies (the pre-Phase-5 layout).</summary>
     public void ExportToZip(string path)
     {
         if (string.IsNullOrEmpty(FolderPath) || !Directory.Exists(FolderPath))
@@ -330,6 +340,73 @@ public class ModProfile
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         if (File.Exists(path)) File.Delete(path);
         ZipFile.CreateFromDirectory(FolderPath, path, CompressionLevel.Optimal, false);
+    }
+
+    /// <summary>Library-driven export. Builds a .vmprofile zip from
+    /// scratch by:
+    ///   • Writing profile.json as the root entry.
+    ///   • For each ProfileMod that has a matching `(mod_id, version)`
+    ///     in the live library at `<modsDir>/Library/`, including the
+    ///     .vmz under `mods/<filename>` inside the zip.
+    /// Mods not present in the library are emitted with an empty
+    /// ArchiveFileName so the recipient knows to download them on
+    /// import. Use this for any profile created under the new model
+    /// — `ExportToZip` (above) is only for legacy profiles with a
+    /// pre-existing per-profile `mods/` folder.</summary>
+    public void ExportToZipUsingLibrary(string path, string modsDir)
+    {
+        var dir = System.IO.Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        if (File.Exists(path)) File.Delete(path);
+
+        // Build a deep copy of the profile so we can rewrite
+        // ArchiveFileName per ProfileMod (matched / unmatched in
+        // library) without mutating the in-memory original.
+        var exportProfile = new ModProfile
+        {
+            Name        = Name,
+            Description = Description,
+            CreatedAt   = CreatedAt,
+            UpdatedAt   = DateTime.UtcNow,
+            Mods        = Mods.Select(m => new ProfileMod
+            {
+                ModId           = m.ModId,
+                DisplayName     = m.DisplayName,
+                Version         = m.Version,
+                IsEnabled       = m.IsEnabled,
+                Priority        = m.Priority,
+                ModWorkshopId   = m.ModWorkshopId,
+                ArchiveFileName = "", // recomputed below per library lookup
+            }).ToList(),
+        };
+
+        using var fs  = File.Create(path);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+
+        // Track filename collisions so the same name from two
+        // library entries doesn't clobber inside the zip.
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pm in exportProfile.Mods)
+        {
+            if (string.IsNullOrEmpty(pm.ModId)) continue;
+            var libPath = ModLibrary.Find(modsDir, pm.ModId, pm.Version);
+            if (string.IsNullOrEmpty(libPath)) continue; // mark as no-bundle
+            var srcName = System.IO.Path.GetFileName(libPath);
+            var unique  = MakeUniqueName(srcName, used);
+            used.Add(unique);
+            pm.ArchiveFileName = unique;
+            var entry = zip.CreateEntry("mods/" + unique, CompressionLevel.Optimal);
+            using var es = entry.Open();
+            using var rs = File.OpenRead(libPath);
+            rs.CopyTo(es);
+        }
+
+        // Write profile.json AFTER the bundles so it reflects the
+        // matched ArchiveFileName values.
+        var jsonEntry = zip.CreateEntry("profile.json", CompressionLevel.Optimal);
+        using (var es = jsonEntry.Open())
+        using (var sw = new StreamWriter(es))
+            sw.Write(JsonSerializer.Serialize(exportProfile, _opts));
     }
 
     /// <summary>Deletes the entire profile folder (including bundled

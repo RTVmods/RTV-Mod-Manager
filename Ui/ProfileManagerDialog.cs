@@ -28,6 +28,10 @@ public class ProfileManagerDialog : Form
     private readonly ModWorkshopClient _mw;
     private readonly ModConfig         _modConfig;
     private readonly string            _modsDir;
+    /// <summary>Forwarded to ProfileApplyDialog so locked mods are
+    /// excluded from the apply plan. Empty when the caller has no
+    /// lock-aware settings to share (e.g. unit tests).</summary>
+    private readonly IReadOnlyList<string> _lockedModIds;
 
     // ── Data ──────────────────────────────────────────────────────────
 
@@ -40,8 +44,10 @@ public class ProfileManagerDialog : Form
     private Label    _detDesc  = null!;
     private Label    _detMeta  = null!;
     private DataGridView _detGrid = null!;
+    private TextBox      _detFilter = null!;
     private Button   _applyBtn  = null!;
     private Button   _exportBtn = null!;
+    private Button   _diffBtn   = null!;
     private Button   _deleteBtn = null!;
     private Panel    _detailPanel = null!;
 
@@ -51,12 +57,14 @@ public class ProfileManagerDialog : Form
         ModRegistry registry,
         ModWorkshopClient mw,
         ModConfig modConfig,
-        string modsDir)
+        string modsDir,
+        IReadOnlyList<string>? lockedModIds = null)
     {
-        _registry  = registry;
-        _mw        = mw;
-        _modConfig = modConfig;
-        _modsDir   = modsDir;
+        _registry     = registry;
+        _mw           = mw;
+        _modConfig    = modConfig;
+        _modsDir      = modsDir;
+        _lockedModIds = lockedModIds ?? Array.Empty<string>();
 
         InitUi();
         LoadProfiles();
@@ -160,8 +168,53 @@ public class ProfileManagerDialog : Form
             BorderStyle     = BorderStyle.FixedSingle,
             SelectionMode   = SelectionMode.One,
             IntegralHeight  = false,
+            AllowDrop       = true,
         };
         _list.SelectedIndexChanged += (_, _) => ShowSelected();
+
+        // Drop target: drag ProfileMods from the detail grid onto a
+        // profile in this list to ADD them to that profile.
+        // Source-profile mods stay in place — drag is copy semantics
+        // (less destructive; user can explicitly remove afterward).
+        _list.DragEnter += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(typeof(DraggedProfileMods)) != true) return;
+            e.Effect = DragDropEffects.Copy;
+        };
+        _list.DragOver += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(typeof(DraggedProfileMods)) != true) return;
+            // Highlight the listbox item under the cursor as the drop
+            // target. ListBox.IndexFromPoint takes client coords; the
+            // drag event is in screen coords so convert first. -1 (no
+            // item under cursor) means "drop won't land anywhere",
+            // which we show as a no-drop cursor.
+            var pt = _list.PointToClient(new Point(e.X, e.Y));
+            var idx = _list.IndexFromPoint(pt);
+            if (idx >= 0 && idx < _profiles.Count)
+            {
+                if (_list.SelectedIndex != idx) _list.SelectedIndex = idx;
+                e.Effect = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None;
+            }
+        };
+        _list.DragDrop += (_, e) =>
+        {
+            if (e.Data?.GetDataPresent(typeof(DraggedProfileMods)) != true) return;
+            var payload = (DraggedProfileMods)e.Data.GetData(typeof(DraggedProfileMods))!;
+            var pt = _list.PointToClient(new Point(e.X, e.Y));
+            var idx = _list.IndexFromPoint(pt);
+            if (idx < 0 || idx >= _profiles.Count) return;
+            var target = _profiles[idx];
+            // No-op when dropping onto the same profile that
+            // sourced the drag — copying a profile's mods onto
+            // itself accomplishes nothing.
+            if (object.ReferenceEquals(target, payload.SourceProfile)) return;
+            AddProfileModsToProfile(target, payload.Mods);
+        };
 
         var toolbar = new Panel
         {
@@ -170,10 +223,36 @@ public class ProfileManagerDialog : Form
             BackColor = Color.Transparent,
         };
 
-        var saveBtn = MainForm.ThemedButton("💾 Save Current");
-        saveBtn.Width  = 140;
+        // Four buttons sized to fit the ~450px left pane: Clone /
+        // New Modlist / Import / Delete. "Clone" duplicates the
+        // currently-active profile under a new name (the active
+        // profile is whichever one mod_config.cfg's [settings]
+        // active_profile names). The button replaces the legacy
+        // "Save Current" which captured the live registry state
+        // directly — under the new model, the active profile IS
+        // the live state, so cloning it gives you the same effect
+        // plus an explicit name.
+        var saveBtn = MainForm.ThemedButton("🗍 Clone");
+        saveBtn.Width  = 90;
         saveBtn.Height = 40;
         saveBtn.AutoSize = false;
+        var cloneTip = new ToolTip();
+        cloneTip.SetToolTip(saveBtn,
+            "Clone the SELECTED profile (highlighted in the list) "
+            + "under a new name. The clone has the same mod list "
+            + "and settings but is not activated automatically; "
+            + "switch to it from the title-row Active selector.");
+
+        var emptyBtn = MainForm.ThemedButton("✪ New Modlist…");
+        emptyBtn.Width  = 130;
+        emptyBtn.Height = 40;
+        emptyBtn.AutoSize = false;
+        var tt = new ToolTip();
+        tt.SetToolTip(emptyBtn,
+            "Create a profile that starts from 0 mods — or just "
+            + "the locked mods. Existing mods stay in the mods "
+            + "folder; ApplyProfile prompts you per-duplicate "
+            + "(keep / use bundle / download new).");
 
         var importBtn = MainForm.ThemedButton("📂 Import…");
         importBtn.Width  = 100;
@@ -190,18 +269,22 @@ public class ProfileManagerDialog : Form
         toolbar.Resize += (_, _) =>
         {
             saveBtn.Top    = 6;
+            emptyBtn.Top   = 6;
             importBtn.Top  = 6;
             _deleteBtn.Top = 6;
-            saveBtn.Left   = 0;
-            importBtn.Left = saveBtn.Right + 4;
+            saveBtn.Left    = 0;
+            emptyBtn.Left   = saveBtn.Right  + 4;
+            importBtn.Left  = emptyBtn.Right + 4;
             _deleteBtn.Left = importBtn.Right + 4;
         };
         toolbar.Controls.Add(saveBtn);
+        toolbar.Controls.Add(emptyBtn);
         toolbar.Controls.Add(importBtn);
         toolbar.Controls.Add(_deleteBtn);
 
-        saveBtn.Click   += (_, _) => SaveCurrentProfile();
-        importBtn.Click += (_, _) => ImportProfileFromFile();
+        saveBtn.Click    += (_, _) => CloneSelectedProfile();
+        emptyBtn.Click   += (_, _) => SaveNewModlistProfile();
+        importBtn.Click  += (_, _) => ImportProfileFromFile();
         _deleteBtn.Click += (_, _) => DeleteSelected();
 
         panel.Controls.Add(_list);
@@ -250,6 +333,12 @@ public class ProfileManagerDialog : Form
 
         _detGrid = BuildDetailGrid();
 
+        // Filter row — sits between the metadata block and the
+        // grid. Same affordances as the main form's mods toolbar
+        // filter (textbox + × clear chip + Esc-to-clear), but
+        // scoped to the currently-selected profile's mod list.
+        var filterRow = BuildDetailFilterRow();
+
         var detBtnRow = new Panel
         {
             Dock      = DockStyle.Bottom,
@@ -273,26 +362,128 @@ public class ProfileManagerDialog : Form
         _exportBtn.AutoSize = false;
         _exportBtn.Enabled  = false;
 
+        _diffBtn = MainForm.ThemedButton("Diff with…");
+        _diffBtn.Width  = 120;
+        _diffBtn.Height = 40;
+        _diffBtn.AutoSize = false;
+        _diffBtn.Enabled  = false;
+
         detBtnRow.Resize += (_, _) =>
         {
             _applyBtn.Top  = 6;
             _exportBtn.Top = 6;
+            _diffBtn.Top   = 6;
             _applyBtn.Left  = 0;
             _exportBtn.Left = _applyBtn.Right + 8;
+            _diffBtn.Left   = _exportBtn.Right + 8;
         };
         _applyBtn.Click  += (_, _) => ApplySelected();
         _exportBtn.Click += (_, _) => ExportSelected();
+        _diffBtn.Click   += (_, _) => DiffSelected();
 
         detBtnRow.Controls.Add(_applyBtn);
         detBtnRow.Controls.Add(_exportBtn);
+        detBtnRow.Controls.Add(_diffBtn);
 
-        // Reverse-add for Dock.Top stacking
+        // Reverse-add for Dock.Top stacking — first-added Top is
+        // CLOSEST to the body (just above _detGrid here); the
+        // last-added Top sits at the very top of the panel. Filter
+        // row goes in just before _detMeta so the visual order is:
+        // name → desc → meta → filter → grid.
         p.Controls.Add(detBtnRow);
         p.Controls.Add(_detGrid);
+        p.Controls.Add(filterRow);
         p.Controls.Add(_detMeta);
         p.Controls.Add(_detDesc);
         p.Controls.Add(_detName);
         return p;
+    }
+
+    /// <summary>Builds the detail-pane filter row — `Filter:` label
+    /// + textbox + × clear chip. Mirrors the main form's pattern:
+    /// always-visible × button (dim when empty, bright when there's
+    /// text to clear) and Esc-inside-filter clears without bubbling.
+    /// Wires TextChanged → ShowSelected so the grid filters live.</summary>
+    private Panel BuildDetailFilterRow()
+    {
+        var row = new Panel
+        {
+            Dock      = DockStyle.Top,
+            Height    = 32,
+            BackColor = Color.Transparent,
+            Margin    = new Padding(0, 0, 0, 6),
+        };
+        var label = new Label
+        {
+            Text      = "Filter:",
+            AutoSize  = true,
+            ForeColor = Color.FromArgb(220, 225, 235),
+            Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
+            BackColor = Color.Transparent,
+            Location  = new Point(0, 6),
+        };
+        _detFilter = new TextBox
+        {
+            BackColor   = Color.FromArgb(30, 36, 48),
+            ForeColor   = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font        = new Font("Segoe UI", 12f),
+            PlaceholderText = "filter by name, id, or version",
+            Anchor      = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+        };
+        var fgActive = Color.FromArgb(235, 240, 250);
+        var fgDim    = Color.FromArgb(120, 132, 156);
+        var clearBtn = new Label
+        {
+            Text        = "×",
+            Font        = new Font("Segoe UI", 12f, FontStyle.Bold),
+            TextAlign   = ContentAlignment.MiddleCenter,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor   = Color.FromArgb(60, 72, 92),
+            ForeColor   = fgDim,
+            Cursor      = Cursors.Hand,
+            AutoSize    = false,
+            Anchor      = AnchorStyles.Right | AnchorStyles.Top,
+        };
+        clearBtn.Click += (_, _) => { _detFilter.Clear(); _detFilter.Focus(); };
+        clearBtn.MouseEnter += (_, _) => clearBtn.BackColor = Color.FromArgb(85, 100, 130);
+        clearBtn.MouseLeave += (_, _) => clearBtn.BackColor = Color.FromArgb(60, 72, 92);
+
+        // Layout: Filter: [textbox fills] [× 26px]
+        // Recompute on resize so the textbox stretches with the panel.
+        row.Resize += (_, _) =>
+        {
+            label.Location    = new Point(0, 6);
+            const int xWidth  = 26;
+            const int xGap    = 6;
+            const int labelGap = 8;
+            var labelRight    = label.Right + labelGap;
+            clearBtn.Size     = new Size(xWidth, _detFilter.PreferredHeight);
+            clearBtn.Location = new Point(row.Width - xWidth, 4);
+            _detFilter.Size   = new Size(
+                row.Width - labelRight - xWidth - xGap,
+                _detFilter.PreferredHeight);
+            _detFilter.Location = new Point(labelRight, 4);
+        };
+
+        _detFilter.TextChanged += (_, _) =>
+        {
+            clearBtn.ForeColor = _detFilter.Text.Length > 0 ? fgActive : fgDim;
+            // Re-render the grid with the new filter.
+            ShowSelected();
+        };
+        _detFilter.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Escape) return;
+            _detFilter.Clear();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        };
+
+        row.Controls.Add(label);
+        row.Controls.Add(_detFilter);
+        row.Controls.Add(clearBtn);
+        return row;
     }
 
     private DataGridView BuildDetailGrid()
@@ -301,6 +492,9 @@ public class ProfileManagerDialog : Form
         // 12pt Consolas cells, 12pt bold Segoe UI headers, 36px header,
         // 32px rows, identical selection / grid colours — so the
         // profile detail and the main list look like the same widget.
+        // ReadOnly = false because the "On" checkbox is editable (toggles
+        // the per-mod enabled flag inside the profile). Other columns
+        // are individually marked ReadOnly = true.
         var grid = new DataGridView
         {
             Dock  = DockStyle.Fill,
@@ -308,7 +502,14 @@ public class ProfileManagerDialog : Form
             AllowUserToAddRows  = false,
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
-            ReadOnly     = true,
+            ReadOnly     = false,
+            // Multi-select so the user can ctrl-click / shift-click a
+            // batch of mods and remove them via the context menu in a
+            // single action. The right-click handler below uses the
+            // current selection rather than the click-target row when
+            // the click lands on an already-selected row, so a
+            // multi-row selection isn't accidentally collapsed to one.
+            MultiSelect   = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
             BackgroundColor = Color.FromArgb(18, 22, 30),
@@ -335,12 +536,15 @@ public class ProfileManagerDialog : Form
             RowTemplate         = { Height = 32 },
         };
 
-        grid.Columns.Add(new DataGridViewTextBoxColumn
+        // Editable checkbox — clicking toggles the mod's IsEnabled flag
+        // INSIDE the profile (not in the live mods folder). Persists
+        // immediately via SaveMetadataOnly so the profile.json on disk
+        // stays in sync.
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
         {
             Name       = "On",
             HeaderText = "On",
-            Width      = 40,
-            ReadOnly   = true,
+            Width      = 50,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -377,7 +581,201 @@ public class ProfileManagerDialog : Form
         foreach (DataGridViewColumn col in grid.Columns)
             col.SortMode = DataGridViewColumnSortMode.NotSortable;
 
+        // Commit checkbox edits the instant the cell value changes,
+        // rather than waiting for focus to leave the cell — without
+        // this the IsEnabled flag would lag a click behind reality.
+        grid.CurrentCellDirtyStateChanged += (_, _) =>
+        {
+            if (grid.IsCurrentCellDirty)
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        };
+        grid.CellValueChanged += (_, e) => OnProfileCellEdited(e.RowIndex, e.ColumnIndex);
+
+        // Right-click → context menu with "Remove from profile (N)".
+        // Works on the current MULTI-row selection rather than just
+        // the click-target — ctrl/shift-select a batch then
+        // right-click to bulk-remove. MouseDown rule: if the click
+        // hits a row that's NOT already selected, replace the
+        // selection with that one row (matches WinForms convention
+        // and avoids the surprise of "I right-clicked a different
+        // row but the action ran on my old selection"). Clicks on a
+        // row that's IN the current selection keep the whole
+        // multi-row selection.
+        var ctx = new ContextMenuStrip();
+        grid.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right) return;
+            var hit = grid.HitTest(e.X, e.Y);
+            if (hit.RowIndex < 0 || hit.RowIndex >= grid.Rows.Count) return;
+            if (!grid.Rows[hit.RowIndex].Selected)
+            {
+                grid.ClearSelection();
+                grid.Rows[hit.RowIndex].Selected = true;
+            }
+        };
+        ctx.Opening += (_, e) =>
+        {
+            var selectedRows = grid.SelectedRows
+                .Cast<DataGridViewRow>()
+                .Where(r => r.Tag is ProfileMod)
+                .ToList();
+            if (selectedRows.Count == 0)
+            {
+                e.Cancel = true;
+                return;
+            }
+            ctx.Items.Clear();
+            var label = selectedRows.Count == 1
+                ? "Remove from profile"
+                : $"Remove from profile ({selectedRows.Count})";
+            var item = new ToolStripMenuItem(label);
+            // Capture the snapshot of selected ProfileMods here so
+            // a later refresh / re-sort can't shift the indices out
+            // from under the click handler.
+            var pmsToRemove = selectedRows
+                .Select(r => (ProfileMod)r.Tag!)
+                .ToList();
+            item.Click += (_, _) => RemoveModsFromProfile(pmsToRemove);
+            ctx.Items.Add(item);
+        };
+        grid.ContextMenuStrip = ctx;
+
+        // Drag SOURCE — let the user pick up one or more mods and
+        // drop them onto another profile in the left-hand list to
+        // copy them across. Uses a manual mouse-down/move threshold
+        // (default 4-pixel) so a normal click-to-select doesn't
+        // start a drag; only deliberate drags do. The dragged
+        // payload is a DraggedProfileMods snapshot containing the
+        // source profile (so the drop target can no-op when it's
+        // the same profile) plus the captured ProfileMod refs.
+        var dragOrigin = Point.Empty;
+        var dragArmed  = false;
+        grid.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left) return;
+            var hit = grid.HitTest(e.X, e.Y);
+            if (hit.RowIndex < 0 || hit.RowIndex >= grid.Rows.Count) return;
+            // Don't arm a drag from a click on the editable "On"
+            // checkbox — that's a toggle, not a drag handle.
+            if (hit.ColumnIndex >= 0
+                && grid.Columns[hit.ColumnIndex].Name == "On") return;
+            dragOrigin = new Point(e.X, e.Y);
+            dragArmed  = true;
+        };
+        grid.MouseUp += (_, _) => dragArmed = false;
+        grid.MouseMove += (_, e) =>
+        {
+            if (!dragArmed) return;
+            if ((e.Button & MouseButtons.Left) == 0) { dragArmed = false; return; }
+            // 4-pixel deadzone matches WinForms' default
+            // SystemInformation.DragSize. Suppresses accidental
+            // drags from minor mouse jitter during a click.
+            var dx = Math.Abs(e.X - dragOrigin.X);
+            var dy = Math.Abs(e.Y - dragOrigin.Y);
+            if (dx + dy < SystemInformation.DragSize.Width) return;
+            dragArmed = false;
+
+            // Gather the current selection as the drag payload.
+            // Multi-row selections drag the whole set; a single-
+            // row drag picks up just that row.
+            var pmsToDrag = grid.SelectedRows
+                .Cast<DataGridViewRow>()
+                .Where(r => r.Tag is ProfileMod)
+                .Select(r => (ProfileMod)r.Tag!)
+                .ToList();
+            if (pmsToDrag.Count == 0) return;
+            // Snapshot the source profile too — the drop handler
+            // uses it to no-op when the user drags onto the same
+            // profile (no point copying mods to themselves).
+            var sourceProfile = _list.SelectedIndex >= 0
+                                 && _list.SelectedIndex < _profiles.Count
+                ? _profiles[_list.SelectedIndex]
+                : null;
+            var payload = new DraggedProfileMods(sourceProfile, pmsToDrag);
+            grid.DoDragDrop(payload, DragDropEffects.Copy);
+        };
+
         return grid;
+    }
+
+    /// <summary>Drag-drop payload carried from the detail grid to
+    /// the profile list. SourceProfile may be null in pathological
+    /// cases (no selected profile when the drag starts); the drop
+    /// handler treats null as "different profile" and proceeds.
+    /// </summary>
+    private sealed record DraggedProfileMods(
+        ModProfile? SourceProfile,
+        List<ProfileMod> Mods);
+
+    /// <summary>Append `mods` to `target.Mods`, deduping by mod_id
+    /// (case-insensitive) so dragging an already-present mod is a
+    /// no-op rather than a duplicate. Each added entry is a NEW
+    /// ProfileMod with the same fields — references aren't shared
+    /// between profiles so toggling enabled-state in one profile
+    /// can't leak across to another. Persists with
+    /// SaveMetadataOnly + refreshes the listbox row count so the
+    /// "(N mods)" label updates immediately if the target profile
+    /// is currently selected.</summary>
+    private void AddProfileModsToProfile(
+        ModProfile target,
+        IReadOnlyList<ProfileMod> mods)
+    {
+        if (target == null || mods == null || mods.Count == 0) return;
+        var existingIds = new HashSet<string>(
+            target.Mods.Select(m => m.ModId),
+            StringComparer.OrdinalIgnoreCase);
+        var added = 0;
+        var skipped = 0;
+        foreach (var src in mods)
+        {
+            if (string.IsNullOrEmpty(src.ModId)) { skipped++; continue; }
+            if (existingIds.Contains(src.ModId))  { skipped++; continue; }
+            target.Mods.Add(new ProfileMod
+            {
+                ModId           = src.ModId,
+                DisplayName     = src.DisplayName,
+                Version         = src.Version,
+                IsEnabled       = src.IsEnabled,
+                Priority        = src.Priority,
+                ModWorkshopId   = src.ModWorkshopId,
+                // Don't share the bundled archive between profiles
+                // — the source profile owns its mods/ folder; copying
+                // an entry's metadata across is fine but pointing at
+                // the source's bundled .vmz from the target would
+                // break apply-time bundle resolution. The recipient
+                // profile gets a metadata-only entry that falls
+                // back to library / MW download on apply.
+                ArchiveFileName = "",
+            });
+            existingIds.Add(src.ModId);
+            added++;
+        }
+        if (added > 0)
+        {
+            target.UpdatedAt = DateTime.UtcNow;
+            try { target.SaveMetadataOnly(); }
+            catch { /* best-effort; in-memory state still reflects the change */ }
+        }
+        // Refresh the listbox so the per-profile mod-count label
+        // updates, and the detail grid too when the user dropped
+        // onto the currently-selected profile.
+        var selIdx = _list.SelectedIndex;
+        LoadProfiles();
+        if (selIdx >= 0 && selIdx < _list.Items.Count)
+            _list.SelectedIndex = selIdx;
+
+        // Surface the outcome — silent success makes it unclear
+        // whether the drag actually did anything.
+        var msg = added > 0
+            ? $"Copied {added} mod{(added == 1 ? "" : "s")} into '{target.Name}'"
+              + (skipped > 0 ? $"  ({skipped} skipped — already present)" : "")
+              + "."
+            : skipped > 0
+                ? $"Nothing added — all {skipped} dragged mod(s) are already in '{target.Name}'."
+                : "Nothing to copy.";
+        ThemedMessageBox.Show(this, msg, "Drag-and-drop copy",
+            MessageBoxButtons.OK,
+            added > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
     // ── Bottom row ───────────────────────────────────────────────────
@@ -424,6 +822,8 @@ public class ProfileManagerDialog : Form
         _deleteBtn.Enabled = profile != null;
         _applyBtn.Enabled  = profile != null;
         _exportBtn.Enabled = profile != null;
+        // Diff needs at least one OTHER profile to compare against.
+        _diffBtn.Enabled = profile != null && _profiles.Count >= 2;
 
         if (profile == null)
         {
@@ -450,12 +850,34 @@ public class ProfileManagerDialog : Form
             + $"created {profile.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}{updated}"
             + bundleNote;
 
+        // Order the rows the same way each refresh so editing one entry
+        // doesn't shuffle the rest, AND stash the ProfileMod ref in
+        // Row.Tag so the edit/remove handlers can find the original
+        // model without re-resolving by index against a re-sorted list.
+        // Apply the live filter here so the grid only renders the
+        // ProfileMods that match name / id / version — matches the
+        // main form's filter semantics.
+        var filter = (_detFilter?.Text ?? "").Trim().ToLowerInvariant();
+        bool MatchesFilter(ProfileMod m)
+        {
+            if (filter.Length == 0) return true;
+            if ((m.DisplayName ?? "").ToLowerInvariant().Contains(filter)) return true;
+            if ((m.ModId ?? "").ToLowerInvariant().Contains(filter)) return true;
+            if ((m.Version ?? "").ToLowerInvariant().Contains(filter)) return true;
+            return false;
+        }
+        var ordered = profile.Mods
+            .Where(MatchesFilter)
+            .OrderBy(m => m.Priority)
+            .ThenBy(m => m.DisplayName)
+            .ToList();
         _detGrid.Rows.Clear();
-        foreach (var m in profile.Mods.OrderBy(m => m.Priority).ThenBy(m => m.DisplayName))
+        foreach (var m in ordered)
         {
             var i = _detGrid.Rows.Add();
             var r = _detGrid.Rows[i];
-            r.Cells["On"].Value       = m.IsEnabled ? "✓" : "✗";
+            r.Tag = m;
+            r.Cells["On"].Value       = m.IsEnabled;
             r.Cells["ModName"].Value  = m.DisplayName;
             r.Cells["Version"].Value  = m.Version;
             r.Cells["Priority"].Value = m.Priority;
@@ -465,11 +887,88 @@ public class ProfileManagerDialog : Form
             r.Cells["ModName"].ToolTipText = hasBundle
                 ? $"id: {m.ModId}\nbundled: {m.ArchiveFileName}"
                 : $"id: {m.ModId}\nno bundled archive — will fall back to ModWorkshop";
-            r.Cells["On"].Style.ForeColor = m.IsEnabled
-                ? Color.FromArgb(120, 200, 130)
-                : Color.FromArgb(160, 80, 80);
             if (!hasBundle) r.DefaultCellStyle.ForeColor = Color.FromArgb(160, 170, 190);
         }
+    }
+
+    /// <summary>Wires the "On" checkbox edit back to the underlying
+    /// ProfileMod and persists. Other columns are ReadOnly so this
+    /// only ever fires for the checkbox.</summary>
+    private void OnProfileCellEdited(int rowIndex, int columnIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _detGrid.Rows.Count) return;
+        var profile = SelectedProfile();
+        if (profile == null) return;
+        var row = _detGrid.Rows[rowIndex];
+        if (row.Tag is not ProfileMod pm) return;
+        if (_detGrid.Columns[columnIndex].Name != "On") return;
+        var newVal = row.Cells["On"].Value is bool b && b;
+        if (pm.IsEnabled == newVal) return;
+        pm.IsEnabled = newVal;
+        profile.UpdatedAt = DateTime.UtcNow;
+        try { profile.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ThemedMessageBox.Show(this,
+                $"Couldn't save profile change:\n{ex.Message}",
+                "Save failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>Drops one or more mods from the selected profile.
+    /// For each: deletes its bundled .vmz from the profile's mods/
+    /// folder (if any), removes the ProfileMod from profile.Mods,
+    /// then rewrites profile.json once at the end. Single
+    /// confirmation prompt covers the whole batch; the live mods
+    /// folder is never touched.</summary>
+    private void RemoveModsFromProfile(List<ProfileMod> mods)
+    {
+        if (mods.Count == 0) return;
+        var profile = SelectedProfile();
+        if (profile == null) return;
+
+        var promptBody = mods.Count == 1
+            ? $"Remove '{mods[0].DisplayName}' from profile '{profile.Name}'?"
+            : $"Remove these {mods.Count} mods from profile "
+              + $"'{profile.Name}'?\n\n  • "
+              + string.Join("\n  • ",
+                    mods.Take(8).Select(m => m.DisplayName))
+              + (mods.Count > 8 ? $"\n  … and {mods.Count - 8} more" : "");
+        var dr = ThemedMessageBox.Show(this,
+            promptBody
+            + "\n\nThis drops the entries from the profile and "
+            + "deletes their bundled archives (if any). The live "
+            + "mods folder is untouched.",
+            "Remove from profile",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (dr != DialogResult.Yes) return;
+
+        // Delete bundles first, then mutate Mods. A partial failure
+        // mid-batch still leaves the profile.json consistent because
+        // we rewrite it once at the end.
+        foreach (var pm in mods)
+        {
+            var bundlePath = profile.ResolveBundledArchive(pm);
+            if (!string.IsNullOrEmpty(bundlePath))
+            {
+                try { File.Delete(bundlePath); }
+                catch { /* leave the orphan; not worth blocking */ }
+            }
+            profile.Mods.Remove(pm);
+        }
+        profile.UpdatedAt = DateTime.UtcNow;
+        try { profile.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ThemedMessageBox.Show(this,
+                $"Couldn't save profile change:\n{ex.Message}",
+                "Save failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        ShowSelected();
     }
 
     private static string FormatBytes(long bytes)
@@ -487,6 +986,85 @@ public class ProfileManagerDialog : Form
     }
 
     // ── Actions ───────────────────────────────────────────────────────
+
+    /// <summary>Clones the profile currently SELECTED in the
+    /// dialog's left-pane list under a user-supplied name. The
+    /// clone has the same Mods list + description + settings but
+    /// is NOT activated — the user switches to it from the
+    /// title-row dropdown when ready. Bundles aren't copied; the
+    /// clone references the same library files the source does
+    /// (looked up at apply / switch time).</summary>
+    private void CloneSelectedProfile()
+    {
+        var source = SelectedProfile();
+        if (source == null)
+        {
+            ThemedMessageBox.Show(this,
+                "Select a profile in the list first, then click "
+                + "Clone to make a copy of it under a new name.",
+                "Nothing to clone",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var newName = TextInputDialog.Prompt(this,
+            "Clone Profile",
+            $"Clone of '{source.Name}'. New profile name:",
+            $"{source.Name} (copy)");
+        if (string.IsNullOrWhiteSpace(newName)) return;
+
+        // Overwrite check — same flow as SaveCurrent / Empty.
+        var existing = _profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, newName, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            var dr = ThemedMessageBox.Show(this,
+                $"A profile named '{newName}' already exists.\n\n"
+                + "Overwrite it?",
+                "Overwrite?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (dr != DialogResult.Yes) return;
+        }
+
+        var clone = new ModProfile
+        {
+            Name        = newName,
+            Description = $"Clone of '{source.Name}' — "
+                        + $"{DateTime.Now:yyyy-MM-dd HH:mm}",
+            CreatedAt   = DateTime.UtcNow,
+            Mods        = source.Mods.Select(m => new ProfileMod
+            {
+                ModId         = m.ModId,
+                DisplayName   = m.DisplayName,
+                Version       = m.Version,
+                IsEnabled     = m.IsEnabled,
+                Priority      = m.Priority,
+                ModWorkshopId = m.ModWorkshopId,
+                // ArchiveFileName intentionally NOT copied — clone
+                // doesn't carry bundles; ModLibrary.Find at apply
+                // / switch time is the lookup path.
+            }).ToList(),
+        };
+        try { clone.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ThemedMessageBox.Show(this,
+                $"Couldn't write the new profile:\n{ex.Message}",
+                "Clone failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        LoadProfiles();
+        for (int i = 0; i < _list.Items.Count; i++)
+        {
+            if (string.Equals(_list.Items[i]?.ToString(), newName,
+                    StringComparison.OrdinalIgnoreCase))
+            { _list.SelectedIndex = i; break; }
+        }
+    }
 
     private void SaveCurrentProfile()
     {
@@ -516,7 +1094,7 @@ public class ProfileManagerDialog : Form
             p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
-            var dr = MessageBox.Show(this,
+            var dr = ThemedMessageBox.Show(this,
                 $"A profile named '{name}' already exists.\n\n"
                 + "Overwrite it (existing bundled archives will be replaced "
                 + "with copies of the currently-installed mods)?",
@@ -554,7 +1132,7 @@ public class ProfileManagerDialog : Form
             var sample = string.Join("\n  • ",
                 failed.Take(6).Select(m => $"{m.DisplayName} ({m.Version})"));
             var more = failed.Count > 6 ? $"\n  … and {failed.Count - 6} more" : "";
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Profile saved, but {failed.Count} mod(s) couldn't be bundled:\n  • {sample}{more}\n\n"
                 + "These are typically directory mods (unpacked) or .vmz "
                 + "files that were locked at copy time. On apply, the manager "
@@ -573,6 +1151,117 @@ public class ProfileManagerDialog : Form
         }
     }
 
+    /// <summary>Creates a NEW MODLIST profile — Mods list contains
+    /// only the user's locked mods (or is literally empty if there
+    /// are none). Applying it doesn't disable any other installed
+    /// mods; it just establishes a small starting set. Duplicate
+    /// handling lives in ProfileApplyDialog (per-row Source
+    /// dropdown: keep current / use bundle / download new).</summary>
+    private void SaveNewModlistProfile()
+    {
+        var lockedIds = new HashSet<string>(
+            _lockedModIds, StringComparer.OrdinalIgnoreCase);
+        var lockedEntries = _registry.Entries
+            .Where(e => !string.IsNullOrEmpty(e.ModId)
+                     && lockedIds.Contains(e.ModId))
+            .ToList();
+
+        // Explain what the user is about to create. The prompt
+        // doubles as the confirmation — if they hit Cancel the
+        // profile isn't created.
+        var preview = lockedEntries.Count > 0
+            ? $"Starts with {lockedEntries.Count} locked mod(s). "
+              + "Applying it later won't disable anything else — "
+              + "duplicates are handled per-row in the apply dialog."
+            : "Starts from zero mods. Applying it later won't "
+              + "disable anything else — duplicates are handled "
+              + "per-row in the apply dialog.";
+        var name = TextInputDialog.Prompt(this,
+            "New Modlist",
+            "Name the new-modlist profile:\n\n" + preview,
+            $"Modlist  {DateTime.Now:yyyy-MM-dd HH:mm}");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        // Same overwrite confirmation as SaveCurrentProfile so the
+        // user doesn't lose an existing profile by accident.
+        var existing = _profiles.FirstOrDefault(
+            p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            var dr = ThemedMessageBox.Show(this,
+                $"A profile named '{name}' already exists.\n\n"
+                + "Overwrite it?",
+                "Overwrite?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (dr != DialogResult.Yes) return;
+        }
+
+        // Profile contains ONLY the locked mods (or nothing). The
+        // apply phase reads "anything in registry but not in profile
+        // and not locked" → disable. That's how the empty list
+        // becomes "everything off" on apply.
+        Cursor = Cursors.WaitCursor;
+        ModProfile profile;
+        List<ProfileMod> failed;
+        try
+        {
+            profile = new ModProfile
+            {
+                Name        = name,
+                Description = "New modlist — "
+                            + (lockedEntries.Count > 0
+                                ? $"starts with {lockedEntries.Count} locked mod(s)."
+                                : "starts from zero mods."),
+                CreatedAt   = DateTime.UtcNow,
+                Mods        = lockedEntries
+                    .Select(e => new ProfileMod
+                    {
+                        ModId         = e.ModId,
+                        DisplayName   = string.IsNullOrEmpty(e.DisplayName)
+                                            ? e.ModId
+                                            : e.DisplayName,
+                        Version       = e.Version,
+                        IsEnabled     = e.IsEnabled,
+                        Priority      = e.Priority,
+                        ModWorkshopId = e.ModWorkshopId,
+                    })
+                    .ToList(),
+            };
+            failed = profile.SaveWithBundles(lockedEntries);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+
+        if (failed.Count > 0)
+        {
+            var sample = string.Join("\n  • ",
+                failed.Take(6).Select(m => $"{m.DisplayName} ({m.Version})"));
+            var more = failed.Count > 6
+                ? $"\n  … and {failed.Count - 6} more" : "";
+            ThemedMessageBox.Show(this,
+                $"Empty profile saved, but {failed.Count} locked "
+                + $"mod(s) couldn't be bundled:\n  • {sample}{more}\n\n"
+                + "Usually directory mods or files locked at copy "
+                + "time. The profile still applies correctly — "
+                + "those entries just have no bundled .vmz to "
+                + "restore from later.",
+                "Partial bundle",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        LoadProfiles();
+        for (int i = 0; i < _list.Items.Count; i++)
+        {
+            if (string.Equals(_list.Items[i]?.ToString(), name,
+                    StringComparison.OrdinalIgnoreCase))
+            { _list.SelectedIndex = i; break; }
+        }
+    }
+
     private void ImportProfileFromFile()
     {
         using var dlg = new OpenFileDialog
@@ -586,10 +1275,11 @@ public class ProfileManagerDialog : Form
 
         ModProfile? profile;
         var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+        var isZip = (ext == ".vmprofile" || ext == ".zip");
         Cursor = Cursors.WaitCursor;
         try
         {
-            profile = (ext == ".vmprofile" || ext == ".zip")
+            profile = isZip
                 ? ModProfile.LoadFromZip(dlg.FileName)
                 : ModProfile.LoadFromJsonFile(dlg.FileName);
         }
@@ -600,7 +1290,7 @@ public class ProfileManagerDialog : Form
 
         if (profile == null)
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 "Could not parse the selected file as a mod profile.\n\n"
                 + "Expected a .vmprofile zip (bundled archives) or a "
                 + ".json file (metadata only).",
@@ -609,12 +1299,33 @@ public class ProfileManagerDialog : Form
             return;
         }
 
-        // If we imported a JSON (no folder), save it through SaveMetadataOnly
-        // so it lands in a folder under ProfilesDir. Zip imports already
-        // unzip themselves into a folder.
+        // Save metadata if it came from a bare .json (Zip imports
+        // already unzip themselves into a folder during LoadFromZip).
         if (string.IsNullOrEmpty(profile.FolderPath))
         {
             profile.SaveMetadataOnly();
+        }
+
+        // .vmprofile path: every bundled archive inside the imported
+        // profile's `mods/` subfolder gets ingested into the active
+        // mods folder's Library so the new profile model can find
+        // them on activate. ModLibrary.Add is idempotent — if the
+        // recipient already has the same (mod_id, version), this is
+        // a no-op for that file.
+        var libraryAdded   = 0;
+        var librarySkipped = 0;
+        if (isZip && !string.IsNullOrEmpty(profile.FolderPath))
+        {
+            var bundleDir = Path.Combine(profile.FolderPath, "mods");
+            if (Directory.Exists(bundleDir))
+            {
+                foreach (var vmz in Directory.GetFiles(bundleDir, "*.vmz"))
+                {
+                    var added = ModLibrary.Add(_modsDir, vmz);
+                    if (added != null) libraryAdded++;
+                    else               librarySkipped++;
+                }
+            }
         }
 
         LoadProfiles();
@@ -624,16 +1335,98 @@ public class ProfileManagerDialog : Form
             { _list.SelectedIndex = i; break; }
         }
 
-        // Ask if they want to apply immediately
-        var applyNow = MessageBox.Show(this,
-            $"Profile '{profile.Name}' imported "
-            + $"({profile.BundledArchivesCount()} archive(s) bundled).\n\n"
-            + "Apply it now?",
-            "Apply?",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Question,
-            MessageBoxDefaultButton.Button1);
-        if (applyNow == DialogResult.Yes) ApplySelected();
+        // Decide which follow-up prompt makes sense. .vmprofile
+        // imports are fully self-contained once their bundles land
+        // in the library — the user can switch profiles from the
+        // title-row selector. .json imports name mods but bring no
+        // archives; those need a ModWorkshop download, which the
+        // existing ApplySelected flow handles via its
+        // MissingDownload row kind.
+        if (isZip)
+        {
+            var libraryNote = libraryAdded > 0
+                ? $"  ·  {libraryAdded} archive(s) added to Library"
+                  + (librarySkipped > 0 ? $" ({librarySkipped} skipped)" : "")
+                : "  ·  no archives ingested";
+            ThemedMessageBox.Show(this,
+                $"Profile '{profile.Name}' imported{libraryNote}.\n\n"
+                + "Switch to it from the title-row Active selector "
+                + "to activate.",
+                "Imported",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else
+        {
+            // JSON spec — count mods that aren't in the library yet
+            // so the prompt explains what Apply will do.
+            int missingFromLib = 0;
+            foreach (var pm in profile.Mods)
+            {
+                if (string.IsNullOrEmpty(pm.ModId)) continue;
+                if (string.IsNullOrEmpty(
+                        ModLibrary.Find(_modsDir, pm.ModId, pm.Version)))
+                    missingFromLib++;
+            }
+            var dlBlurb = missingFromLib > 0
+                ? $"{missingFromLib} mod(s) need to be downloaded "
+                  + "from ModWorkshop. "
+                : "";
+            var applyNow = ThemedMessageBox.Show(this,
+                $"Profile '{profile.Name}' imported (JSON spec).\n\n"
+                + dlBlurb
+                + "Apply it now? Apply runs the per-row plan "
+                + "(downloads + activate).",
+                "Apply now?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button1);
+            if (applyNow == DialogResult.Yes) ApplySelected();
+        }
+    }
+
+    /// <summary>Open a small picker dialog listing every OTHER
+    /// profile, then show ProfileDiffDialog with the selected
+    /// profile and the picked one. Triggered by the "Diff with…"
+    /// button on the detail pane.</summary>
+    private void DiffSelected()
+    {
+        var profile = SelectedProfile();
+        if (profile == null) return;
+        var others = _profiles
+            .Where(p => !object.ReferenceEquals(p, profile))
+            .ToList();
+        if (others.Count == 0)
+        {
+            ThemedMessageBox.Show(this,
+                "Need at least one OTHER profile to diff against.",
+                "Nothing to compare",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // Quick picker — single-select listbox in a small dialog.
+        // Worth its own form rather than a combo because users
+        // tend to have many profiles and the listbox is friendlier
+        // to read at a glance.
+        using var picker = new ProfileDiffPickerDialog(profile.Name, others);
+        if (picker.ShowDialog(this) != DialogResult.OK) return;
+        var other = picker.Selected;
+        if (other == null) return;
+
+        using var dlg = new ProfileDiffDialog(profile, other);
+        dlg.ShowDialog(this);
+        // If the user copied entries between profiles inside the
+        // diff dialog, their on-disk profile.json files changed
+        // out from under our in-memory _profiles list. Refresh
+        // so the right pane (detail grid + mod counts) reflects
+        // the new state.
+        if (dlg.MadeChanges)
+        {
+            var keepIdx = _list.SelectedIndex;
+            LoadProfiles();
+            if (keepIdx >= 0 && keepIdx < _list.Items.Count)
+                _list.SelectedIndex = keepIdx;
+        }
     }
 
     private void ExportSelected()
@@ -655,7 +1448,19 @@ public class ProfileManagerDialog : Form
             var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
             if (ext == ".vmprofile" || ext == ".zip")
             {
-                profile.ExportToZip(dlg.FileName);
+                // Two export paths for .vmprofile depending on where
+                // the bundles live:
+                //   • LEGACY (pre-Phase-5): the profile has a
+                //     per-profile mods/ folder with bundled archives
+                //     — use ExportToZip which zips that folder.
+                //   • NEW MODEL: bundles live in the library under
+                //     `<modsDir>/Library/` — use ExportToZipUsingLibrary
+                //     which looks each ProfileMod up by (mod_id, version)
+                //     and pulls from there.
+                if (profile.BundledArchivesCount() > 0)
+                    profile.ExportToZip(dlg.FileName);
+                else
+                    profile.ExportToZipUsingLibrary(dlg.FileName, _modsDir);
             }
             else
             {
@@ -681,14 +1486,14 @@ public class ProfileManagerDialog : Form
                     System.Text.Json.JsonSerializer.Serialize(copy,
                         new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             }
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Profile exported to:\n{dlg.FileName}",
                 "Exported",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this,
+            ThemedMessageBox.Show(this,
                 $"Export failed:\n{ex.Message}",
                 "Export error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -703,7 +1508,7 @@ public class ProfileManagerDialog : Form
     {
         var profile = SelectedProfile();
         if (profile == null) return;
-        var dr = MessageBox.Show(this,
+        var dr = ThemedMessageBox.Show(this,
             $"Delete profile '{profile.Name}'?\nThis cannot be undone.",
             "Delete profile",
             MessageBoxButtons.YesNo,
@@ -720,7 +1525,7 @@ public class ProfileManagerDialog : Form
         if (profile == null) return;
 
         using var dlg = new ProfileApplyDialog(
-            profile, _registry, _mw, _modConfig, _modsDir);
+            profile, _registry, _mw, _modConfig, _modsDir, _lockedModIds);
         dlg.ShowDialog(this);
         if (dlg.Applied)
         {
