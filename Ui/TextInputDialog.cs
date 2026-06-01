@@ -105,4 +105,107 @@ public class TextInputDialog : Form
         var dr = owner != null ? d.ShowDialog(owner) : d.ShowDialog();
         return dr == DialogResult.OK ? d.Result : null;
     }
+
+    /// <summary>Like Prompt but with a multi-line textbox for
+    /// inputs that need vertical room — mod notes, long
+    /// descriptions, etc. Same return contract as Prompt
+    /// (null = user cancelled, empty string = user OK'd with
+    /// nothing typed).</summary>
+    public static string? PromptMultiline(
+        IWin32Window? owner,
+        string title,
+        string prompt,
+        string initial = "")
+    {
+        using var d = new MultilineTextInputDialog(title, prompt, initial);
+        var dr = owner != null ? d.ShowDialog(owner) : d.ShowDialog();
+        return dr == DialogResult.OK ? d.Result : null;
+    }
+}
+
+/// <summary>Variant of TextInputDialog with a Multiline textbox
+/// sized for paragraph-length input. Kept as a separate class
+/// rather than a flag on TextInputDialog because the layout
+/// constraints differ enough (fixed height instead of natural,
+/// vertical scrollbar) that switching by flag would muddy the
+/// constructor.</summary>
+internal class MultilineTextInputDialog : Form
+{
+    public string Result { get; private set; } = "";
+
+    public MultilineTextInputDialog(string title, string prompt, string initial = "")
+    {
+        Text = title;
+        StartPosition = FormStartPosition.CenterParent;
+        BackColor = Color.FromArgb(26, 30, 40);
+        ForeColor = Color.FromArgb(220, 225, 235);
+        Font = new Font("Segoe UI", 12f);
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowInTaskbar = false;
+        MinimumSize = new Size(600, 360);
+        Width  = 640;
+        Height = 420;
+        Padding = new Padding(16, 14, 16, 14);
+
+        var root = new TableLayoutPanel
+        {
+            Dock        = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount    = 3,
+            BackColor   = Color.Transparent,
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        Controls.Add(root);
+
+        var promptLabel = new Label
+        {
+            Text        = prompt,
+            AutoSize    = true,
+            MaximumSize = new Size(580, 0),
+            Margin      = new Padding(0, 0, 0, 8),
+        };
+        root.Controls.Add(promptLabel, 0, 0);
+
+        var input = new TextBox
+        {
+            Text        = initial,
+            Dock        = DockStyle.Fill,
+            Multiline   = true,
+            ScrollBars  = ScrollBars.Vertical,
+            AcceptsReturn = true,
+            BackColor   = Color.FromArgb(18, 22, 30),
+            ForeColor   = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font        = new Font("Consolas", 12f),
+        };
+        root.Controls.Add(input, 0, 1);
+
+        var btnRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize      = true,
+            Dock          = DockStyle.Fill,
+            BackColor     = Color.Transparent,
+            Margin        = new Padding(0, 12, 0, 0),
+        };
+        var ok = MainForm.ThemedButton("OK");
+        ok.Width = 100; ok.Height = 40; ok.AutoSize = false;
+        ok.DialogResult = DialogResult.OK;
+        ok.Click += (_, _) => { Result = input.Text; Close(); };
+        var cancel = MainForm.ThemedButton("Cancel");
+        cancel.Width = 100; cancel.Height = 40; cancel.AutoSize = false;
+        cancel.DialogResult = DialogResult.Cancel;
+        cancel.Click += (_, _) => { Result = ""; Close(); };
+        btnRow.Controls.Add(ok);
+        btnRow.Controls.Add(cancel);
+        root.Controls.Add(btnRow, 0, 2);
+
+        AcceptButton = ok;
+        CancelButton = cancel;
+        Load += (_, _) => { input.Focus(); input.SelectionStart = input.TextLength; };
+    }
 }

@@ -42,10 +42,7 @@ public class AboutDialog : Form
         const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  AI";
 #else
         const string edition       = "Integrated edition";
-        const string editionDetail =
-            "Conflict detection is fully active; the AI resolver is "
-            + "omitted entirely. No Claude Code CLI dependency, no "
-            + "Decomp/ requirement.";
+        const string editionDetail = "";
         const string titleText     = "ЯOAD TO VOSTOK MOD MAИAGEЯ  ·  IИTEGЯATED";
 #endif
 
@@ -208,7 +205,12 @@ public class AboutDialog : Form
         Controls.Add(linksPanel);
         Controls.Add(linksHeader);
         Controls.Add(divider);
-        Controls.Add(editionLabel);
+        // Skip the description label when there's nothing to say —
+        // otherwise the empty label still claims its top/bottom Margin
+        // and leaves dead vertical space between the title and the
+        // divider.
+        if (!string.IsNullOrEmpty(editionDetail))
+            Controls.Add(editionLabel);
         Controls.Add(topRow);
     }
 
