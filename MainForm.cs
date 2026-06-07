@@ -678,7 +678,7 @@ public class MainForm : Form
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 7,
+            ColumnCount = 8,
             RowCount = 1,
             AutoSize = true,
             BackColor = Color.Transparent,
@@ -690,6 +690,7 @@ public class MainForm : Form
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profile selector
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profiles
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // mod packager
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // support package
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // settings
 
         // Decorative red star ornament next to the title — pure
@@ -865,6 +866,19 @@ public class MainForm : Form
         packagerBtn.Click += (_, _) => OpenModPackagerDialog();
         titleRow.Controls.Add(packagerBtn, 5, 0);
 
+        // Support Package — collects a .vmzlog snapshot (active profile
+        // bundle + the whole Godot logs directory + loader state) the
+        // user can hand to a maintainer when reporting a problem. Sits
+        // between the creator tool and Settings.
+        var supportBtn = ThemedButton("📦 Support…");
+        supportBtn.Width = 150;
+        supportBtn.Height = 40;
+        supportBtn.AutoSize = false;
+        supportBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        supportBtn.Margin = new Padding(0, 0, 8, 0);
+        supportBtn.Click += (_, _) => OpenSupportPackageDialog();
+        titleRow.Controls.Add(supportBtn, 6, 0);
+
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
         settingsBtn.Height = 40;
@@ -872,7 +886,7 @@ public class MainForm : Form
         settingsBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         settingsBtn.Margin = new Padding(0, 0, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn, 6, 0);
+        titleRow.Controls.Add(settingsBtn, 7, 0);
 
         root.Controls.Add(titleRow, 0, 0);
 
@@ -2823,7 +2837,7 @@ public class MainForm : Form
             // sizing kept rendering the × invisible. It's promoted to a
             // first-class toolbar column here so it renders by the same
             // rules every other button does.
-            ColumnCount = 10,
+            ColumnCount = 11,
             RowCount = 1,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 4, 0, 4),
@@ -2837,6 +2851,7 @@ public class MainForm : Form
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Disable all
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Refresh
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Dependencies
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Analyze Log
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Conflicts toggle
 
         // Filter label. Anchor with no Top/Bottom = vertically centred
@@ -2981,6 +2996,16 @@ public class MainForm : Form
         deps.Click += (_, _) => ShowProfileDependenciesDialog();
         bar.Controls.Add(deps, 8, 0);
 
+        // Analyze Log — parses the latest godot.log into a hook/override
+        // overwrite map + issue report (both editions); the AI edition
+        // additionally sends a compact digest to Claude for root-cause
+        // diagnosis + a proposed load order. Sits by the conflicts tools
+        // since it's the runtime counterpart to the static conflict scan.
+        var analyzeLog = ThemedButton("🩺 Analyze Log");
+        analyzeLog.Margin = new Padding(0, 2, 4, 2);
+        analyzeLog.Click += (_, _) => OpenLogAnalysisDialog();
+        bar.Controls.Add(analyzeLog, 9, 0);
+
         // Sidebar toggle. Label flips between "Hide conflicts" and
         // "Show conflicts" via SyncConflictsToggleLabel so the text
         // always reflects the current Panel2Collapsed state. Saved to
@@ -3001,7 +3026,7 @@ public class MainForm : Form
             if (nowVisible) _applySplit();
             SyncConflictsToggleLabel();
         };
-        bar.Controls.Add(_conflictsToggle, 9, 0);
+        bar.Controls.Add(_conflictsToggle, 10, 0);
 
         return bar;
     }
@@ -3240,6 +3265,51 @@ public class MainForm : Form
         // import / install-list flows.
         using var dlg = new Ui.ModPackagerDialog(_registry, _activeProfile);
         dlg.ShowDialog(this);
+    }
+
+    /// <summary>Opens the Collect Support Package dialog — bundles the
+    /// active profile (as a loadable .vmprofile) plus the entire Godot
+    /// logs directory and the loader's mod_config.cfg into a single
+    /// .vmzlog the user can save and hand to a maintainer. Passes the
+    /// active profile (may be null → snapshots all live mods), the live
+    /// registry, and the mods dir. Read-only with respect to the live
+    /// mods folder, so no rescan on close.</summary>
+    private void OpenSupportPackageDialog()
+    {
+        using var dlg = new Ui.SupportPackageDialog(_activeProfile, _registry, ModsDir);
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>Opens the Log Analysis dialog. Parses the latest
+    /// godot.log for the hook/override overwrite map + issue report
+    /// (both editions). In the AI edition a LogDiagnoser (backed by the
+    /// same Claude runner the resolver uses) is passed in so the dialog
+    /// can offer Claude-powered diagnosis + a proposed load order. If
+    /// the user applies a new load order, the dialog flips Applied and
+    /// we rescan to reflect the rewritten mod_config.cfg.</summary>
+    private void OpenLogAnalysisDialog()
+    {
+#if AI_RESOLVER
+        var diagnoser = new Ai.LogDiagnoser(_claude, _registry)
+        {
+            GameSourcePath = _settings.GameSourcePath,
+        };
+        using var dlg = new Ui.LogAnalysisDialog(
+            _registry, _modConfig, ModsDir, diagnoser, _claude.IsAvailable);
+#else
+        using var dlg = new Ui.LogAnalysisDialog(
+            _registry, _modConfig, ModsDir);
+#endif
+        dlg.ShowDialog(this);
+        if (dlg.Applied)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = DetectConflictsForActive();
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+        }
     }
 
     /// <summary>Opens the profile-wide dependency rollup. Passes the
