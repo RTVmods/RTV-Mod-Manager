@@ -672,29 +672,63 @@ public class MainForm : Form
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Color.Transparent,
         };
+        // Constrain the single column to the form width. Without an
+        // explicit ColumnStyle a 1-column TableLayoutPanel sizes its
+        // column to the widest child's PREFERRED width — which let the
+        // title row (and its right-docked button strip) overflow past
+        // the window's right edge instead of clamping to it. Percent-100
+        // pins the column to the available width so docked children lay
+        // out against the real client width.
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         for (var i = 0; i < 10; i++)
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         Controls.Add(root);
 
-        // Title row: [star] [title] [Launch] [Settings]
-        // Title + action buttons live in a WRAPPING FlowLayoutPanel so
-        // the action buttons reflow onto a second line instead of
-        // clipping off the right edge when the window is narrow or the
-        // display is DPI-scaled. Dock.Top gives the flow the full content
-        // width (that's what makes WrapContents actually wrap — an
-        // AutoSize column never would). Earlier this was a TableLayoutPanel
-        // whose Percent-100 title column ate all the width and pushed the
-        // right-hand buttons off-screen.
-        var titleRow = new FlowLayoutPanel
+        // Title row: [star + title fills left] ............ [action buttons hug right]
+        //
+        // DOCKING, not a TableLayoutPanel. Every table-based attempt
+        // clipped: the 24pt title label gave the Percent column a large
+        // MINIMUM width that wouldn't shrink, so the table starved and
+        // cut off the last (button) column. With docking the priority is
+        // unambiguous: btnFlow docks RIGHT and always gets its full
+        // content width (all buttons visible, flush against the right
+        // edge); leftBlock docks FILL and takes only what's left, so the
+        // TITLE clips when the window is narrow — never the buttons.
+        var titleRow = new Panel
         {
             Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true,
-            FlowDirection = FlowDirection.LeftToRight,
+            Height = 64,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8),
+        };
+
+        // Right block: single-row button strip docked to the right edge.
+        // Dock.Right + AutoSize = sized to the buttons' total width and
+        // pinned right. WrapContents=false so it never collapses into a
+        // vertical stack.
+        var btnFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Right,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+        };
+
+        // Left block: star + title stack, fills the space left of the
+        // buttons and clips its content when narrow (AutoSize off so it
+        // can't push the buttons off-screen).
+        var leftBlock = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
         };
 
         // Decorative red star ornament next to the title — pure
@@ -711,7 +745,7 @@ public class MainForm : Form
         titleStar.Paint += (s, e) => DrawStar(
             e.Graphics, 22, 22, 18,
             Color.FromArgb(220, 200, 50, 60));
-        titleRow.Controls.Add(titleStar);
+        leftBlock.Controls.Add(titleStar);
 
         // Title in faux-Cyrillic — Я for R (distinctive mirror) and
         // И for N (also distinctive). Cyrillic look-alikes for the
@@ -774,7 +808,7 @@ public class MainForm : Form
         versionLabel.Click += (_, _) => OpenAboutDialog();
         titleStack.Controls.Add(title,        0, 0);
         titleStack.Controls.Add(versionLabel, 0, 1);
-        titleRow.Controls.Add(titleStack);
+        leftBlock.Controls.Add(titleStack);
 
         // Green-themed Launch Game button. Reuses ThemedButton's
         // FlatStyle + sizing scaffolding then overrides the colours
@@ -795,7 +829,7 @@ public class MainForm : Form
         launchBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 115, 70);
         launchBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 70, 45);
         launchBtn.Click += (_, _) => LaunchVostok();
-        titleRow.Controls.Add(launchBtn);
+        btnFlow.Controls.Add(launchBtn);
 
         // Active-profile selector. Reads "📋 Active: <name> ▾" and
         // clicking opens a ContextMenuStrip with every known
@@ -840,7 +874,7 @@ public class MainForm : Form
             profileMenu.Show(_profileSelector,
                 new Point(0, _profileSelector.Height));
         };
-        titleRow.Controls.Add(_profileSelector);
+        btnFlow.Controls.Add(_profileSelector);
 
         // Profiles button — sits between Launch and Settings so the
         // user can save / apply mod loadouts without digging through
@@ -853,7 +887,7 @@ public class MainForm : Form
         profilesBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         profilesBtn.Margin = new Padding(0, 0, 8, 0);
         profilesBtn.Click += async (_, _) => await OpenProfilesDialogAsync();
-        titleRow.Controls.Add(profilesBtn);
+        btnFlow.Controls.Add(profilesBtn);
 
         // Mod Packager — creator-side tool: takes a folder or
         // existing .vmz/.zip, lets the author edit manifest fields
@@ -868,7 +902,7 @@ public class MainForm : Form
         packagerBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         packagerBtn.Margin = new Padding(0, 0, 8, 0);
         packagerBtn.Click += (_, _) => OpenModPackagerDialog();
-        titleRow.Controls.Add(packagerBtn);
+        btnFlow.Controls.Add(packagerBtn);
 
         // Support Package — collects a .vmzlog snapshot (active profile
         // bundle + the whole Godot logs directory + loader state) the
@@ -881,7 +915,7 @@ public class MainForm : Form
         supportBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         supportBtn.Margin = new Padding(0, 0, 8, 0);
         supportBtn.Click += (_, _) => OpenSupportPackageDialog();
-        titleRow.Controls.Add(supportBtn);
+        btnFlow.Controls.Add(supportBtn);
 
         // Browse ModWorkshop — opens the embedded WebView2 browser on
         // modworkshop.net; downloading a .vmz (or clicking "Install this
@@ -899,7 +933,7 @@ public class MainForm : Form
         urlInstallItem.Click += async (_, _) => await InstallFromModWorkshopUrlAsync();
         browseMenu.Items.Add(urlInstallItem);
         browseBtn.ContextMenuStrip = browseMenu;
-        titleRow.Controls.Add(browseBtn);
+        btnFlow.Controls.Add(browseBtn);
 
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
@@ -908,7 +942,14 @@ public class MainForm : Form
         settingsBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         settingsBtn.Margin = new Padding(0, 0, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn);
+        btnFlow.Controls.Add(settingsBtn);
+
+        // Add the Dock.Right strip FIRST, then the Dock.Fill title block:
+        // WinForms lays out docked children by Z-order, so the Fill must
+        // be added last to take only the space the Right strip leaves.
+        titleRow.Controls.Add(btnFlow);
+        titleRow.Controls.Add(leftBlock);
+        leftBlock.BringToFront();
 
         root.Controls.Add(titleRow, 0, 0);
 
