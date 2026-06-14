@@ -82,6 +82,7 @@ public class ProfileManagerDialog : Form
         Width  = 1226;
         Height = 663;
         ShowInTaskbar   = false;
+        DialogSizing.ClampToWorkingArea(this);
 
         // ── Main title ──────────────────────────────────────────────
         var title = new Label

@@ -11,11 +11,19 @@
          dialog via Assembly.GetName().Version. Bumping it here updates
          both editions and the Win32 file-version resource embedded in
          the .exe (Properties → Details in Explorer). -->
-    <Version>0.5.75</Version>
+    <Version>0.5.81</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
     <Authors>Joni</Authors>
     <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>
   </PropertyGroup>
+
+  <!-- Embedded ModWorkshop browser. The Edge WebView2 Runtime is
+       preinstalled on Win10/11; the native WebView2Loader.dll rides
+       inside the single-file .exe via the IncludeNativeLibrariesForSelfExtract
+       flag set in the Release block below. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+  </ItemGroup>
 
   <!--
     Two editions, one source tree.

@@ -565,7 +565,10 @@ public class MainForm : Form
 #else
         Text = "Road to Vostok Mod Manager Integrated";
 #endif
-        MinimumSize = new Size(900, 600);
+        // Lower bound kept modest: both toolbars now wrap their buttons
+        // (FlowLayoutPanel) so a narrow window reflows instead of
+        // clipping. 760 still leaves the mods grid usable.
+        MinimumSize = new Size(760, 560);
         BackColor = Color.FromArgb(26, 30, 40);
         ForeColor = Color.FromArgb(220, 225, 235);
         Font = new Font("Segoe UI", 12f);
@@ -675,23 +678,24 @@ public class MainForm : Form
         Controls.Add(root);
 
         // Title row: [star] [title] [Launch] [Settings]
-        var titleRow = new TableLayoutPanel
+        // Title + action buttons live in a WRAPPING FlowLayoutPanel so
+        // the action buttons reflow onto a second line instead of
+        // clipping off the right edge when the window is narrow or the
+        // display is DPI-scaled. Dock.Top gives the flow the full content
+        // width (that's what makes WrapContents actually wrap — an
+        // AutoSize column never would). Earlier this was a TableLayoutPanel
+        // whose Percent-100 title column ate all the width and pushed the
+        // right-hand buttons off-screen.
+        var titleRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 8,
-            RowCount = 1,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            FlowDirection = FlowDirection.LeftToRight,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8),
         };
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // star
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f)); // title (fills)
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // launch
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profile selector
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // profiles
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // mod packager
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // support package
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // settings
 
         // Decorative red star ornament next to the title — pure
         // soviet-aesthetic flourish, no behaviour. Painted via
@@ -707,7 +711,7 @@ public class MainForm : Form
         titleStar.Paint += (s, e) => DrawStar(
             e.Graphics, 22, 22, 18,
             Color.FromArgb(220, 200, 50, 60));
-        titleRow.Controls.Add(titleStar, 0, 0);
+        titleRow.Controls.Add(titleStar);
 
         // Title in faux-Cyrillic — Я for R (distinctive mirror) and
         // И for N (also distinctive). Cyrillic look-alikes for the
@@ -770,7 +774,7 @@ public class MainForm : Form
         versionLabel.Click += (_, _) => OpenAboutDialog();
         titleStack.Controls.Add(title,        0, 0);
         titleStack.Controls.Add(versionLabel, 0, 1);
-        titleRow.Controls.Add(titleStack, 1, 0);
+        titleRow.Controls.Add(titleStack);
 
         // Green-themed Launch Game button. Reuses ThemedButton's
         // FlatStyle + sizing scaffolding then overrides the colours
@@ -791,7 +795,7 @@ public class MainForm : Form
         launchBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 115, 70);
         launchBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(35, 70, 45);
         launchBtn.Click += (_, _) => LaunchVostok();
-        titleRow.Controls.Add(launchBtn, 2, 0);
+        titleRow.Controls.Add(launchBtn);
 
         // Active-profile selector. Reads "📋 Active: <name> ▾" and
         // clicking opens a ContextMenuStrip with every known
@@ -836,7 +840,7 @@ public class MainForm : Form
             profileMenu.Show(_profileSelector,
                 new Point(0, _profileSelector.Height));
         };
-        titleRow.Controls.Add(_profileSelector, 3, 0);
+        titleRow.Controls.Add(_profileSelector);
 
         // Profiles button — sits between Launch and Settings so the
         // user can save / apply mod loadouts without digging through
@@ -849,7 +853,7 @@ public class MainForm : Form
         profilesBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         profilesBtn.Margin = new Padding(0, 0, 8, 0);
         profilesBtn.Click += async (_, _) => await OpenProfilesDialogAsync();
-        titleRow.Controls.Add(profilesBtn, 4, 0);
+        titleRow.Controls.Add(profilesBtn);
 
         // Mod Packager — creator-side tool: takes a folder or
         // existing .vmz/.zip, lets the author edit manifest fields
@@ -864,7 +868,7 @@ public class MainForm : Form
         packagerBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         packagerBtn.Margin = new Padding(0, 0, 8, 0);
         packagerBtn.Click += (_, _) => OpenModPackagerDialog();
-        titleRow.Controls.Add(packagerBtn, 5, 0);
+        titleRow.Controls.Add(packagerBtn);
 
         // Support Package — collects a .vmzlog snapshot (active profile
         // bundle + the whole Godot logs directory + loader state) the
@@ -877,7 +881,25 @@ public class MainForm : Form
         supportBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         supportBtn.Margin = new Padding(0, 0, 8, 0);
         supportBtn.Click += (_, _) => OpenSupportPackageDialog();
-        titleRow.Controls.Add(supportBtn, 6, 0);
+        titleRow.Controls.Add(supportBtn);
+
+        // Browse ModWorkshop — opens the embedded WebView2 browser on
+        // modworkshop.net; downloading a .vmz (or clicking "Install this
+        // mod") routes straight into the install pipeline. Right-click
+        // for the no-browser URL-paste install fallback.
+        var browseBtn = ThemedButton("🌐 Browse MW…");
+        browseBtn.Width = 160;
+        browseBtn.Height = 40;
+        browseBtn.AutoSize = false;
+        browseBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        browseBtn.Margin = new Padding(0, 0, 8, 0);
+        browseBtn.Click += (_, _) => OpenModBrowserDialog();
+        var browseMenu = new ContextMenuStrip();
+        var urlInstallItem = new ToolStripMenuItem("Install from ModWorkshop URL…");
+        urlInstallItem.Click += async (_, _) => await InstallFromModWorkshopUrlAsync();
+        browseMenu.Items.Add(urlInstallItem);
+        browseBtn.ContextMenuStrip = browseMenu;
+        titleRow.Controls.Add(browseBtn);
 
         var settingsBtn = ThemedButton("⚙ Settings…");
         settingsBtn.Width = 140;
@@ -886,7 +908,7 @@ public class MainForm : Form
         settingsBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         settingsBtn.Margin = new Padding(0, 0, 0, 0);
         settingsBtn.Click += (_, _) => OpenSettingsDialog();
-        titleRow.Controls.Add(settingsBtn, 7, 0);
+        titleRow.Controls.Add(settingsBtn);
 
         root.Controls.Add(titleRow, 0, 0);
 
@@ -2536,6 +2558,17 @@ public class MainForm : Form
         => !string.IsNullOrEmpty(e.ModId)
             && _settings.TestingMods.Contains(e.ModId);
 
+    /// <summary>Mod IDs installed during THIS app session (browser,
+    /// drag-drop, file picker, URL paste). In-memory only — clears on
+    /// relaunch — so the green "just installed" grid highlight is a
+    /// transient at-a-glance marker, not persisted state.</summary>
+    private readonly HashSet<string> _sessionInstalled =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private bool IsInstalledThisSession(ModEntry e)
+        => !string.IsNullOrEmpty(e.ModId)
+            && _sessionInstalled.Contains(e.ModId);
+
     /// <summary>Adds or removes the mod from the testing list and
     /// persists. Triggers a grid repopulate so the yellow tint
     /// updates immediately.</summary>
@@ -2822,43 +2855,57 @@ public class MainForm : Form
 
     private Control BuildModsToolbar()
     {
+        // Host: a filter row (filling textbox) stacked above a WRAPPING
+        // button flow. Splitting them means the action buttons reflow
+        // onto extra lines instead of clipping off the right edge when
+        // the window is narrow / DPI-scaled — the old single-row
+        // TableLayoutPanel just cut buttons off. AutoSize so the host
+        // grows as buttons wrap.
         var bar = new TableLayoutPanel
         {
-            // 48px = bumped-button Height (40) + top/bottom padding
-            // (4 + 4). Used as the canonical toolbar height; the
-            // conflicts grid gets a same-height empty spacer so its
-            // column headers vertically line up with the mods grid's.
-            Height = 48,
             Dock = DockStyle.Top,
-            // 10 columns: [Filter label][textbox(fill)][× clear][Install]
-            // [Import list][Enable all][Disable all][Refresh][Dependencies][Conflicts toggle].
-            // The × button used to live inside a nested TableLayoutPanel
-            // alongside the textbox — that nest's Dock=Fill + sub-column
-            // sizing kept rendering the × invisible. It's promoted to a
-            // first-class toolbar column here so it renders by the same
-            // rules every other button does.
-            ColumnCount = 11,
-            RowCount = 1,
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = Color.Transparent,
             Padding = new Padding(0, 4, 0, 4),
         };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Filter:
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));       // textbox (fills)
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,  32f));      // × clear
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Install
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Import list
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Enable all
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Disable all
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Refresh
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Dependencies
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Analyze Log
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));            // Conflicts toggle
+        bar.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // filter row
+        bar.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // button flow
+
+        // Filter row: [label][textbox(fill)][× clear].
+        var filterRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 3,
+            RowCount = 1,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, 4),
+        };
+        filterRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // Filter:
+        filterRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f)); // textbox (fills)
+        filterRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32f)); // × clear
+
+        // Wrapping flow that holds every action button. WrapContents +
+        // the host's full-width Dock is what lets buttons spill onto a
+        // second line instead of clipping.
+        var btnFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+        };
 
         // Filter label. Anchor with no Top/Bottom = vertically centred
         // in the cell, so it sits on the same horizontal midline as the
-        // textbox and the buttons regardless of their individual
-        // natural heights.
-        bar.Controls.Add(new Label
+        // textbox.
+        filterRow.Controls.Add(new Label
         {
             Text      = "Filter:",
             AutoSize  = true,
@@ -2881,7 +2928,7 @@ public class MainForm : Form
             PlaceholderText = "filter by name, id, or filename",
             Margin      = new Padding(0),
         };
-        bar.Controls.Add(_filterBox, 1, 0);
+        filterRow.Controls.Add(_filterBox, 1, 0);
 
         // × clear chip. Explicit Size matching the textbox height
         // (~24px for our Segoe UI 12 + FixedSingle), centred in its
@@ -2912,7 +2959,7 @@ public class MainForm : Form
             clearFilter.BackColor = Color.FromArgb(85, 100, 130);
         clearFilter.MouseLeave += (_, _) =>
             clearFilter.BackColor = Color.FromArgb(60, 72, 92);
-        bar.Controls.Add(clearFilter, 2, 0);
+        filterRow.Controls.Add(clearFilter, 2, 0);
 
         _filterBox.TextChanged += (_, _) =>
         {
@@ -2935,7 +2982,7 @@ public class MainForm : Form
         var install = ThemedButton("Install mod…");
         install.Margin = new Padding(0, 2, 4, 2);
         install.Click += async (_, _) => await InstallModFromFilePickerAsync();
-        bar.Controls.Add(install, 3, 0);
+        btnFlow.Controls.Add(install);
 
         // Batch-add from a JSON mod-list file (a "I want these mods
         // plus their deps" manifest the user dropped in). Adds to
@@ -2968,22 +3015,22 @@ public class MainForm : Form
         importTip.SetToolTip(importList,
             "Import a mod-pack JSON into the active profile.\n"
             + "Right-click for a starter template.");
-        bar.Controls.Add(importList, 4, 0);
+        btnFlow.Controls.Add(importList);
 
         var enableAll = ThemedButton("Enable all");
         enableAll.Margin = new Padding(0, 2, 4, 2);
         enableAll.Click += (_, _) => BulkToggle(enable: true);
-        bar.Controls.Add(enableAll, 5, 0);
+        btnFlow.Controls.Add(enableAll);
 
         var disableAll = ThemedButton("Disable all");
         disableAll.Margin = new Padding(0, 2, 4, 2);
         disableAll.Click += (_, _) => BulkToggle(enable: false);
-        bar.Controls.Add(disableAll, 6, 0);
+        btnFlow.Controls.Add(disableAll);
 
         var refresh = ThemedButton("Refresh");
         refresh.Margin = new Padding(0, 2, 4, 2);
         refresh.Click += async (_, _) => await RefreshAllAsync();
-        bar.Controls.Add(refresh, 7, 0);
+        btnFlow.Controls.Add(refresh);
 
         // Dependencies rollup for the active profile. Opens a read-
         // only dialog listing every mod in the profile that declares
@@ -2994,7 +3041,16 @@ public class MainForm : Form
         var deps = ThemedButton("Dependencies");
         deps.Margin = new Padding(0, 2, 4, 2);
         deps.Click += (_, _) => ShowProfileDependenciesDialog();
-        bar.Controls.Add(deps, 8, 0);
+        btnFlow.Controls.Add(deps);
+
+        // Library — manages the canonical store of every .vmz ever
+        // added (<mods>/Library/). Lists each archived version with its
+        // live/enabled state and lets the user install a version into
+        // the active profile or delete it from the library.
+        var library = ThemedButton("📚 Library");
+        library.Margin = new Padding(0, 2, 4, 2);
+        library.Click += async (_, _) => await OpenLibraryDialogAsync();
+        btnFlow.Controls.Add(library);
 
         // Analyze Log — parses the latest godot.log into a hook/override
         // overwrite map + issue report (both editions); the AI edition
@@ -3004,7 +3060,7 @@ public class MainForm : Form
         var analyzeLog = ThemedButton("🩺 Analyze Log");
         analyzeLog.Margin = new Padding(0, 2, 4, 2);
         analyzeLog.Click += (_, _) => OpenLogAnalysisDialog();
-        bar.Controls.Add(analyzeLog, 9, 0);
+        btnFlow.Controls.Add(analyzeLog);
 
         // Sidebar toggle. Label flips between "Hide conflicts" and
         // "Show conflicts" via SyncConflictsToggleLabel so the text
@@ -3026,7 +3082,11 @@ public class MainForm : Form
             if (nowVisible) _applySplit();
             SyncConflictsToggleLabel();
         };
-        bar.Controls.Add(_conflictsToggle, 10, 0);
+        btnFlow.Controls.Add(_conflictsToggle);
+
+        // Assemble: filter row on top, wrapping button flow below.
+        bar.Controls.Add(filterRow, 0, 0);
+        bar.Controls.Add(btnFlow,   0, 1);
 
         return bar;
     }
@@ -3278,6 +3338,107 @@ public class MainForm : Form
     {
         using var dlg = new Ui.SupportPackageDialog(_activeProfile, _registry, ModsDir);
         dlg.ShowDialog(this);
+    }
+
+    /// <summary>Install entry point the embedded ModWorkshop browser
+    /// calls back into for a downloaded .vmz. Keeps InstallModFilesAsync
+    /// private while giving the dialog a single async callback that runs
+    /// the full pipeline (copy → library → cfg → deps → rescan).</summary>
+    internal Task InstallDownloadedModAsync(string path)
+        => InstallModFilesAsync(new[] { path });
+
+    /// <summary>Opens the Library manager — lists every archived .vmz in
+    /// &lt;mods&gt;/Library/ with its live/enabled state and lets the user
+    /// install a version (reusing the standard install pipeline) or
+    /// delete it from the library. Rescans on close if anything changed
+    /// so the main grid reflects new installs.</summary>
+    private async Task OpenLibraryDialogAsync()
+    {
+        using var dlg = new Ui.LibraryDialog(_registry, ModsDir, InstallDownloadedModAsync);
+        dlg.ShowDialog(this);
+        if (dlg.Changed)
+        {
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+            _lastConflicts = DetectConflictsForActive();
+            UpdateConflictsStatus(_lastConflicts);
+            PopulateConflictsList(_lastConflicts);
+        }
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Opens the embedded ModWorkshop browser. Installs happen
+    /// via InstallDownloadedModAsync, which already rescans/refreshes —
+    /// so no post-close work is needed here.</summary>
+    private void OpenModBrowserDialog()
+    {
+        // Snapshot the library's ModWorkshop ids ONCE — ModLibrary.List
+        // opens every .vmz, too heavy to run on each page navigation.
+        // The live registry check (done per-call below) is in-memory and
+        // already reflects anything installed during this browse session
+        // (installs rescan), so the snapshot only needs to cover
+        // pre-existing library mods that aren't currently live.
+        var libMwIds = new HashSet<int>();
+        try
+        {
+            foreach (var l in Domain.ModLibrary.List(ModsDir))
+                if (l.ModWorkshopId > 0) libMwIds.Add(l.ModWorkshopId);
+        }
+        catch { /* best-effort — empty set just means no "already owned" hits */ }
+
+        bool OwnsModWorkshopId(int mwId)
+            => mwId > 0
+               && (libMwIds.Contains(mwId)
+                   || _registry.Entries.Any(e => e.ModWorkshopId == mwId));
+
+        using var dlg = new Ui.ModBrowserDialog(
+            _mw, InstallDownloadedModAsync, OwnsModWorkshopId, _settings);
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>No-browser fallback: prompt for a ModWorkshop mod URL or
+    /// id, download the latest .vmz via the public API, and install it
+    /// through the same pipeline. Works even when the WebView2 runtime
+    /// is unavailable.</summary>
+    private async Task InstallFromModWorkshopUrlAsync()
+    {
+        string input;
+        using (var dlg = new Ui.TextInputDialog(
+            "Install from ModWorkshop",
+            "Paste a ModWorkshop mod URL (e.g. https://modworkshop.net/mod/56801) "
+            + "or a numeric mod id:"))
+        {
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            input = dlg.Result;
+        }
+        if (!Domain.ModWorkshopUrl.TryParseModId(input, out var id))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Couldn't find a mod id in that text. Expected a modworkshop.net/mod/<id> "
+                + "URL or a plain number.",
+                "Not a mod URL",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        var temp = Path.Combine(
+            Path.GetTempPath(), "vmm_dl_" + Guid.NewGuid().ToString("N") + ".vmz");
+        try
+        {
+            await _mw.DownloadLatestAsync(id, temp);
+            await InstallModFilesAsync(new[] { temp });
+        }
+        catch (Exception ex)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"Couldn't download or install mod {id}:\n{ex.Message}",
+                "Install failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+        }
     }
 
     /// <summary>Opens the Log Analysis dialog. Parses the latest
@@ -4854,6 +5015,19 @@ public class MainForm : Form
                     row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(210, 175, 50);
                     row.DefaultCellStyle.SelectionForeColor = Color.FromArgb(20, 20, 20);
                 }
+                // ✓ Installed-this-session flag — solid green tint that
+                // wins over both pack-blue and testing-yellow, because
+                // "just added" is the freshest, most useful signal after
+                // a browse/install run. In-memory only (_sessionInstalled),
+                // so it clears on next launch. Applied last → highest
+                // precedence.
+                if (IsInstalledThisSession(e))
+                {
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(40, 95, 55);
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(235, 245, 235);
+                    row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(55, 120, 70);
+                    row.DefaultCellStyle.SelectionForeColor = Color.FromArgb(245, 250, 245);
+                }
                 row.Cells["Enabled"].Value = e.IsEnabled;
                 StyleUpdateCell(row.Cells["Update"], e);
                 row.Cells["Pos"].Value = e.IsEnabled ? $"{++pos}" : "";
@@ -5950,6 +6124,12 @@ public class MainForm : Form
         // and the in-game loader can't see them as enabled.
         if (cfgDirty) SaveModConfigSafely();
 
+        // Record the just-installed mod_ids in the per-session set so
+        // PopulateModsGrid tints their rows green this run. In-memory —
+        // clears on relaunch.
+        foreach (var id in installedModIds)
+            if (!string.IsNullOrEmpty(id)) _sessionInstalled.Add(id);
+
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
@@ -5967,20 +6147,52 @@ public class MainForm : Form
             _modsLabel.Text =
                 $"No mods installed ({skipped.Count} skipped).";
 
-        if (skipped.Count > 0)
+        // Own confirmation dialogs to the frontmost form so they sit on
+        // top of the embedded browser when an install came from there —
+        // owning to MainForm would hide them behind the modal browser.
+        IWin32Window owner = ActiveForm ?? (IWin32Window)this;
+
+        if (installed.Count > 0)
+        {
+            // Prominent success confirmation. Resolve friendly display
+            // names from the rescanned registry where we can (the
+            // manifest id → entry), falling back to the filename.
+            var names = new List<string>();
+            foreach (var id in installedModIds)
+            {
+                var entry = _registry.FindById(id);
+                names.Add(entry != null && !string.IsNullOrEmpty(entry.DisplayName)
+                    ? entry.DisplayName : id);
+            }
+            if (names.Count == 0) names.AddRange(installed);
+            var nameList = string.Join("\n", names.Take(10).Select(n => $"   ✓  {n}"));
+            if (names.Count > 10) nameList += $"\n   …and {names.Count - 10} more";
+
+            var msg = $"✓  {installed.Count} mod"
+                + (installed.Count == 1 ? "" : "s")
+                + " installed and enabled — highlighted in green in the list.\n\n"
+                + nameList;
+            if (skipped.Count > 0)
+            {
+                var sk = string.Join("\n",
+                    skipped.Take(6).Select(s => $"   •  {Path.GetFileName(s.path)}: {s.reason}"));
+                if (skipped.Count > 6) sk += $"\n   …and {skipped.Count - 6} more";
+                msg += $"\n\n{skipped.Count} skipped:\n{sk}";
+            }
+            Ui.ThemedMessageBox.Show(owner, msg,
+                installed.Count == 1 ? "Mod installed" : "Mods installed",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else if (skipped.Count > 0)
         {
             var preview = string.Join("\n",
-                skipped.Take(8).Select(s => $"  • {Path.GetFileName(s.path)}: {s.reason}"));
+                skipped.Take(8).Select(s => $"   •  {Path.GetFileName(s.path)}: {s.reason}"));
             if (skipped.Count > 8)
-                preview += $"\n  …and {skipped.Count - 8} more";
-            Ui.ThemedMessageBox.Show(this,
-                $"{installed.Count} installed; {skipped.Count} skipped.\n\n"
-                + preview,
+                preview += $"\n   …and {skipped.Count - 8} more";
+            Ui.ThemedMessageBox.Show(owner,
+                $"No mods installed; {skipped.Count} skipped.\n\n" + preview,
                 "Install report",
-                MessageBoxButtons.OK,
-                installed.Count > 0
-                    ? MessageBoxIcon.Information
-                    : MessageBoxIcon.Warning);
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // Dependency follow-up — scan the just-installed mods for

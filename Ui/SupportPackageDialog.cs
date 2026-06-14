@@ -51,6 +51,7 @@ public class SupportPackageDialog : Form
         Width           = 820;
         Height          = 600;
         ShowInTaskbar   = false;
+        DialogSizing.ClampToWorkingArea(this);
 
         var title = new Label
         {

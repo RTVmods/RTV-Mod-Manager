@@ -107,6 +107,16 @@ public class Settings
     public int WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
 
+    /// <summary>Persisted bounds of the embedded ModWorkshop browser
+    /// window, so it reopens at the size/position the user last left it.
+    /// Zero width/height = "use the default" (first run). Validated
+    /// against current screens at open time, same as the main window.</summary>
+    public int BrowserLeft { get; set; }
+    public int BrowserTop { get; set; }
+    public int BrowserWidth { get; set; }
+    public int BrowserHeight { get; set; }
+    public bool BrowserMaximized { get; set; }
+
     /// <summary>Splitter ratio between the mods grid (Panel1) and the
     /// conflicts grid (Panel2) — 0 means "no saved value, use the
     /// 0.62 default". Stored as a fraction rather than absolute

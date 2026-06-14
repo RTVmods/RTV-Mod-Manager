@@ -89,6 +89,7 @@ public class LogAnalysisDialog : Form
         Width           = 1180;
         Height          = 760;
         ShowInTaskbar   = false;
+        DialogSizing.ClampToWorkingArea(this);
 
         var title = new Label
         {

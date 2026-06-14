@@ -343,6 +343,7 @@ public class ProfileApplyDialog : Form
         Width       = 1180;
         Height      = 660;
         ShowInTaskbar  = false;
+        DialogSizing.ClampToWorkingArea(this);
 
         // Top: title + description
         var title = new Label
