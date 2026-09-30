@@ -2794,6 +2794,8 @@ public class MainForm : Form
                 if (r.Tag is Severity) r.Selected = false;
         };
         grid.CellContentClick += async (_, e) => await OnConflictsCellClickedAsync(e);
+        // Double-click any conflict row → method-level detail dialog.
+        grid.CellDoubleClick += (_, e) => OpenConflictDetail(e.RowIndex);
         return grid;
     }
 
@@ -5458,7 +5460,7 @@ public class MainForm : Form
     /// title goes on line 1, the technical type + resolution hint on
     /// line 2. The raw type/key remain accessible via the cell
     /// tooltip for power users.</summary>
-    private static (string title, string subtitle) DescribeConflict(
+    internal static (string title, string subtitle) DescribeConflict(
         ConflictDetector.Conflict c)
     {
         var key = c.Key;
@@ -7967,7 +7969,19 @@ public class MainForm : Form
     }
 
 
-    // --- conflict resolve ----------------------------------------
+    // --- conflict detail / resolve -------------------------------
+
+    /// <summary>Double-click a conflict row → opens the detail dialog
+    /// (method-level hook breakdown for hook collisions, a generic
+    /// per-mod value view otherwise). Banner rows (Tag is Severity)
+    /// are skipped.</summary>
+    private void OpenConflictDetail(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _conflictsGrid.Rows.Count) return;
+        if (_conflictsGrid.Rows[rowIndex].Tag is not ConflictDetector.Conflict c) return;
+        using var dlg = new Ui.ConflictDetailDialog(c, _registry, ModsDir);
+        dlg.ShowDialog(this);
+    }
 
     private async Task OnConflictsCellClickedAsync(DataGridViewCellEventArgs e)
     {
