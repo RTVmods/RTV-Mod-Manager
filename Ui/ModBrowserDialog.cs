@@ -1,15 +1,16 @@
-// Embedded ModWorkshop browser with auto-install.
+// Embedded VostokMods browser with auto-install.
 //
-// Hosts a WebView2 control pointed at modworkshop.net. Two install
+// Hosts a WebView2 control pointed at vostokmods.net. Two install
 // routes, both feeding the existing install pipeline via the callback
 // MainForm supplies (InstallDownloadedModAsync → InstallModFilesAsync):
 //
-//   1. Download interception — when the page triggers a .vmz download,
+//   1. Download interception — when the page triggers a mod file
+//      download (.vmz, or a .zip served by vostokmods.net),
 //      DownloadStarting redirects it to a temp file; on completion the
 //      file is handed to the install callback.
 //   2. "Install this mod" button — when the current URL is a mod page,
-//      the numeric id is parsed and the latest .vmz is fetched via the
-//      public API (ModWorkshopClient.DownloadLatestAsync), then installed.
+//      the slug is parsed and the latest file is fetched via the
+//      public API (VostokModsClient.DownloadAsync), then installed.
 //
 // WebView2 needs the Edge WebView2 Runtime (preinstalled on Win10/11).
 // If EnsureCoreWebView2Async fails, we show a themed message pointing at
@@ -26,14 +27,17 @@ namespace VostokModManager.Ui;
 
 public class ModBrowserDialog : Form
 {
-    private const string HomeUrl = "https://modworkshop.net/game/roadtovostok";
+    private const string HomeUrl = VostokModsUrl.ExploreModsUrl;
 
-    private readonly ModWorkshopClient _mw;
-    private readonly Func<string, Task> _installCallback;
-    /// <summary>Returns true when a mod with the given ModWorkshop id is
+    private readonly VostokModsClient _vm;
+    /// <summary>Installs the downloaded file at the given path. The
+    /// second argument is the source it came from, or
+    /// <see cref="ModSource.None"/> when that isn't known.</summary>
+    private readonly Func<string, ModSource, Task> _installCallback;
+    /// <summary>Returns true when a mod with the given source is
     /// already present locally (live mods or the library). Drives the
     /// "Already in library" button state.</summary>
-    private readonly Func<int, bool> _ownsModWorkshopId;
+    private readonly Func<ModSource, bool> _ownsSource;
     private readonly Settings _settings;
 
     private WebView2 _web = null!;
@@ -53,21 +57,21 @@ public class ModBrowserDialog : Form
     public int InstalledCount { get; private set; }
 
     public ModBrowserDialog(
-        ModWorkshopClient mw,
-        Func<string, Task> installCallback,
-        Func<int, bool> ownsModWorkshopId,
+        VostokModsClient vm,
+        Func<string, ModSource, Task> installCallback,
+        Func<ModSource, bool> ownsSource,
         Settings settings)
     {
-        _mw = mw;
+        _vm = vm;
         _installCallback = installCallback;
-        _ownsModWorkshopId = ownsModWorkshopId;
+        _ownsSource = ownsSource;
         _settings = settings;
         InitUi();
     }
 
     private void InitUi()
     {
-        Text            = "Browse ModWorkshop";
+        Text            = "Browse VostokMods";
         StartPosition   = FormStartPosition.CenterParent;
         BackColor       = Color.FromArgb(26, 30, 40);
         ForeColor       = Color.FromArgb(220, 225, 235);
@@ -230,7 +234,7 @@ public class ModBrowserDialog : Form
                 + "Evergreen runtime from:\n"
                 + "https://developer.microsoft.com/microsoft-edge/webview2/\n\n"
                 + "You can still install mods via the \"Install from "
-                + "ModWorkshop URL…\" option without the browser.",
+                + "VostokMods URL…\" option without the browser.",
                 "Embedded browser unavailable",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             Close();
@@ -254,7 +258,7 @@ public class ModBrowserDialog : Form
         if (_installing)
             return; // mid-install: leave button/status as set by the install flow
 
-        if (!ModWorkshopUrl.TryParseModId(url, out var id))
+        if (!VostokModsUrl.TryParseModPageSlug(url, out var slug))
         {
             _installBtn.Text = "⬇ Install this mod";
             _installBtn.Enabled = false;
@@ -263,14 +267,14 @@ public class ModBrowserDialog : Form
             return;
         }
 
-        var owned = _ownsModWorkshopId(id);
+        var owned = _ownsSource(ModSource.ForSlug(slug));
         if (owned)
         {
             _installBtn.Text = "✓ Already in library";
             _installBtn.Enabled = false;
             SetInstallButtonColor(installed: true);
             _statusLabel.Text =
-                $"Mod {id} is already in your library — re-download via the "
+                $"Mod {slug} is already in your library — re-download via the "
                 + "page's Download button if you want to force-update it.";
         }
         else
@@ -279,7 +283,7 @@ public class ModBrowserDialog : Form
             _installBtn.Enabled = true;
             SetInstallButtonColor(installed: false);
             _statusLabel.Text =
-                $"On mod page (id {id}) — click “Install this mod”, or use "
+                $"On mod page ({slug}) — click “Install this mod”, or use "
                 + "the page's Download button.";
         }
     }
@@ -303,7 +307,7 @@ public class ModBrowserDialog : Form
         }
     }
 
-    // ── Trigger 1: intercept .vmz downloads ──────────────────────────
+    // ── Trigger 1: intercept mod file downloads ──────────────────────
 
     private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
     {
@@ -311,7 +315,19 @@ public class ModBrowserDialog : Form
         var uri = e.DownloadOperation.Uri ?? "";
         var looksVmz = name.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase)
                     || uri.Contains(".vmz", StringComparison.OrdinalIgnoreCase);
-        if (!looksVmz) return; // let other downloads behave normally
+        // VostokMods also serves mods named .zip. A .zip from any other
+        // host is an ordinary download.
+        var looksSiteZip = IsVostokModsHost(uri)
+                    && (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                        || UrlPathEndsWith(uri, ".zip"));
+        if (!looksVmz && !looksSiteZip) return; // let other downloads behave normally
+
+        // The mod page on screen when the download starts is where the
+        // file came from; any other page leaves the source unknown.
+        var source = VostokModsUrl.TryParseModPageSlug(
+                _web.Source?.ToString() ?? "", out var slug)
+            ? ModSource.ForSlug(slug)
+            : ModSource.None;
 
         // Redirect to a temp path we control, hide the default UI, and
         // install on completion.
@@ -328,7 +344,7 @@ public class ModBrowserDialog : Form
             if (op.State == CoreWebView2DownloadState.Completed)
             {
                 _statusLabel.Text = "Download complete — installing…";
-                await RunInstallAsync(op.ResultFilePath);
+                await RunInstallAsync(op.ResultFilePath, source);
             }
             else if (op.State == CoreWebView2DownloadState.Interrupted)
             {
@@ -337,15 +353,31 @@ public class ModBrowserDialog : Form
         };
     }
 
+    /// <summary>True when the URL's host is vostokmods.net or one of
+    /// its subdomains (files.vostokmods.net serves the downloads).</summary>
+    private static bool IsVostokModsHost(string url)
+    {
+        if (!VostokModsUrl.IsVostokMods(url)) return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return false;
+        return u.Host.Equals("vostokmods.net", StringComparison.OrdinalIgnoreCase)
+            || u.Host.EndsWith(".vostokmods.net", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>True when the URL's path (query and fragment aside)
+    /// ends with the given extension.</summary>
+    private static bool UrlPathEndsWith(string url, string ext)
+        => Uri.TryCreate(url, UriKind.Absolute, out var u)
+           && u.AbsolutePath.EndsWith(ext, StringComparison.OrdinalIgnoreCase);
+
     // ── Trigger 2: Install-this-mod button ───────────────────────────
 
     private async Task InstallCurrentModAsync()
     {
         var url = _web.Source?.ToString() ?? "";
-        if (!ModWorkshopUrl.TryParseModId(url, out var id))
+        if (!VostokModsUrl.TryParseModPageSlug(url, out var slug))
         {
             ThemedMessageBox.Show(this,
-                "This page isn't a specific mod page, so there's no mod id to "
+                "This page isn't a specific mod page, so there's no mod to "
                 + "install. Open a mod's page first.",
                 "No mod on this page",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -354,14 +386,14 @@ public class ModBrowserDialog : Form
 
         _installing = true;
         _installBtn.Enabled = false;
-        _statusLabel.Text = $"Downloading mod {id}…";
+        _statusLabel.Text = $"Downloading mod {slug}…";
         try
         {
             var temp = Path.Combine(
                 Path.GetTempPath(),
                 "vmm_dl_" + Guid.NewGuid().ToString("N") + ".vmz");
-            await _mw.DownloadLatestAsync(id, temp);
-            await RunInstallAsync(temp);
+            await _vm.DownloadAsync(slug, temp);
+            await RunInstallAsync(temp, ModSource.ForSlug(slug));
         }
         catch (Exception ex)
         {
@@ -378,10 +410,11 @@ public class ModBrowserDialog : Form
         }
     }
 
-    /// <summary>Hands a downloaded .vmz to MainForm's install pipeline,
-    /// then cleans up the temp file. Marshalled to the UI thread since
-    /// the download StateChanged handler may fire off-thread.</summary>
-    private async Task RunInstallAsync(string? path)
+    /// <summary>Hands a downloaded mod file and the source it came from
+    /// to MainForm's install pipeline, then cleans up the temp file.
+    /// Marshalled to the UI thread since the download StateChanged
+    /// handler may fire off-thread.</summary>
+    private async Task RunInstallAsync(string? path, ModSource source)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
@@ -390,7 +423,8 @@ public class ModBrowserDialog : Form
         }
         try
         {
-            await _installCallback(path);
+            DownloadedSources.Record(path, source);
+            await _installCallback(path, source);
             InstalledCount++;
             _statusLabel.Text = "Installed. Browse for more, or close to return.";
         }

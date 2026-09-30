@@ -30,7 +30,7 @@ public static class ModPacker
         public string Version     { get; set; } = "";
         public string Description { get; set; } = "";
         public int?   Priority    { get; set; }
-        public int?   ModWorkshopId { get; set; }
+        public ModSource Source   { get; set; }
         public List<string> RequiredDependencies { get; set; } = new();
         public List<string> OptionalDependencies { get; set; } = new();
         /// <summary>When true, write the dependencies section even
@@ -39,13 +39,13 @@ public static class ModPacker
         /// can REMOVE deps by clearing the lists and rebuilding.
         /// </summary>
         public bool WriteEmptyDependencies { get; set; } = true;
-        /// <summary>Optional `dep_id → ModWorkshop numeric id` map
+        /// <summary>Optional `dep_id → source` map
         /// written to a `[dependency_sources]` section in mod.txt.
         /// The in-game loader ignores this section; the manager's
-        /// install-time resolver uses it to auto-fill the MW URL
+        /// install-time resolver uses it to find the download
         /// for missing dependencies (no user paste needed). Empty
         /// → drop the section entirely.</summary>
-        public Dictionary<string, int> DependencySources { get; set; } = new();
+        public Dictionary<string, ModSource> DependencySources { get; set; } = new();
     }
 
     public class PackResult
@@ -128,8 +128,8 @@ public static class ModPacker
                 modTxt = ManifestEditor.SetValue(modTxt, "mod", "description", QuoteString(opts.Description));
             if (opts.Priority is int p)
                 modTxt = ManifestEditor.SetModPriority(modTxt, p);
-            if (opts.ModWorkshopId is int mw && mw > 0)
-                modTxt = ManifestEditor.SetUpdatesModworkshop(modTxt, mw);
+            if (opts.Source.IsValid)
+                modTxt = ManifestEditor.SetUpdatesSource(modTxt, opts.Source);
 
             // Dependencies — always write the section so the result
             // is deterministic and removing deps actually shows up
@@ -144,7 +144,7 @@ public static class ModPacker
                     modTxt, "optional", opts.OptionalDependencies);
 
             // [dependency_sources] — non-standard sidecar section
-            // mapping dep slug → MW id. Always rewrite (even when
+            // mapping dep id → source. Always rewrite (even when
             // empty, which drops a stale section) so the file is
             // deterministic across packs.
             modTxt = ManifestEditor.SetDependencySourcesSection(

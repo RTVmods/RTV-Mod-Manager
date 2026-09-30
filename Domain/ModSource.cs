@@ -78,12 +78,15 @@ public readonly struct ModSource : IEquatable<ModSource>
     public static ModSource Parse(string? key)
         => TryParse(key, out var s) ? s : default;
 
+    /// <summary>Ids compare ignoring case: slugs and UUIDs are both
+    /// case-insensitive on the host.</summary>
     public bool Equals(ModSource other)
         => string.Equals(Provider, other.Provider, StringComparison.Ordinal)
-        && string.Equals(Id, other.Id, StringComparison.Ordinal);
+        && string.Equals(Id, other.Id, StringComparison.OrdinalIgnoreCase);
 
     public override bool Equals(object? obj) => obj is ModSource o && Equals(o);
-    public override int GetHashCode() => HashCode.Combine(Provider, Id);
+    public override int GetHashCode()
+        => HashCode.Combine(Provider, StringComparer.OrdinalIgnoreCase.GetHashCode(Id));
     public static bool operator ==(ModSource a, ModSource b) => a.Equals(b);
     public static bool operator !=(ModSource a, ModSource b) => !a.Equals(b);
     public override string ToString() => Key;

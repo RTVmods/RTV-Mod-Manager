@@ -31,7 +31,7 @@
 //
 // Phase 5 will add Library auto-population from the .json/.vmprofile
 // import paths so a "profile mod missing from Library" case can
-// fall back to a ModWorkshop download.
+// fall back to a VostokMods download.
 
 namespace VostokModManager.Domain;
 
@@ -176,7 +176,7 @@ public static class ProfileSwitcher
             var libPath = ModLibrary.Find(modsDir, pm.ModId, pm.Version);
             // Fallback: profile.json recorded version doesn't match
             // anything in the library (typical after a JSON-spec
-            // import where the MW download's manifest version
+            // import where the download's manifest version
             // differs from the spec — same root cause as the ≠
             // mismatch glyph in the main grid). Use the newest
             // library file for this mod_id and log the substitution

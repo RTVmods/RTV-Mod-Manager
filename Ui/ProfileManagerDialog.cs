@@ -25,7 +25,7 @@ public class ProfileManagerDialog : Form
     // ── Dependencies ──────────────────────────────────────────────────
 
     private readonly ModRegistry       _registry;
-    private readonly ModWorkshopClient _mw;
+    private readonly VostokModsClient  _vm;
     private readonly ModConfig         _modConfig;
     private readonly string            _modsDir;
     /// <summary>Forwarded to ProfileApplyDialog so locked mods are
@@ -55,13 +55,13 @@ public class ProfileManagerDialog : Form
 
     public ProfileManagerDialog(
         ModRegistry registry,
-        ModWorkshopClient mw,
+        VostokModsClient vm,
         ModConfig modConfig,
         string modsDir,
         IReadOnlyList<string>? lockedModIds = null)
     {
         _registry     = registry;
-        _mw           = mw;
+        _vm           = vm;
         _modConfig    = modConfig;
         _modsDir      = modsDir;
         _lockedModIds = lockedModIds ?? Array.Empty<string>();
@@ -738,14 +738,14 @@ public class ProfileManagerDialog : Form
                 Version         = src.Version,
                 IsEnabled       = src.IsEnabled,
                 Priority        = src.Priority,
-                ModWorkshopId   = src.ModWorkshopId,
+                Source          = src.Source,
                 // Don't share the bundled archive between profiles
                 // — the source profile owns its mods/ folder; copying
                 // an entry's metadata across is fine but pointing at
                 // the source's bundled .vmz from the target would
                 // break apply-time bundle resolution. The recipient
                 // profile gets a metadata-only entry that falls
-                // back to library / MW download on apply.
+                // back to library / VostokMods download on apply.
                 ArchiveFileName = "",
             });
             existingIds.Add(src.ModId);
@@ -883,11 +883,13 @@ public class ProfileManagerDialog : Form
             r.Cells["Version"].Value  = m.Version;
             r.Cells["Priority"].Value = m.Priority;
             // Bundle indicator in tooltip — mods missing an archive
-            // will fall back to ModWorkshop on apply.
+            // will fall back to VostokMods on apply, when linked.
             var hasBundle = !string.IsNullOrEmpty(profile.ResolveBundledArchive(m));
             r.Cells["ModName"].ToolTipText = hasBundle
                 ? $"id: {m.ModId}\nbundled: {m.ArchiveFileName}"
-                : $"id: {m.ModId}\nno bundled archive — will fall back to ModWorkshop";
+                : m.SourceRef.IsValid
+                    ? $"id: {m.ModId}\nno bundled archive — will fall back to VostokMods ({m.SourceRef.Id})"
+                    : $"id: {m.ModId}\nno bundled archive, no VostokMods link";
             if (!hasBundle) r.DefaultCellStyle.ForeColor = Color.FromArgb(160, 170, 190);
         }
     }
@@ -1042,7 +1044,7 @@ public class ProfileManagerDialog : Form
                 Version       = m.Version,
                 IsEnabled     = m.IsEnabled,
                 Priority      = m.Priority,
-                ModWorkshopId = m.ModWorkshopId,
+                Source        = m.Source,
                 // ArchiveFileName intentionally NOT copied — clone
                 // doesn't carry bundles; ModLibrary.Find at apply
                 // / switch time is the lookup path.
@@ -1137,8 +1139,8 @@ public class ProfileManagerDialog : Form
                 $"Profile saved, but {failed.Count} mod(s) couldn't be bundled:\n  • {sample}{more}\n\n"
                 + "These are typically directory mods (unpacked) or .vmz "
                 + "files that were locked at copy time. On apply, the manager "
-                + "will fall back to downloading them from ModWorkshop if they "
-                + "have a linked ID.",
+                + "will fall back to downloading them from VostokMods if they "
+                + "are linked to it.",
                 "Partial bundle",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -1226,7 +1228,7 @@ public class ProfileManagerDialog : Form
                         Version       = e.Version,
                         IsEnabled     = e.IsEnabled,
                         Priority      = e.Priority,
-                        ModWorkshopId = e.ModWorkshopId,
+                        Source        = e.Source.Key,
                     })
                     .ToList(),
             };
@@ -1340,7 +1342,7 @@ public class ProfileManagerDialog : Form
         // imports are fully self-contained once their bundles land
         // in the library — the user can switch profiles from the
         // title-row selector. .json imports name mods but bring no
-        // archives; those need a ModWorkshop download, which the
+        // archives; those need a VostokMods download, which the
         // existing ApplySelected flow handles via its
         // MissingDownload row kind.
         if (isZip)
@@ -1370,7 +1372,7 @@ public class ProfileManagerDialog : Form
             }
             var dlBlurb = missingFromLib > 0
                 ? $"{missingFromLib} mod(s) need to be downloaded "
-                  + "from ModWorkshop. "
+                  + "from VostokMods. "
                 : "";
             var applyNow = ThemedMessageBox.Show(this,
                 $"Profile '{profile.Name}' imported (JSON spec).\n\n"
@@ -1480,7 +1482,7 @@ public class ProfileManagerDialog : Form
                         Version = m.Version,
                         IsEnabled = m.IsEnabled,
                         Priority = m.Priority,
-                        ModWorkshopId = m.ModWorkshopId,
+                        Source = m.Source,
                     }).ToList(),
                 };
                 File.WriteAllText(dlg.FileName,
@@ -1526,7 +1528,7 @@ public class ProfileManagerDialog : Form
         if (profile == null) return;
 
         using var dlg = new ProfileApplyDialog(
-            profile, _registry, _mw, _modConfig, _modsDir, _lockedModIds);
+            profile, _registry, _vm, _modConfig, _modsDir, _lockedModIds);
         dlg.ShowDialog(this);
         if (dlg.Applied)
         {

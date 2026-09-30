@@ -168,7 +168,7 @@ public class LibraryDialog : Form
         });
         g.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "MW", HeaderText = "MW id", Width = 90,
+            Name = "Source", HeaderText = "VostokMods", Width = 180,
             SortMode = DataGridViewColumnSortMode.NotSortable,
         });
 
@@ -253,7 +253,7 @@ public class LibraryDialog : Form
                 state,
                 ProfilesText(e),
                 FormatSize(e.SizeBytes),
-                e.ModWorkshopId > 0 ? e.ModWorkshopId.ToString() : "—");
+                e.Source.IsValid ? e.Source.Id : "—");
             _grid.Rows[idx].Tag = e;
             _grid.Rows[idx].Cells["State"].Style.ForeColor = color;
             if (ProfileCount(e) == 0)
@@ -323,8 +323,8 @@ public class LibraryDialog : Form
             case "Size":
                 q = src.OrderBy(e => e.SizeBytes);
                 break;
-            case "MW":
-                q = src.OrderBy(e => e.ModWorkshopId);
+            case "Source":
+                q = src.OrderBy(e => e.Source.Id, StringComparer.OrdinalIgnoreCase);
                 break;
             default: // "Mod"
                 q = src.OrderBy(Name, StringComparer.OrdinalIgnoreCase)

@@ -11,10 +11,10 @@
 //   📚  From library       — already-downloaded copy of (mod_id,
 //                            any version) exists under Library/;
 //                            copy into live + add to profile.
-//   ⬇  Download via MW    — not installed anywhere; download via the
-//                            entry's mod_workshop_id, ensure-in-lib,
-//                            add to profile.
-//   ✗  Cannot resolve      — no mod_id match, no MW id; informational
+//   ⬇  Download            — not installed anywhere; download from
+//                            VostokMods via the entry's source,
+//                            ensure-in-lib, add to profile.
+//   ✗  Cannot resolve      — no mod_id match, no source; informational
 //                            only, skipped.
 //
 // Mirrors ProfileApplyDialog's two-pane shape (plan grid + progress
@@ -41,7 +41,7 @@ public class ImportModListDialog : Form
     private readonly ModListImport      _import;
     private readonly ModProfile         _profile;     // active profile (caller asserts non-null)
     private readonly ModRegistry        _registry;
-    private readonly ModWorkshopClient  _mw;
+    private readonly VostokModsClient   _vm;
     private readonly string             _modsDir;
 
     // ── Plan rows ────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ public class ImportModListDialog : Form
     private CancellationTokenSource? _cts;
 
     /// <summary>Optional companion directory the dialog scans for
-    /// `.vmz` files to recover MW ids when the JSON doesn't carry
+    /// `.vmz` files to recover sources when the JSON doesn't carry
     /// them. Typically Path.GetDirectoryName(jsonPath) — same
     /// folder the import file lives in, where a user dropping
     /// JSON + .vmz files together expects them to be considered.
@@ -83,14 +83,14 @@ public class ImportModListDialog : Form
         ModListImport      import,
         ModProfile         activeProfile,
         ModRegistry        registry,
-        ModWorkshopClient  mw,
+        VostokModsClient   vm,
         string             modsDir,
         string?            companionDir = null)
     {
         _import       = import;
         _profile      = activeProfile;
         _registry     = registry;
-        _mw           = mw;
+        _vm           = vm;
         _modsDir      = modsDir;
         _companionDir = companionDir;
 
@@ -128,26 +128,26 @@ public class ImportModListDialog : Form
                 libByMod[le.ModId] = le;
         }
 
-        // Fallback MW-id map for entries whose JSON omitted the
-        // mod_workshop_id. Sources (highest priority first):
-        //   • live registry mods carrying [updates] modworkshop
+        // Fallback source map for entries whose JSON omitted the
+        // source. Read from (later ones overrule earlier ones):
+        //   • live registry mods linked to VostokMods
         //   • library .vmz files (read at List() time)
         //   • .vmz files sitting alongside the JSON (_companionDir),
         //     so a "drop the JSON + the .vmz files together" flow
-        //     can recover MW ids the JSON didn't bother to record.
-        // Last source wins so the companion dir's .vmz (most
+        //     can recover sources the JSON didn't bother to record.
+        // Last one wins so the companion dir's .vmz (most
         // recently authored) overrules older snapshots.
-        var fallbackMwIds = new Dictionary<string, int>(
+        var fallbackSources = new Dictionary<string, ModSource>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var e in _registry.Entries)
         {
             if (string.IsNullOrEmpty(e.ModId)) continue;
-            if (e.ModWorkshopId > 0) fallbackMwIds[e.ModId] = e.ModWorkshopId;
+            if (e.Source.IsValid) fallbackSources[e.ModId] = e.Source;
         }
         foreach (var le in libByMod.Values)
         {
-            if (le.ModWorkshopId > 0)
-                fallbackMwIds[le.ModId] = le.ModWorkshopId;
+            if (le.Source.IsValid)
+                fallbackSources[le.ModId] = le.Source;
         }
         if (!string.IsNullOrEmpty(_companionDir)
             && Directory.Exists(_companionDir))
@@ -160,26 +160,26 @@ public class ImportModListDialog : Form
                     using var arch = new ModArchive();
                     if (!arch.Open(f)) continue;
                     var id = arch.ModId;
-                    var mw = arch.ModWorkshopId;
-                    if (!string.IsNullOrEmpty(id) && mw > 0)
-                        fallbackMwIds[id] = mw;
+                    var src = arch.Source;
+                    if (!string.IsNullOrEmpty(id) && src.IsValid)
+                        fallbackSources[id] = src;
                 }
             }
             catch { /* best-effort; bad permissions / locked files shouldn't block import */ }
         }
 
         var flat = _import.Flatten();
-        // Patch missing MW ids in-place — Flatten gave us mutable
+        // Patch missing sources in-place — Flatten gave us mutable
         // entries, so the rest of BuildPlan reads the augmented
         // values directly. Empty mod_id stays empty (we have no
         // way to look it up).
         foreach (var fe in flat)
         {
             var ent = fe.Entry;
-            if (ent.ModWorkshopId > 0) continue;
+            if (ent.SourceRef.IsValid) continue;
             if (string.IsNullOrEmpty(ent.ModId)) continue;
-            if (fallbackMwIds.TryGetValue(ent.ModId, out var mw) && mw > 0)
-                ent.ModWorkshopId = mw;
+            if (fallbackSources.TryGetValue(ent.ModId, out var src) && src.IsValid)
+                ent.Source = src.Key;
         }
         // Stable, predictable ordering: top-level entries first (so
         // the user reads them as the headline mods of the import),
@@ -201,60 +201,39 @@ public class ImportModListDialog : Form
         {
             var entry = flat_.Entry;
             var parentChain = flat_.ParentChain;
+            var source = entry.SourceRef;
             // Resolve a usable live ModEntry: prefer mod_id, then
-            // ModWorkshopId match (recovers when the import uses a
-            // URL slug rather than the manifest id).
+            // a source match (recovers when the import's mod_id
+            // differs from the manifest id).
             ModEntry? live = null;
             if (!string.IsNullOrEmpty(entry.ModId))
                 liveById.TryGetValue(entry.ModId, out live);
-            if (live == null && entry.ModWorkshopId > 0)
+            if (live == null && source.IsValid)
                 live = _registry.Entries.FirstOrDefault(
-                    e => e.ModWorkshopId == entry.ModWorkshopId
+                    e => SameSource(e.Source, source)
                       && !string.IsNullOrEmpty(e.ModId));
 
-            // Library path (same dual lookup).
+            // Library path, by mod_id only; a row the library can't
+            // match by mod_id goes to the download path.
             string libPath = "";
             if (!string.IsNullOrEmpty(entry.ModId)
                 && libByMod.TryGetValue(entry.ModId, out var le))
                 libPath = le.Path;
-            if (string.IsNullOrEmpty(libPath) && entry.ModWorkshopId > 0)
-            {
-                // No id index for MW id in library; fall back to a
-                // linear scan once per row (library is typically
-                // small — well under 200 entries even for power users).
-                foreach (var l in ModLibrary.List(_modsDir))
-                {
-                    if (l.ModId == "") continue;
-                    // We can't read MW id from a library Entry —
-                    // ModLibrary doesn't surface it. Skip the MW-id
-                    // fallback for the library; the download path
-                    // will handle this case fine.
-                    break;
-                }
-            }
 
             // Is this id already in the profile?
             bool inProfile = false;
             if (!string.IsNullOrEmpty(entry.ModId)
                 && profileIds.Contains(entry.ModId))
                 inProfile = true;
-            // Profile-by-MW-id fallback. Same reason as the live
-            // lookup — slug id mismatches.
-            if (!inProfile && entry.ModWorkshopId > 0)
+            // Profile-by-source fallback. Same reason as the live
+            // lookup — mod_id mismatches.
+            if (!inProfile && source.IsValid)
             {
                 var match = _profile.Mods.FirstOrDefault(
-                    m => m.ModWorkshopId == entry.ModWorkshopId
+                    m => SameSource(m.SourceRef, source)
                       && !string.IsNullOrEmpty(m.ModId));
                 if (match != null) inProfile = true;
             }
-
-            string label = !string.IsNullOrEmpty(entry.DisplayName)
-                ? entry.DisplayName
-                : (!string.IsNullOrEmpty(entry.ModId)
-                    ? entry.ModId
-                    : (entry.ModWorkshopId > 0
-                        ? $"MW {entry.ModWorkshopId}"
-                        : "(unknown)"));
 
             // Optional mods default to UNticked so the user
             // explicitly opts INTO each nice-to-have; required
@@ -289,15 +268,15 @@ public class ImportModListDialog : Form
                 row = new PlanRow(RowKind.FromLibrary, entry, parentChain, null, libPath,
                     "📚", "Will install from library (already downloaded)", defaultOptIn);
             }
-            else if (entry.ModWorkshopId > 0)
+            else if (source.IsValid)
             {
                 row = new PlanRow(RowKind.Download, entry, parentChain, null, "",
-                    "⬇", "Will download from ModWorkshop", defaultOptIn);
+                    "⬇", "Will download from VostokMods", defaultOptIn);
             }
             else
             {
                 row = new PlanRow(RowKind.Unresolvable, entry, parentChain, null, "",
-                    "✗", "No mod_workshop_id — cannot download", false);
+                    "✗", "No VostokMods source — cannot download", false);
             }
             _plan.Add(row);
         }
@@ -505,11 +484,11 @@ public class ImportModListDialog : Form
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name       = "MwId",
-            HeaderText = "MW",
-            Width      = 70,
+            Name       = "Source",
+            HeaderText = "VostokMods",
+            Width      = 180,
             ReadOnly   = true,
-            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleLeft },
         });
         // "Via": lineage column. Empty for top-level entries; for
         // transitively-included rows shows "↳ dep of X" or
@@ -552,8 +531,8 @@ public class ImportModListDialog : Form
             r.Cells["ModName"].Value   = string.IsNullOrEmpty(row.Entry.DisplayName)
                 ? row.Entry.ModId : row.Entry.DisplayName;
             r.Cells["ModId"].Value     = row.Entry.ModId;
-            r.Cells["MwId"].Value      = row.Entry.ModWorkshopId > 0
-                ? row.Entry.ModWorkshopId.ToString() : "—";
+            r.Cells["Source"].Value    = row.Entry.SourceRef.IsValid
+                ? row.Entry.SourceRef.Id : "—";
             // Default-null IsOptional reads as "required" — same
             // back-compat rule the rest of the importer uses.
             var isOptional = row.Entry.IsOptional == true;
@@ -813,7 +792,7 @@ public class ImportModListDialog : Form
             }
         }
 
-        // MW downloads.
+        // VostokMods downloads.
         foreach (var (row, optIn) in actions)
         {
             if (ct.IsCancellationRequested) break;
@@ -821,13 +800,15 @@ public class ImportModListDialog : Form
             if (row.Kind != RowKind.Download) continue;
             try
             {
+                var source   = row.Entry.SourceRef;
                 var liveName = LiveFilenameFor(row.Entry);
                 var dst      = Path.Combine(_modsDir, liveName);
                 if (File.Exists(dst)) dst = Path.Combine(
                     _modsDir, MakeUniqueName(liveName));
-                Advance($"⬇ {DisplayLabel(row.Entry)} (MW {row.Entry.ModWorkshopId}) …");
-                await Task.Run(() => _mw.DownloadLatestAsync(
-                    row.Entry.ModWorkshopId, dst, ct), ct);
+                Advance($"⬇ {DisplayLabel(row.Entry)} ({source.Id}) …");
+                await Task.Run(() => _vm.DownloadAsync(
+                    source.Id, dst, ct: ct), ct);
+                DownloadedSources.Record(dst, source);
                 // Snapshot into library so a future profile switch
                 // can short-circuit the redownload.
                 try { ModLibrary.Add(_modsDir, dst); } catch { }
@@ -898,9 +879,9 @@ public class ImportModListDialog : Form
                     Version       = entry.Version,
                     IsEnabled     = row.Entry.IsEnabled ?? true,
                     Priority      = row.Entry.Priority  ?? entry.DeclaredPriority,
-                    ModWorkshopId = entry.ModWorkshopId > 0
-                                      ? entry.ModWorkshopId
-                                      : row.Entry.ModWorkshopId,
+                    Source        = entry.Source.IsValid
+                                      ? entry.Source.Key
+                                      : row.Entry.SourceRef.Key,
                     PackName      = packLabel,
                 });
                 Log($"  + profile: {DisplayLabel(row.Entry)} ({entry.ModId} v{entry.Version}) [{packLabel}]");
@@ -910,8 +891,8 @@ public class ImportModListDialog : Form
                 existing.Version     = entry.Version;
                 if (string.IsNullOrEmpty(existing.DisplayName))
                     existing.DisplayName = entry.DisplayName;
-                if (existing.ModWorkshopId == 0 && entry.ModWorkshopId > 0)
-                    existing.ModWorkshopId = entry.ModWorkshopId;
+                if (!existing.SourceRef.IsValid && entry.Source.IsValid)
+                    existing.Source = entry.Source.Key;
                 if (string.IsNullOrEmpty(existing.PackName))
                     existing.PackName = packLabel;
                 Log($"  ↻ profile updated: {DisplayLabel(row.Entry)} ({entry.ModId} v{entry.Version})");
@@ -950,7 +931,7 @@ public class ImportModListDialog : Form
     }
 
     /// <summary>Locate the just-installed registry entry for an
-    /// import row. Mod_id first, then ModWorkshop id — mirrors the
+    /// import row. Mod_id first, then source — mirrors the
     /// fallback path the Apply dialog uses.</summary>
     private ModEntry? ResolveRegistryEntry(ImportEntry entry)
     {
@@ -961,21 +942,30 @@ public class ImportModListDialog : Form
                     StringComparison.OrdinalIgnoreCase));
             if (byId != null) return byId;
         }
-        if (entry.ModWorkshopId > 0)
+        var source = entry.SourceRef;
+        if (source.IsValid)
         {
             return _registry.Entries.FirstOrDefault(e =>
-                e.ModWorkshopId == entry.ModWorkshopId
+                SameSource(e.Source, source)
                 && !string.IsNullOrEmpty(e.ModId));
         }
         return null;
     }
+
+    /// <summary>True when both sources are valid and name the same
+    /// mod. Slugs compare case-insensitively: an import's slug arrives
+    /// lowercased while a mod.txt keeps its own casing.</summary>
+    private static bool SameSource(ModSource a, ModSource b) =>
+        a.IsValid && b.IsValid
+        && a.Provider == b.Provider
+        && string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase);
 
     private static string DisplayLabel(ImportEntry e) =>
         !string.IsNullOrEmpty(e.DisplayName)
             ? e.DisplayName
             : (!string.IsNullOrEmpty(e.ModId)
                 ? e.ModId
-                : (e.ModWorkshopId > 0 ? $"MW {e.ModWorkshopId}" : "(unknown)"));
+                : (e.SourceRef.IsValid ? e.SourceRef.Id : "(unknown)"));
 
     /// <summary>Renders a parent chain into the "Via" column text:
     /// empty for top-level, "↳ dep of X" for one parent,
@@ -994,13 +984,13 @@ public class ImportModListDialog : Form
 
     /// <summary>Live filename for a freshly-downloaded / copied mod.
     /// Prefers the mod_id slug from the import (consistent with how
-    /// the Apply dialog names its downloads); falls back to the MW
-    /// id when no mod_id is present.</summary>
+    /// the Apply dialog names its downloads); falls back to the
+    /// VostokMods slug when no mod_id is present.</summary>
     private static string LiveFilenameFor(ImportEntry e)
     {
         var key = !string.IsNullOrEmpty(e.ModId)
             ? e.ModId
-            : (e.ModWorkshopId > 0 ? $"mw{e.ModWorkshopId}" : "unknown");
+            : (e.SourceRef.IsValid ? e.SourceRef.Id : "unknown");
         return $"{ModProfile.SafeFileName(key)}.vmz";
     }
 

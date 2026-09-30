@@ -1,6 +1,6 @@
 // Mod creator's "pack me a .vmz" tool. Takes a source (existing
 // .vmz / .zip OR a folder), surfaces the editable manifest fields
-// (mod_id, name, version, priority, ModWorkshop id, description) +
+// (mod_id, name, version, priority, VostokMods slug, description) +
 // a dependency picker, then writes a fresh .vmz with the edits
 // applied.
 //
@@ -51,7 +51,7 @@ public class ModPackagerDialog : Form
     private TextBox _nameBox         = null!;
     private TextBox _versionBox      = null!;
     private NumericUpDown _priorityBox = null!;
-    private TextBox _mwIdBox         = null!;
+    private TextBox _sourceBox       = null!;
     private TextBox _descBox         = null!;
 
     // ── Dependencies ──────────────────────────────────────────────
@@ -75,37 +75,37 @@ public class ModPackagerDialog : Form
     private TextBox      _log        = null!;
 
     /// <summary>One installable-mod row in the dep grid. ModId is
-    /// the MANIFEST id (string slug, the form mod.txt's
-    /// [dependencies] section needs); ModWorkshopId is the numeric
-    /// id from the mod's ModWorkshop URL. We surface the MW id as
-    /// the primary identifier in the UI (it's the value mod authors
+    /// the MANIFEST id (the form mod.txt's [dependencies] section
+    /// needs); Source is the mod's VostokMods source, whose slug
+    /// comes from the mod's page URL. We surface the slug as the
+    /// primary identifier in the UI (it's the value mod authors
     /// actually share with each other) but always write the
     /// manifest id when packing, because that's what the in-game
     /// loader matches against.</summary>
     private record DepRow(
-        string ModId,
-        int    ModWorkshopId,
-        string DisplayName,
-        bool   IsInstalledHere);
+        string    ModId,
+        ModSource Source,
+        string    DisplayName,
+        bool      IsInstalledHere);
 
     /// <summary>Optional active profile — when present, its
-    /// ProfileMod entries are a SECOND source of mod_workshop_id
-    /// values that the registry / mod.txt may lack. A mod can
-    /// have its MW id stored in profile.json (because it was
-    /// originally added via a JSON import that carried it) even
-    /// when the on-disk mod.txt's [updates] modworkshop is
-    /// missing. We treat the profile as authoritative for the
-    /// MW id when both sources disagree because the profile is
-    /// where the user's intent lives. Null when the manager
-    /// opened the packager without an active profile — falls
-    /// back to registry-only lookup.</summary>
+    /// ProfileMod entries are a SECOND place to find the source
+    /// that the registry / mod.txt may lack. A mod can have its
+    /// source stored in profile.json (because it was originally
+    /// added via a JSON import that carried it) even when the
+    /// on-disk mod.txt's [updates] source is missing. We treat
+    /// the profile as authoritative for the source when both
+    /// disagree because the profile is where the user's intent
+    /// lives. Null when the manager opened the packager without
+    /// an active profile — falls back to registry-only lookup.
+    /// </summary>
     private readonly ModProfile? _activeProfile;
 
-    /// <summary>mod_id → MW id index built once at dialog open
+    /// <summary>mod_id → source index built once at dialog open
     /// from registry mod.txts UNION profile entries. Built in
     /// PopulateDepGrid so it stays in sync if the registry rows
     /// change shape (rare; just covering all entry points).</summary>
-    private Dictionary<string, int> _modIdToMwIndex = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ModSource> _modIdToSourceIndex = new(StringComparer.OrdinalIgnoreCase);
 
     public ModPackagerDialog(ModRegistry registry, ModProfile? activeProfile = null)
     {
@@ -149,10 +149,10 @@ public class ModPackagerDialog : Form
             if (!TryPickModDropPaths(e, out var paths)) return;
             var added = new List<string>();
             var skipped = new List<string>();
-            int mwCaptured = 0;
+            int sourcesCaptured = 0;
             foreach (var p in paths)
             {
-                var (id, mwId) = ExtractModInfoFromPath(p);
+                var (id, source) = ExtractModInfoFromPath(p);
                 if (string.IsNullOrEmpty(id))
                 {
                     skipped.Add(Path.GetFileName(p) + " (no mod.txt / no id)");
@@ -164,19 +164,19 @@ public class ModPackagerDialog : Form
                     continue;
                 }
                 added.Add(id);
-                // Remember the MW id (if the dropped file declared
+                // Remember the source (if the dropped file declared
                 // one) so the eventual Export reads it back when
-                // resolving this slug — covers the case where the
+                // resolving this mod_id — covers the case where the
                 // dep isn't installed locally so neither the
-                // registry nor the library knows its MW id.
-                if (mwId > 0) { _modIdToMwIndex[id] = mwId; mwCaptured++; }
+                // registry nor the library knows its source.
+                if (source.IsValid) { _modIdToSourceIndex[id] = source; sourcesCaptured++; }
             }
             if (added.Count > 0)
                 AppendLinesToBox(box, added);
             if (added.Count > 0)
             {
-                var mwNote = mwCaptured > 0 ? $" ({mwCaptured} with MW id)" : "";
-                Log($"↓ added {added.Count} {kindLabel} dep(s){mwNote}: {string.Join(", ", added)}");
+                var sourceNote = sourcesCaptured > 0 ? $" ({sourcesCaptured} linked to VostokMods)" : "";
+                Log($"↓ added {added.Count} {kindLabel} dep(s){sourceNote}: {string.Join(", ", added)}");
             }
             foreach (var s in skipped)
                 Log($"  · skipped: {s}");
@@ -215,36 +215,35 @@ public class ModPackagerDialog : Form
         => ExtractModInfoFromPath(path).Id;
 
     /// <summary>Read mod.txt from `path` (folder or archive) and
-    /// return both its `[mod] id` AND `[updates] modworkshop` —
-    /// in one open pass. Empty id / zero mw_id when fields are
+    /// return both its `[mod] id` AND `[updates] source` — in one
+    /// open pass. Empty id / ModSource.None when fields are
     /// missing or the file isn't parseable.</summary>
-    private static (string Id, int MwId) ExtractModInfoFromPath(string path)
+    private static (string Id, ModSource Source) ExtractModInfoFromPath(string path)
     {
         try
         {
             if (Directory.Exists(path))
             {
                 var p = Path.Combine(path, "mod.txt");
-                if (!File.Exists(p)) return ("", 0);
+                if (!File.Exists(p)) return ("", ModSource.None);
                 var parsed = ModArchive.ParseConfigFile(File.ReadAllText(p));
                 var id = parsed.TryGetValue("mod", out var sec)
                     && sec.TryGetValue("id", out var v) ? v : "";
-                var mw = 0;
+                var source = ModSource.None;
                 if (parsed.TryGetValue("updates", out var us)
-                    && us.TryGetValue("modworkshop", out var raw)
-                    && int.TryParse(raw, out var n) && n > 0)
-                    mw = n;
-                return (id, mw);
+                    && us.TryGetValue("source", out var raw))
+                    source = ModSource.Parse(raw);
+                return (id, source);
             }
             if (File.Exists(path))
             {
                 using var arch = new ModArchive();
-                if (!arch.Open(path)) return ("", 0);
-                return (arch.ModId ?? "", arch.ModWorkshopId);
+                if (!arch.Open(path)) return ("", ModSource.None);
+                return (arch.ModId ?? "", arch.Source);
             }
         }
         catch { /* malformed input → empty, caller logs */ }
-        return ("", 0);
+        return ("", ModSource.None);
     }
 
     /// <summary>True when `box.Text` already contains `id` as a
@@ -701,7 +700,7 @@ public class ModPackagerDialog : Form
             Width       = 90,
             Margin      = new Padding(0, 4, 0, 4),
         };
-        _mwIdBox     = Field("ModWorkshop numeric id (optional)");
+        _sourceBox   = Field("VostokMods mod page URL or slug (optional)");
         _descBox     = new TextBox
         {
             Anchor      = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
@@ -723,7 +722,7 @@ public class ModPackagerDialog : Form
         t.Controls.Add(Lbl("mod_id:"),     0, 1); t.Controls.Add(_modIdBox,    1, 1);
         t.Controls.Add(Lbl("version:"),    0, 2); t.Controls.Add(_versionBox,  1, 2);
         t.Controls.Add(Lbl("priority:"),   0, 3); t.Controls.Add(_priorityBox, 1, 3);
-        t.Controls.Add(Lbl("ModWorkshop:"),0, 4); t.Controls.Add(_mwIdBox,     1, 4);
+        t.Controls.Add(Lbl("VostokMods:"), 0, 4); t.Controls.Add(_sourceBox,   1, 4);
         t.Controls.Add(Lbl("description:"),0, 5); t.Controls.Add(_descBox,     1, 5);
 
         grp.Controls.Add(t);
@@ -755,7 +754,7 @@ public class ModPackagerDialog : Form
             BackColor   = Color.FromArgb(30, 36, 48),
             ForeColor   = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            PlaceholderText = "filter installed mods by name, MW id, or mod_id",
+            PlaceholderText = "filter installed mods by name, VostokMods slug, or mod_id",
             Margin      = new Padding(0, 0, 0, 6),
         };
         _depFilterBox.TextChanged += (_, _) => PopulateDepGrid(_depFilterBox.Text);
@@ -805,18 +804,18 @@ public class ModPackagerDialog : Form
             Name = "Opt", HeaderText = "Optional", Width = 80,
             DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
         });
-        // MW first — primary identifier mod authors actually share
-        // with each other (the number in the modworkshop.net/mod/
-        // URL). Manifest mod_id is shown alongside as the secondary
-        // identifier; it's what the in-game loader matches against
-        // and what we write into the packaged mod.txt.
+        // VostokMods slug first — primary identifier mod authors
+        // actually share with each other (the last part of the
+        // vostokmods.net/mod/ URL). Manifest mod_id is shown
+        // alongside as the secondary identifier; it's what the
+        // in-game loader matches against and what we write into
+        // the packaged mod.txt.
         _depGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "MwId", HeaderText = "MW",
-            Width = 90, ReadOnly = true,
+            Name = "Source", HeaderText = "VostokMods",
+            Width = 200, ReadOnly = true,
             DefaultCellStyle =
             {
-                Alignment = DataGridViewContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(170, 200, 240),
             },
         });
@@ -875,7 +874,7 @@ public class ModPackagerDialog : Form
         // Custom mod_ids
         t.Controls.Add(new Label
         {
-            Text      = "Extra dependencies by MW id or URL (one per line or CSV) — for mods not installed locally:",
+            Text      = "Extra dependencies by VostokMods mod page URL or mod_id (one per line or CSV) — for mods not installed locally:",
             AutoSize  = true,
             ForeColor = Color.FromArgb(170, 185, 210),
             BackColor = Color.Transparent,
@@ -917,7 +916,7 @@ public class ModPackagerDialog : Form
             BackColor   = Color.FromArgb(30, 36, 48),
             ForeColor   = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            PlaceholderText = "56781\nhttps://modworkshop.net/mod/56123",
+            PlaceholderText = "weapon-rig-api\nhttps://vostokmods.net/mod/some-mod",
         };
         _customOptBox = new TextBox
         {
@@ -927,7 +926,7 @@ public class ModPackagerDialog : Form
             BackColor   = Color.FromArgb(30, 36, 48),
             ForeColor   = Color.FromArgb(220, 225, 235),
             BorderStyle = BorderStyle.FixedSingle,
-            PlaceholderText = "56999",
+            PlaceholderText = "https://vostokmods.net/mod/another-mod",
             Margin      = new Padding(8, 0, 0, 0),
         };
         customGrid.Controls.Add(_customReqBox, 0, 1);
@@ -967,41 +966,42 @@ public class ModPackagerDialog : Form
             else                                              _checkedOpt.Remove(modId);
         }
 
-        // Rebuild the mod_id → MW id index from THREE sources, in
+        // Rebuild the mod_id → source index from THREE places, in
         // increasing priority order so later writes overwrite
-        // earlier ones (last source wins):
+        // earlier ones (last one wins):
         //   1. Library entries (canonical .vmz copies under
         //      <mods>/Library/) — every mod the user ever
-        //      installed. Captures MW ids for mods not currently
+        //      installed. Captures sources for mods not currently
         //      live AND not in the profile.
         //   2. Registry entries (mod.txt of currently-live mods).
         //   3. Active profile's ProfileMod entries — the user's
-        //      source of truth for "what MW id does this mod live
-        //      under", since profile mods can carry MW ids that
-        //      survive even when the on-disk mod.txt loses them.
-        _modIdToMwIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        //      source of truth for "which VostokMods page does
+        //      this mod live under", since profile mods can carry
+        //      sources that survive even when the on-disk mod.txt
+        //      loses them.
+        _modIdToSourceIndex = new Dictionary<string, ModSource>(StringComparer.OrdinalIgnoreCase);
         try
         {
             foreach (var le in ModLibrary.List(_registry.ModsDir))
             {
                 if (string.IsNullOrEmpty(le.ModId)) continue;
-                if (le.ModWorkshopId > 0)
-                    _modIdToMwIndex[le.ModId] = le.ModWorkshopId;
+                if (le.Source.IsValid)
+                    _modIdToSourceIndex[le.ModId] = le.Source;
             }
         }
         catch { /* best-effort; library scan failures fall back to registry/profile */ }
         foreach (var e in _registry.Entries)
         {
             if (string.IsNullOrEmpty(e.ModId)) continue;
-            if (e.ModWorkshopId > 0) _modIdToMwIndex[e.ModId] = e.ModWorkshopId;
+            if (e.Source.IsValid) _modIdToSourceIndex[e.ModId] = e.Source;
         }
         if (_activeProfile != null)
         {
             foreach (var pm in _activeProfile.Mods)
             {
                 if (string.IsNullOrEmpty(pm.ModId)) continue;
-                if (pm.ModWorkshopId > 0)
-                    _modIdToMwIndex[pm.ModId] = pm.ModWorkshopId;
+                if (pm.SourceRef.IsValid)
+                    _modIdToSourceIndex[pm.ModId] = pm.SourceRef;
             }
         }
 
@@ -1014,15 +1014,14 @@ public class ModPackagerDialog : Form
             .Select(g => new DepRow(
                 g.Key,
                 // Prefer the merged index — falls back to the
-                // registry's own ModWorkshopId only when no
+                // registry's own Source only when no
                 // profile-level value exists.
-                _modIdToMwIndex.TryGetValue(g.Key, out var mw) ? mw : g.First().ModWorkshopId,
+                _modIdToSourceIndex.TryGetValue(g.Key, out var indexed) ? indexed : g.First().Source,
                 g.First().DisplayName ?? "",
                 true))
             // Sort by display name (case-insensitive) so the grid
             // matches the cognitive order the user reads the list
-            // in. MW-id sort would look random because the numbers
-            // don't correlate to mod identity at a glance.
+            // in, which is the name column rather than the slug.
             .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.ModId, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1032,8 +1031,8 @@ public class ModPackagerDialog : Form
             f.Length == 0
             || r.ModId.ToLowerInvariant().Contains(f)
             || r.DisplayName.ToLowerInvariant().Contains(f)
-            || (r.ModWorkshopId > 0
-                && r.ModWorkshopId.ToString().Contains(f));
+            || (r.Source.IsValid
+                && r.Source.Id.ToLowerInvariant().Contains(f));
 
         _depGrid.Rows.Clear();
         foreach (var r in _depRows.Where(Matches))
@@ -1042,8 +1041,8 @@ public class ModPackagerDialog : Form
             var row = _depGrid.Rows[i];
             row.Cells["Req"].Value = _checkedReq.Contains(r.ModId);
             row.Cells["Opt"].Value = _checkedOpt.Contains(r.ModId);
-            row.Cells["MwId"].Value = r.ModWorkshopId > 0
-                ? r.ModWorkshopId.ToString() : "—";
+            row.Cells["Source"].Value = r.Source.IsValid
+                ? r.Source.Id : "—";
             row.Cells["ModId"].Value = r.ModId;
             row.Cells["DisplayName"].Value = r.DisplayName;
         }
@@ -1170,7 +1169,7 @@ public class ModPackagerDialog : Form
             if (int.TryParse(prio, out var pn))
                 _priorityBox.Value = Math.Max(_priorityBox.Minimum, Math.Min(_priorityBox.Maximum, pn));
             else _priorityBox.Value = 0;
-            _mwIdBox.Text = Get(parsed, "updates", "modworkshop");
+            _sourceBox.Text = ModSource.Parse(Get(parsed, "updates", "source")).Id;
 
             // Pre-tick deps the source already declares. Required +
             // optional sections come in as Godot-array or CSV — let
@@ -1190,7 +1189,7 @@ public class ModPackagerDialog : Form
     private void ApplyDepSelections(List<string> req, List<string> opt)
     {
         // Existing dep entries may be EITHER manifest mod_ids
-        // (the conventional form) OR numeric MW ids (the form our
+        // (the conventional form) OR VostokMods slugs (the form our
         // packager falls back to when a dep wasn't resolvable at
         // pack time). Normalise both kinds into a "matches this
         // grid row?" predicate before applying ticks.
@@ -1198,9 +1197,8 @@ public class ModPackagerDialog : Form
         {
             if (string.Equals(r.ModId, depId, StringComparison.OrdinalIgnoreCase))
                 return true;
-            if (r.ModWorkshopId > 0
-                && int.TryParse(depId, out var n)
-                && n == r.ModWorkshopId)
+            if (r.Source.IsValid
+                && string.Equals(r.Source.Id, depId, StringComparison.OrdinalIgnoreCase))
                 return true;
             return false;
         }
@@ -1253,6 +1251,7 @@ public class ModPackagerDialog : Form
         }
         if (!dst.EndsWith(".vmz", StringComparison.OrdinalIgnoreCase))
             dst += ".vmz";
+        if (!TryReadMainSource(out var mainSource)) return;
 
         // Collect dep ids from BOTH the grid + the custom textareas.
         // Deduped (case-insensitive) and ordered: grid picks first
@@ -1261,9 +1260,9 @@ public class ModPackagerDialog : Form
         // What lands in mod.txt is ALWAYS the manifest mod_id string.
         // The grid carries it directly (each row knows the mod's
         // manifest id from the registry); the custom text accepts
-        // MW numeric ids / URLs, which we resolve to the manifest
+        // VostokMods mod page URLs, which we resolve to the manifest
         // id via _registry when the dep mod is installed locally.
-        // Unresolvable numerics are written verbatim with a warning
+        // Unresolvable URLs are written as their slug with a warning
         // so the author sees it and can fix later.
         var req = new List<string>();
         var opt = new List<string>();
@@ -1279,39 +1278,39 @@ public class ModPackagerDialog : Form
         foreach (var id in _checkedOpt)
             if (optSeen.Add(id) && !reqSeen.Contains(id)) opt.Add(id);
 
-        // Track dep_id → MW id pairs so the produced .vmz carries
+        // Track dep_id → source pairs so the produced .vmz carries
         // a [dependency_sources] section the install-time
         // resolver can use to auto-download these deps without
         // round-tripping to the user for URLs.
-        var depSources = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var depSources = new Dictionary<string, ModSource>(StringComparer.OrdinalIgnoreCase);
 
         // Grid ticks: rows know their manifest mod_id AND the
-        // MW id from the registry, so this is a direct map.
+        // source from the registry, so this is a direct map.
         foreach (var r in _depRows)
         {
-            if (r.ModWorkshopId <= 0) continue;
+            if (!r.Source.IsValid) continue;
             if (reqSeen.Contains(r.ModId) || optSeen.Contains(r.ModId))
-                depSources[r.ModId] = r.ModWorkshopId;
+                depSources[r.ModId] = r.Source;
         }
 
-        // Resolve each custom-text entry: tries MW-id / URL parse
-        // first, falls back to treating the raw string as a
-        // manifest mod_id (legacy / hand-typed slug form). When
-        // the input was MW-shaped AND resolvable to a registry
-        // entry, record (resolved_id, mw_id) in depSources too.
+        // Resolve each custom-text entry: tries the VostokMods URL
+        // parse first, falls back to treating the raw string as a
+        // manifest mod_id (the hand-typed form). Whenever a source
+        // is known for the entry, record (dep_id, source) in
+        // depSources too.
         foreach (var raw in ParseCustomList(_customReqBox.Text))
         {
-            var (id, mwForSources) = ResolveCustomDepEntry(raw);
+            var (id, depSource, _) = ResolveCustomDepEntry(raw);
             if (string.IsNullOrEmpty(id)) continue;
             if (reqSeen.Add(id)) req.Add(id);
-            if (mwForSources > 0) depSources[id] = mwForSources;
+            if (depSource.IsValid) depSources[id] = depSource;
         }
         foreach (var raw in ParseCustomList(_customOptBox.Text))
         {
-            var (id, mwForSources) = ResolveCustomDepEntry(raw);
+            var (id, depSource, _) = ResolveCustomDepEntry(raw);
             if (string.IsNullOrEmpty(id)) continue;
             if (optSeen.Add(id) && !reqSeen.Contains(id)) opt.Add(id);
-            if (mwForSources > 0) depSources[id] = mwForSources;
+            if (depSource.IsValid) depSources[id] = depSource;
         }
 
         var opts = new ModPacker.PackOptions
@@ -1321,8 +1320,7 @@ public class ModPackagerDialog : Form
             Version     = _versionBox.Text.Trim(),
             Description = _descBox.Text.Trim(),
             Priority    = (int)_priorityBox.Value,
-            ModWorkshopId = ManifestEditor.ParseModWorkshopIdInput(_mwIdBox.Text.Trim()) is var mw && mw > 0
-                ? mw : (int?)null,
+            Source      = mainSource,
             RequiredDependencies = req,
             OptionalDependencies = opt,
             DependencySources    = depSources,
@@ -1339,59 +1337,92 @@ public class ModPackagerDialog : Form
         }
     }
 
+    /// <summary>Reads the Main mod's VostokMods box. An empty box
+    /// is fine and yields ModSource.None. Anything else must be a
+    /// VostokMods mod page URL or slug; when it isn't, logs why
+    /// and returns false so the caller stops.</summary>
+    private bool TryReadMainSource(out ModSource source)
+    {
+        source = ModSource.None;
+        var text = _sourceBox.Text.Trim();
+        if (text.Length == 0) return true;
+        if (!text.All(char.IsDigit)
+            && VostokModsUrl.TryParseSlug(text, out var slug))
+        {
+            source = ModSource.ForSlug(slug);
+            return true;
+        }
+        Log($"✗ VostokMods: '{text}' is not a VostokMods mod page URL or slug "
+            + "(e.g. https://vostokmods.net/mod/my-mod or my-mod).");
+        return false;
+    }
+
     /// <summary>Translate a single user-typed dep entry into the
-    /// dep id we'll write to mod.txt PLUS the MW numeric id (when
-    /// we have one) for the [dependency_sources] sidecar section.
+    /// dep id we'll write to mod.txt PLUS the VostokMods source
+    /// (when we have one) for the [dependency_sources] sidecar
+    /// section.
     ///
     /// Input forms:
-    ///   • bare numeric id   "56781"
-    ///   • full MW URL       "https://modworkshop.net/mod/56781/slug"
-    ///   • URL fragment      "modworkshop.net/mod/56781"
-    ///   • manifest slug     "mcm" / "weapon-rig-api" / etc.
+    ///   • mod page URL      "https://vostokmods.net/mod/some-mod"
+    ///   • URL fragment      "vostokmods.net/mod/some-mod"
+    ///   • source key        "vostokmods:some-mod"
+    ///   • manifest mod_id   "mcm" / "weapon-rig-api" / etc.
     ///
-    /// Numeric / URL → try the local registry: a row with a
-    /// matching `ModWorkshopId` gives us the real manifest mod_id
-    /// the in-game loader will recognise. We return BOTH the slug
-    /// AND the MW id so the packed mod carries a (slug → MW id)
-    /// entry the install-time resolver can use.
-    /// On miss we write the numeric id verbatim (loader won't
-    /// match, but the manager's resolver can still read the MW id
-    /// directly), AND still report the MW id for the sources map.
+    /// URL / source key → try the local registry: a row with a
+    /// matching `Source` gives us the real manifest mod_id the
+    /// in-game loader will recognise. We return BOTH the mod_id
+    /// AND the source so the packed mod carries a (mod_id →
+    /// source) entry the install-time resolver can use.
+    /// On miss we write the slug verbatim (the loader only
+    /// matches when the slug happens to equal the mod_id, but the
+    /// manager's resolver can still read the source directly),
+    /// AND still report the source for the sources map;
+    /// `idIsManifest` is false in that one case.
     ///
-    /// Non-numeric input is assumed to already BE a manifest
-    /// mod_id and is passed through unchanged — no MW id known.
-    /// Returns ("", 0) when the input doesn't parse at all.</summary>
-    private (string id, int mwForSources) ResolveCustomDepEntry(string raw)
+    /// Any other input is assumed to already BE a manifest
+    /// mod_id and is passed through unchanged, with the source
+    /// looked up from the index when the mod is known locally.
+    /// A bare number or a URL that isn't a VostokMods mod page is
+    /// neither, so it is logged and skipped.
+    /// Returns ("", None, false) when the input is skipped.</summary>
+    private (string id, ModSource source, bool idIsManifest) ResolveCustomDepEntry(string raw)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return ("", 0);
+        if (string.IsNullOrWhiteSpace(raw)) return ("", ModSource.None, false);
         var trimmed = raw.Trim().Trim('"', '\'');
 
-        var mw = ManifestEditor.ParseModWorkshopIdInput(trimmed);
-        if (mw <= 0)
+        ModSource source;
+        if (VostokModsUrl.TryParseModPageSlug(trimmed, out var slug))
+            source = ModSource.ForSlug(slug);
+        else if (!ModSource.TryParse(trimmed, out source))
         {
-            // Not a number / URL. Treat as a manifest mod_id slug.
-            // Look up the MW id in the index built from registry +
-            // active profile — common when the user types a slug
-            // for a mod they HAVE installed locally; the MW id is
+            if (trimmed.All(char.IsDigit) || trimmed.Contains('/'))
+            {
+                Log($"  ⚠ '{trimmed}': expected a VostokMods mod page URL or a mod_id — skipped.");
+                return ("", ModSource.None, false);
+            }
+            // Not a URL / source key. Treat as a manifest mod_id.
+            // Look up the source in the index built from registry +
+            // active profile — common when the user types the id
+            // for a mod they HAVE installed locally; the source is
             // available even without re-typing the URL.
-            var mwFromIndex = _modIdToMwIndex.TryGetValue(trimmed, out var v) ? v : 0;
-            return (trimmed, mwFromIndex);
+            var fromIndex = _modIdToSourceIndex.TryGetValue(trimmed, out var v) ? v : ModSource.None;
+            return (trimmed, fromIndex, true);
         }
 
         var match = _registry.Entries.FirstOrDefault(
-            e => e.ModWorkshopId == mw && !string.IsNullOrEmpty(e.ModId));
+            e => e.Source == source && !string.IsNullOrEmpty(e.ModId));
         if (match != null)
         {
-            Log($"  ↪ MW {mw} → manifest id '{match.ModId}' (from installed '{match.DisplayName}')");
-            return (match.ModId, mw);
+            Log($"  ↪ VostokMods {source.Id} → manifest id '{match.ModId}' (from installed '{match.DisplayName}')");
+            return (match.ModId, source, true);
         }
-        // Unresolvable to a manifest slug. Write the numeric id
-        // literal — the loader won't match, but [dependency_sources]
-        // still gets the MW id so the install-time resolver can
-        // auto-download it.
-        Log($"  ⚠ MW {mw}: not in your installed mods — writing '{mw}' literally; "
+        // Unresolvable to a manifest mod_id. Write the slug
+        // literal — the loader may not match, but
+        // [dependency_sources] still gets the source so the
+        // install-time resolver can auto-download it.
+        Log($"  ⚠ VostokMods {source.Id}: not in your installed mods — writing '{source.Id}' literally; "
             + "install the dep locally then re-pack to get the manifest mod_id.");
-        return (mw.ToString(), mw);
+        return (source.Id, source, false);
     }
 
     private static IEnumerable<string> ParseCustomList(string raw)
@@ -1432,22 +1463,22 @@ public class ModPackagerDialog : Form
     /// profile. NOT a .vmz; complementary output to Build .vmz.
     ///
     /// Contents:
-    ///   • Main mod entry (mod_id / name / version /
-    ///     mod_workshop_id) — included when at least one of
-    ///     mod_id or modworkshop_id is set, so the user can
-    ///     build a pack without a "headline" mod (just a list
-    ///     of deps) when they want to.
+    ///   • Main mod entry (mod_id / name / version / source) —
+    ///     included when at least one of mod_id or source is
+    ///     set, so the user can build a pack without a
+    ///     "headline" mod (just a list of deps) when they want
+    ///     to.
     ///   • Every ticked Required + Optional row from the dep
     ///     grid — read from the persistent tick sets, so a
     ///     filter active when Export is clicked doesn't drop
     ///     ticks for currently-hidden rows.
-    ///   • Every custom-text dep entry — MW URLs / numerics
-    ///     resolve to their manifest mod_id + MW id via the
+    ///   • Every custom-text dep entry — VostokMods URLs
+    ///     resolve to their manifest mod_id + source via the
     ///     local registry (same path Build .vmz uses), so
-    ///     pasted URLs come out as proper id+mw_id pairs in
-    ///     the JSON, not as raw numbers.
+    ///     pasted URLs come out as proper id+source pairs in
+    ///     the JSON, not as raw URLs.
     ///
-    /// Dedup is by mod_id (case-insensitive) primary, MW id
+    /// Dedup is by mod_id (case-insensitive) primary, source
     /// secondary — so the same mod ticked AND pasted as a URL
     /// only shows up once.</summary>
     private void ExportModPackJson()
@@ -1456,23 +1487,22 @@ public class ModPackagerDialog : Form
         var mainModId  = _modIdBox.Text.Trim();
         var mainName   = _nameBox.Text.Trim();
         var mainVer    = _versionBox.Text.Trim();
-        var mainMwId   = ManifestEditor.ParseModWorkshopIdInput(
-            _mwIdBox.Text.Trim());
+        if (!TryReadMainSource(out var mainSource)) return;
 
         var entries = new List<ImportEntry>();
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenMw  = new HashSet<int>();
+        var seenSources = new HashSet<ModSource>();
 
         void AddEntry(ImportEntry e)
         {
-            // Dedup: same mod_id OR same MW id collapses to one.
+            // Dedup: same mod_id OR same source collapses to one.
             if (!string.IsNullOrEmpty(e.ModId))
             {
                 if (!seenIds.Add(e.ModId)) return;
             }
-            if (e.ModWorkshopId > 0)
+            if (e.SourceRef.IsValid)
             {
-                if (!seenMw.Add(e.ModWorkshopId))
+                if (!seenSources.Add(e.SourceRef))
                 {
                     // Add back to seenIds to keep predicate stable.
                     if (!string.IsNullOrEmpty(e.ModId)) seenIds.Add(e.ModId);
@@ -1492,7 +1522,7 @@ public class ModPackagerDialog : Form
         // packaging a real mod that also bundles deps", and the
         // main entry IS a real mod worth exporting.
         var hasSource = !string.IsNullOrEmpty(_srcPath.Text.Trim());
-        if (hasSource && (!string.IsNullOrEmpty(mainModId) || mainMwId > 0))
+        if (hasSource && (!string.IsNullOrEmpty(mainModId) || mainSource.IsValid))
         {
             // The Main mod is always required — it's the headline
             // of a single-mod pack. Leaving IsOptional null skips
@@ -1502,12 +1532,12 @@ public class ModPackagerDialog : Form
             {
                 ModId         = mainModId,
                 DisplayName   = !string.IsNullOrEmpty(mainName) ? mainName : mainModId,
-                ModWorkshopId = mainMwId,
+                Source        = mainSource.Key,
                 Version       = mainVer,
             });
         }
 
-        // Index dep rows by mod_id for quick MW + name lookup
+        // Index dep rows by mod_id for quick source + name lookup
         // when a tick is set.
         var depByModId = _depRows.ToDictionary(
             r => r.ModId, StringComparer.OrdinalIgnoreCase);
@@ -1522,7 +1552,7 @@ public class ModPackagerDialog : Form
                 {
                     ModId         = r.ModId,
                     DisplayName   = r.DisplayName,
-                    ModWorkshopId = r.ModWorkshopId,
+                    Source        = r.Source.Key,
                     // Only emit the flag when truly optional —
                     // keeps required entries' JSON clean and
                     // round-trips cleanly with pre-flag exports.
@@ -1546,24 +1576,22 @@ public class ModPackagerDialog : Form
         {
             foreach (var token in ParseCustomList(raw))
             {
-                var (id, mwForSources) = ResolveCustomDepEntry(token);
-                if (string.IsNullOrEmpty(id) && mwForSources <= 0) continue;
-                // ResolveCustomDepEntry returns either (slug, 0) for
-                // typed slugs we couldn't resolve to a MW id, or
-                // (slug, mw) when we matched against the registry,
-                // or (numeric_string, mw) when the MW id wasn't
-                // resolvable to a slug. The JSON entry mirrors the
+                var (id, depSource, idIsManifest) = ResolveCustomDepEntry(token);
+                if (string.IsNullOrEmpty(id) && !depSource.IsValid) continue;
+                // ResolveCustomDepEntry returns either (mod_id, None)
+                // for typed ids we couldn't resolve to a source, or
+                // (mod_id, source) when we matched against the
+                // registry, or (slug, source) when the source wasn't
+                // resolvable to a mod_id. The JSON entry mirrors the
                 // best info we have.
-                string entryId = id;
-                int mwId = mwForSources;
-                // If id is purely numeric (unresolved MW fallback),
-                // leave it empty in the JSON — recipient resolves
-                // via mod_workshop_id alone.
-                if (int.TryParse(entryId, out _)) entryId = "";
+                // If id is only the slug (unresolved source
+                // fallback), leave it empty in the JSON — recipient
+                // resolves via source alone.
+                string entryId = idIsManifest ? id : "";
                 AddEntry(new ImportEntry
                 {
                     ModId         = entryId,
-                    ModWorkshopId = mwId,
+                    Source        = depSource.Key,
                     // Same null-when-required rule — keeps the
                     // emitted JSON minimal.
                     IsOptional    = isOptional ? true : (bool?)null,
@@ -1727,12 +1755,12 @@ public class ModPackagerDialog : Form
             // manifest fields as the first mod entry even when no
             // source was set. Signature: an entry whose
             // display_name matches the pack's top-level `name` AND
-            // has no mod_workshop_id. Real mods can share a name
-            // with the pack but they'll have an MW id; the no-MW
-            // + name-match pair is unambiguous "this is the pack
+            // has no source. Real mods can share a name with the
+            // pack but they'll have a source; the no-source +
+            // name-match pair is unambiguous "this is the pack
             // talking about itself." Skip with a log so the user
             // sees what happened.
-            if (entry.ModWorkshopId <= 0
+            if (!entry.SourceRef.IsValid
                 && !string.IsNullOrEmpty(import.Name)
                 && !string.IsNullOrEmpty(entry.DisplayName)
                 && string.Equals(entry.DisplayName, import.Name,
@@ -1752,15 +1780,15 @@ public class ModPackagerDialog : Form
             // remain a separate manual add path for installed-only
             // mods the user wants in the pack.
             //
-            // Prefer the mod_id SLUG over the numeric MW id since
-            // the slug is the readable identifier. MW id is
-            // preserved separately via _modIdToMwIndex below, so
-            // re-export still emits it.
+            // Prefer the mod_id over the VostokMods URL since the
+            // mod_id is what mod.txt carries. The source is
+            // preserved separately via _modIdToSourceIndex below,
+            // so re-export still emits it.
             string? line = null;
             if (!string.IsNullOrEmpty(entry.ModId))
                 line = entry.ModId;
-            else if (entry.ModWorkshopId > 0)
-                line = entry.ModWorkshopId.ToString();
+            else if (entry.SourceRef.IsValid)
+                line = entry.SourceRef.PageUrl;
             else
                 continue;
 
@@ -1771,15 +1799,15 @@ public class ModPackagerDialog : Form
             if (optional) { customOptLines.Add(line); optCount++; }
             else          { customReqLines.Add(line); reqCount++; }
 
-            // Persist the JSON's (slug → MW id) mapping into the
+            // Persist the JSON's (mod_id → source) mapping into the
             // packager's index so the next Export round-trips the
-            // MW id even though the textbox only shows the slug.
+            // source even though the textbox only shows the mod_id.
             // Without this, reopen → re-export would silently drop
-            // the MW id for any custom-text entry whose mod isn't
+            // the source for any custom-text entry whose mod isn't
             // also installed locally.
             if (!string.IsNullOrEmpty(entry.ModId)
-                && entry.ModWorkshopId > 0)
-                _modIdToMwIndex[entry.ModId] = entry.ModWorkshopId;
+                && entry.SourceRef.IsValid)
+                _modIdToSourceIndex[entry.ModId] = entry.SourceRef;
         }
         _customReqBox.Text = string.Join(Environment.NewLine, customReqLines);
         _customOptBox.Text = string.Join(Environment.NewLine, customOptLines);

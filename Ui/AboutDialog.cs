@@ -156,8 +156,8 @@ public class AboutDialog : Form
             Margin        = new Padding(0, 0, 0, 12),
         };
         linksPanel.Controls.Add(BuildLink(
-            "Road to Vostok on ModWorkshop",
-            "https://modworkshop.net/g/roadtovostok"));
+            "RTV Mod Manager on GitHub",
+            "https://github.com/RTVmods/RTV-Mod-Manager"));
         linksPanel.Controls.Add(BuildLink(
             "Road to Vostok (game site)",
             "https://www.roadtovostok.com"));

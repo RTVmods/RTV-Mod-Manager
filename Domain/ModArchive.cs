@@ -11,7 +11,7 @@
 //     "autoload":      {<Name>: <res:// path>, ...},
 //     "hooks":         {<res:// target>: <method>, ...},
 //     "script_extend": {<res:// target>: <res:// override>, ...},
-//     "updates":       {modworkshop: <int>, ...},
+//     "updates":       {source: "vostokmods:<slug>", ...},
 //   }
 // Sections that aren't present in the file are simply absent from the dict.
 
@@ -117,8 +117,10 @@ public class ModArchive : IDisposable
         => int.TryParse(GetMod("priority"), out var p) ? p : 0;
     public string ModDescription
         => GetMod("description");
-    public int ModWorkshopId
-        => int.TryParse(GetUpdates("modworkshop"), out var i) ? i : 0;
+    /// <summary>The source declared in `[updates] source=`, or
+    /// <see cref="ModSource.None"/>.</summary>
+    public ModSource Source
+        => ModSource.Parse(GetUpdates("source"));
 
     private string GetMod(string key)
     {

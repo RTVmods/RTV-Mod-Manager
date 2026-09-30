@@ -45,13 +45,13 @@ public static class ModLibrary
         public string Version       { get; init; } = "";
         public string DisplayName   { get; init; } = "";
         public long   SizeBytes     { get; init; }
-        /// <summary>ModWorkshop numeric id from this archive's
-        /// `[updates] modworkshop`, or 0 when absent. Surfaced so
-        /// callers don't need to re-open the .vmz just to pull
-        /// the MW id — `ModLibrary.List` already opens each archive
-        /// once for the manifest read, so this is essentially free.
+        /// <summary>The source this archive declares in
+        /// `[updates] source`, or none. Surfaced so callers don't
+        /// need to re-open the .vmz just to read it —
+        /// `ModLibrary.List` already opens each archive once for
+        /// the manifest read, so this is essentially free.
         /// </summary>
-        public int    ModWorkshopId { get; init; }
+        public ModSource Source   { get; init; }
     }
 
     /// <summary>Deterministic path for a (modId, version) pair.
@@ -132,7 +132,7 @@ public static class ModLibrary
                 Version       = arch.ModVersion,
                 DisplayName   = string.IsNullOrEmpty(arch.ModName) ? arch.ModId : arch.ModName,
                 SizeBytes     = size,
-                ModWorkshopId = arch.ModWorkshopId,
+                Source        = arch.Source,
             });
         }
         return result;

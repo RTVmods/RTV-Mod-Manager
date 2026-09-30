@@ -26,34 +26,31 @@ public class Settings
     /// Empty = use the hardcoded Steam default.</summary>
     public string ModsDir { get; set; } = "";
 
-    /// <summary>Snapshot of the most recent ModWorkshop /mods/versions
-    /// response. Keyed by mod_workshop_id (as string for JSON
-    /// compatibility), value is the latest version string.</summary>
+    /// <summary>Snapshot of the most recent VostokMods version check.
+    /// Keyed by source key ("vostokmods:&lt;slug&gt;"), value is the
+    /// latest version string.</summary>
     public Dictionary<string, string> CachedVersions { get; set; } = new();
 
     /// <summary>ISO-8601 (round-trip) timestamp of when CachedVersions
     /// was last refreshed. Empty when no check has run yet.</summary>
     public string CacheTimestamp { get; set; } = "";
 
-    /// <summary>Latest version string published for the mod manager
-    /// itself on ModWorkshop (modid 56801). Empty when no check has
-    /// run yet. We use the same /mods/versions endpoint we use for
-    /// every other tracked mod — the manager just isn't a mod in the
-    /// mods grid, so it gets its own status row + cache slot.</summary>
-    public string ManagerLatestVersion { get; set; } = "";
+    /// <summary>Version of the mod manager's latest GitHub release.
+    /// Empty when no check has run yet or nothing is published.</summary>
+    public string ManagerReleaseVersion { get; set; } = "";
 
     /// <summary>ISO-8601 timestamp of the last successful manager
     /// version check. We re-poll once per 24h, same TTL as MML.</summary>
-    public string ManagerCheckedAt { get; set; } = "";
+    public string ManagerReleaseCheckedAt { get; set; } = "";
 
     [JsonIgnore]
     public bool IsManagerCacheFresh
     {
         get
         {
-            if (string.IsNullOrEmpty(ManagerLatestVersion)) return false;
+            if (string.IsNullOrEmpty(ManagerReleaseVersion)) return false;
             if (!DateTime.TryParse(
-                    ManagerCheckedAt, null,
+                    ManagerReleaseCheckedAt, null,
                     System.Globalization.DateTimeStyles.RoundtripKind,
                     out var t)) return false;
             return (DateTime.UtcNow - t) < TimeSpan.FromHours(24);
@@ -87,9 +84,9 @@ public class Settings
         }
     }
 
-    /// <summary>Snapshot of mod descriptions fetched from
-    /// /mods/&lt;id&gt;. Keyed by mod_workshop_id (as string for JSON
-    /// compatibility), value is the description text. Populated
+    /// <summary>Snapshot of mod descriptions fetched from VostokMods.
+    /// Keyed by source key ("vostokmods:&lt;slug&gt;"), value is the
+    /// description text. Populated
     /// lazily — only mods whose description has been viewed (or
     /// proactively prefetched) end up here. Refreshed independently
     /// of CachedVersions; no TTL beyond "user clicked refresh".</summary>
@@ -107,7 +104,7 @@ public class Settings
     public int WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
 
-    /// <summary>Persisted bounds of the embedded ModWorkshop browser
+    /// <summary>Persisted bounds of the embedded VostokMods browser
     /// window, so it reopens at the size/position the user last left it.
     /// Zero width/height = "use the default" (first run). Validated
     /// against current screens at open time, same as the main window.</summary>
@@ -229,7 +226,14 @@ public class Settings
             {
                 var json = File.ReadAllText(Path);
                 var s = JsonSerializer.Deserialize<Settings>(json, _opts);
-                if (s != null) return s;
+                if (s != null)
+                {
+                    // Both caches are keyed by source; anything keyed
+                    // another way can never be looked up.
+                    DropUnkeyed(s.CachedVersions);
+                    DropUnkeyed(s.CachedDescriptions);
+                    return s;
+                }
             }
         }
         catch
@@ -237,6 +241,12 @@ public class Settings
             // First-run, corrupted file, perms issue — fall through to defaults.
         }
         return new Settings();
+    }
+
+    private static void DropUnkeyed(Dictionary<string, string> cache)
+    {
+        foreach (var key in cache.Keys.ToList())
+            if (!Domain.ModSource.TryParse(key, out _)) cache.Remove(key);
     }
 
     public void Save()

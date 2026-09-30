@@ -17,7 +17,7 @@
 // When a profile is applied, mods with a bundled archive are restored
 // from the bundle (deterministic — exact version pinning). Mods without
 // a bundle (legacy JSON profiles, or save-failed entries) fall back to
-// downloading the latest from ModWorkshop.
+// downloading from VostokMods.
 
 using System.IO.Compression;
 using System.Text.Json;
@@ -39,10 +39,13 @@ public class ProfileMod
     public string Version     { get; set; } = "";
     public bool   IsEnabled   { get; set; }
     public int    Priority    { get; set; }
-    /// <summary>ModWorkshop numeric ID (0 = unknown). Used as the
-    /// fallback download source when the profile has no bundled
-    /// archive for this mod.</summary>
-    public int    ModWorkshopId { get; set; }
+    /// <summary>Source key ("vostokmods:&lt;slug&gt;", "" = unknown).
+    /// Used as the fallback download source when the profile has no
+    /// bundled archive for this mod.</summary>
+    public string Source      { get; set; } = "";
+
+    [JsonIgnore]
+    public ModSource SourceRef => ModSource.Parse(Source);
     /// <summary>Filename (no path) of the bundled .vmz inside this
     /// profile's `mods/` subfolder. Empty for metadata-only entries —
     /// directory mods, save-failures, or legacy JSON-only profiles.</summary>
@@ -164,7 +167,7 @@ public class ModProfile
                 if (p != null)
                 {
                     // No FolderPath — bundles aren't available, the
-                    // apply dialog will fall back to MW downloads.
+                    // apply dialog will fall back to downloads.
                     result.Add(p);
                 }
             }
@@ -375,7 +378,7 @@ public class ModProfile
                 Version         = m.Version,
                 IsEnabled       = m.IsEnabled,
                 Priority        = m.Priority,
-                ModWorkshopId   = m.ModWorkshopId,
+                Source          = m.Source,
                 ArchiveFileName = "", // recomputed below per library lookup
             }).ToList(),
         };
@@ -454,7 +457,7 @@ public class ModProfile
                     Version       = e.Version,
                     IsEnabled     = e.IsEnabled,
                     Priority      = e.Priority,
-                    ModWorkshopId = e.ModWorkshopId,
+                    Source        = e.Source.Key,
                 })
                 .ToList(),
         };

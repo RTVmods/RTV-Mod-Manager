@@ -23,7 +23,7 @@ public class ModEntry
     ///   "autoload" → {Name → res:// path}
     ///   "hooks" → {res:// target → method}
     ///   "script_extend" → {res:// target → res:// override}
-    ///   "updates" → {modworkshop → int}</summary>
+    ///   "updates" → {source → "vostokmods:&lt;slug&gt;"}</summary>
     public Dictionary<string, Dictionary<string, string>> Manifest { get; set; } = new();
 
     /// <summary>Archive-relative file paths (no leading slash).</summary>
@@ -50,8 +50,18 @@ public class ModEntry
     /// reaching into the manifest dictionary.</summary>
     public int Priority { get; set; }
 
-    public int ModWorkshopId
-        => int.TryParse(GetSection("updates", "modworkshop"), out var i) ? i : 0;
+    /// <summary>The source the mod's own mod.txt declares in
+    /// `[updates] source="vostokmods:&lt;slug&gt;"`, or
+    /// <see cref="ModSource.None"/>. A legacy `modworkshop=` line is
+    /// not a source: that site no longer hosts the game's mods.</summary>
+    public ModSource DeclaredSource
+        => ModSource.Parse(GetSection("updates", "source"));
+
+    /// <summary>Where this mod is downloaded and update-checked from.
+    /// ModRegistry.Scan sets it using the loader's order: the mod.txt
+    /// declaration wins, then the `[mod_sources]` record in
+    /// mod_config.cfg, else none.</summary>
+    public ModSource Source { get; set; }
 
     public Dictionary<string, string> Autoloads => GetSectionDict("autoload");
     public Dictionary<string, string> Hooks => GetSectionDict("hooks");
@@ -71,8 +81,8 @@ public class ModEntry
     private List<string> ParseDepList(string key)
         => ParseCsvOrArray(GetSection("dependencies", key));
 
-    /// <summary>Optional sidecar mapping `dep_id → ModWorkshop
-    /// numeric id`, written by the Mod Packager into a
+    /// <summary>Optional sidecar mapping `dep_id → source key`,
+    /// written by the Mod Packager into a
     /// `[dependency_sources]` section in mod.txt. The in-game
     /// loader doesn't read this section (Godot's ConfigFile parser
     /// silently ignores unknown sections), but the manager uses it
@@ -80,28 +90,28 @@ public class ModEntry
     /// without round-tripping to the user for input.
     ///
     /// Why this exists: the standard `[dependencies] required`
-    /// list stores manifest mod_id SLUGS only — there's no public
-    /// MW lookup for "find the mod whose manifest id is X", so
+    /// list stores manifest mod ids only, and the host has no
+    /// lookup for "find the mod whose manifest id is X", so
     /// downloading a missing dep blind isn't possible. By
-    /// recording the (slug, mw_id) pair at pack time, the dep is
+    /// recording the (mod id, source) pair at pack time, the dep is
     /// resolvable end-to-end on first install.
     ///
     /// Format:
     ///   [dependency_sources]
-    ///   mcm = 56781
-    ///   weapon-rig-api = 56123
+    ///   mcm = "vostokmods:mod-configuration-menu"
+    ///   weapon-rig-api = "vostokmods:weapon-rig-api"
     ///
-    /// Empty when the section is absent or every value parses as
-    /// non-positive.</summary>
-    public Dictionary<string, int> DependencySources
+    /// Values that are not a source key (including the numeric ids
+    /// older packs wrote) are skipped.</summary>
+    public Dictionary<string, ModSource> DependencySources
     {
         get
         {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, ModSource>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in GetSectionDict("dependency_sources"))
             {
-                if (int.TryParse(kvp.Value, out var n) && n > 0)
-                    result[kvp.Key] = n;
+                if (ModSource.TryParse(kvp.Value, out var src))
+                    result[kvp.Key] = src;
             }
             return result;
         }

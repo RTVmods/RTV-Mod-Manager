@@ -53,8 +53,11 @@ public static class VostokModsUrl
             return true;
         }
 
-        // A bare slug. Anything that looks like a URL or a path is not one.
-        if (s.IndexOf('/') < 0 && s.IndexOf('.') < 0 && _reBareSlug.IsMatch(s))
+        // A bare slug. Anything that looks like a URL or a path is not
+        // one, and neither is a bare number: slugs are names, and a
+        // number on its own is an id from some other site.
+        if (s.IndexOf('/') < 0 && s.IndexOf('.') < 0 && _reBareSlug.IsMatch(s)
+            && !s.All(char.IsDigit))
         {
             slug = s.ToLowerInvariant();
             return true;

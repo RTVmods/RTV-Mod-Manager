@@ -6,19 +6,19 @@
 // the broken dep mid-launch).
 //
 // What the dialog can do:
-//   • Per-row paste a ModWorkshop URL or numeric id → click Download
-//     → packager fetches via the existing ModWorkshopClient and
+//   • Per-row paste a VostokMods mod page URL or slug → click
+//     Download → the dialog fetches via VostokModsClient and
 //     installs into the mods folder.
-//   • Click "Find on MW" → opens modworkshop.net in the browser with
-//     the dep slug as search input, so the user can locate the mod
-//     and copy its URL.
+//   • Click "Find" → opens vostokmods.net in the browser with
+//     the dep's mod_id as search input, so the user can locate the
+//     mod and copy its URL.
 //   • Skip individual rows or just close the dialog.
 //
 // What the dialog can't do (intentionally):
-//   • Auto-resolve dep slugs → MW ids. There's no public MW lookup
-//     for "find the mod whose manifest id is X", so the user has to
-//     paste the URL themselves. Once they do, download + library-
-//     capture is fully automatic.
+//   • Auto-resolve dep mod_ids → VostokMods slugs. There's no
+//     lookup for "find the mod whose manifest id is X", so the user
+//     has to paste the URL themselves. Once they do, download +
+//     library-capture is fully automatic.
 //
 // Library-resolvable deps are NOT shown here — the caller copies
 // them in automatically before opening this dialog and only passes
@@ -42,34 +42,34 @@ public class MissingDependenciesDialog : Form
     /// downloaded — caller rescans the registry on close.</summary>
     public bool AnyDownloaded { get; private set; }
 
-    private readonly ModWorkshopClient _mw;
+    private readonly VostokModsClient  _vm;
     private readonly string            _modsDir;
     private readonly List<MissingDep>  _deps;
 
     private DataGridView _grid = null!;
     private TextBox      _log  = null!;
 
-    /// <summary>Per-dep MW id hints sourced from the parent mod's
-    /// `[dependency_sources]` section. Pre-fills the MW input
+    /// <summary>Per-dep source hints taken from the parent mod's
+    /// `[dependency_sources]` section. Pre-fills the source input
     /// column so the user can just click Download All instead of
     /// pasting URLs for each dep that the packager already
     /// recorded sources for. Keyed by dep mod_id (case-insensitive).
     /// </summary>
-    private readonly Dictionary<string, int> _knownMwIds;
+    private readonly Dictionary<string, ModSource> _knownSources;
 
     public MissingDependenciesDialog(
-        ModWorkshopClient mw,
+        VostokModsClient  vm,
         string            modsDir,
         IEnumerable<MissingDep> missing,
-        IReadOnlyDictionary<string, int>? knownMwIds = null)
+        IReadOnlyDictionary<string, ModSource>? knownSources = null)
     {
-        _mw      = mw;
+        _vm      = vm;
         _modsDir = modsDir;
-        _knownMwIds = new Dictionary<string, int>(
+        _knownSources = new Dictionary<string, ModSource>(
             StringComparer.OrdinalIgnoreCase);
-        if (knownMwIds != null)
-            foreach (var kvp in knownMwIds)
-                _knownMwIds[kvp.Key] = kvp.Value;
+        if (knownSources != null)
+            foreach (var kvp in knownSources)
+                _knownSources[kvp.Key] = kvp.Value;
         _deps    = missing
             // Required first (the user cares more), then alpha by id.
             .OrderByDescending(d => d.Required)
@@ -120,8 +120,8 @@ public class MissingDependenciesDialog : Form
         var intro = new Label
         {
             Text = $"{req} required + {opt} optional dependency entries weren't found in your "
-                 + "installed mods or your local library. Paste a ModWorkshop URL or numeric id "
-                 + "into the row and click Download. Use “Find on MW” to open a browser search "
+                 + "installed mods or your local library. Paste a VostokMods mod page URL or slug "
+                 + "into the row and click Download. Use “Find” to open a browser search "
                  + "if you don't have the URL handy.",
             AutoSize = true,
             MaximumSize = new Size(950, 0),
@@ -222,7 +222,7 @@ public class MissingDependenciesDialog : Form
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "MwInput", HeaderText = "MW URL or id",
+            Name = "SourceInput", HeaderText = "VostokMods URL or slug",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             MinimumWidth = 200,
         });
@@ -236,7 +236,7 @@ public class MissingDependenciesDialog : Form
         grid.Columns.Add(new DataGridViewButtonColumn
         {
             Name = "FindBtn", HeaderText = "Find", Width = 90,
-            Text = "Find on MW", UseColumnTextForButtonValue = true,
+            Text = "Find", UseColumnTextForButtonValue = true,
         });
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -257,20 +257,20 @@ public class MissingDependenciesDialog : Form
                 : Color.FromArgb(170, 200, 240);
             row.Cells["ModId"].Value    = d.ModId;
             row.Cells["Parent"].Value   = d.ParentName;
-            // Pre-fill MW id if the parent mod's
+            // Pre-fill the slug if the parent mod's
             // [dependency_sources] section recorded one — author
             // packaged this dep with downloadable metadata.
-            if (_knownMwIds.TryGetValue(d.ModId, out var knownMw)
-                && knownMw > 0)
+            if (_knownSources.TryGetValue(d.ModId, out var known)
+                && known.IsValid)
             {
-                row.Cells["MwInput"].Value = knownMw.ToString();
+                row.Cells["SourceInput"].Value = known.Id;
                 row.Cells["Status"].Value  = "Ready (auto-filled)";
                 row.Cells["Status"].Style.ForeColor =
                     Color.FromArgb(170, 200, 240);
             }
             else
             {
-                row.Cells["MwInput"].Value = "";
+                row.Cells["SourceInput"].Value = "";
                 row.Cells["Status"].Value  = "Pending";
             }
         }
@@ -280,7 +280,7 @@ public class MissingDependenciesDialog : Form
             if (e.RowIndex < 0 || e.RowIndex >= _deps.Count) return;
             var col = grid.Columns[e.ColumnIndex].Name;
             if (col == "FindBtn")
-                OpenMwSearch(_deps[e.RowIndex].ModId);
+                OpenSiteSearch(_deps[e.RowIndex].ModId);
             else if (col == "DlBtn")
                 await DownloadRowAsync(e.RowIndex);
         };
@@ -290,14 +290,14 @@ public class MissingDependenciesDialog : Form
 
     // ── Actions ───────────────────────────────────────────────────
 
-    private static void OpenMwSearch(string slug)
+    private static void OpenSiteSearch(string modId)
     {
-        // ModWorkshop search by free text. The slug often differs
+        // VostokMods search by free text. The mod_id often differs
         // from the display name, but it's a useful starting term —
         // landing the user on a search page is faster than them
         // opening a browser and typing it themselves.
-        var url = "https://modworkshop.net/g/roadtovostok?q="
-                + Uri.EscapeDataString(slug);
+        var url = VostokModsUrl.ExploreModsUrl + "?q="
+                + Uri.EscapeDataString(modId);
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -312,35 +312,56 @@ public class MissingDependenciesDialog : Form
     private async Task DownloadRowAsync(int rowIdx)
     {
         var row = _grid.Rows[rowIdx];
-        var input = row.Cells["MwInput"].Value as string ?? "";
-        var mwId  = ManifestEditor.ParseModWorkshopIdInput(input);
-        if (mwId <= 0)
+        var input = row.Cells["SourceInput"].Value as string ?? "";
+        if (!TryParseSourceInput(input, out var source))
         {
-            row.Cells["Status"].Value = "(paste MW URL or id first)";
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                row.Cells["Status"].Value = "(paste URL or slug first)";
+            }
+            else
+            {
+                row.Cells["Status"].Value = "(not a VostokMods URL)";
+                Log($"✗ {_deps[rowIdx].ModId}: “{input.Trim()}” isn't a VostokMods "
+                  + "mod page URL or slug. Expected something like "
+                  + VostokModsUrl.ModPageUrl("mod-name") + " or just the slug.");
+            }
             row.Cells["Status"].Style.ForeColor = Color.FromArgb(245, 180, 110);
             return;
         }
-        await DoDownloadAsync(rowIdx, mwId);
+        await DoDownloadAsync(rowIdx, source);
     }
 
     private async Task DownloadAllAsync()
     {
         for (int i = 0; i < _grid.Rows.Count; i++)
         {
-            var input = _grid.Rows[i].Cells["MwInput"].Value as string ?? "";
-            var mwId  = ManifestEditor.ParseModWorkshopIdInput(input);
-            if (mwId <= 0) continue;
-            await DoDownloadAsync(i, mwId);
+            var input = _grid.Rows[i].Cells["SourceInput"].Value as string ?? "";
+            if (!TryParseSourceInput(input, out var source)) continue;
+            await DoDownloadAsync(i, source);
         }
     }
 
-    private async Task DoDownloadAsync(int rowIdx, int mwId)
+    /// <summary>Reads a row's input as a VostokMods mod page URL or
+    /// slug. A bare number or a URL on another site is rejected: a
+    /// slug is a name, and only vostokmods.net hosts mods.</summary>
+    private static bool TryParseSourceInput(string input, out ModSource source)
+    {
+        source = ModSource.None;
+        var s = (input ?? "").Trim();
+        if (s.Length == 0 || s.All(char.IsDigit)) return false;
+        if (!VostokModsUrl.TryParseSlug(s, out var slug)) return false;
+        source = ModSource.ForSlug(slug);
+        return true;
+    }
+
+    private async Task DoDownloadAsync(int rowIdx, ModSource source)
     {
         var row = _grid.Rows[rowIdx];
         var dep = _deps[rowIdx];
         row.Cells["Status"].Value = "Downloading…";
         row.Cells["Status"].Style.ForeColor = Color.FromArgb(170, 200, 240);
-        Log($"⬇ {dep.ModId} (MW {mwId}) …");
+        Log($"⬇ {dep.ModId} ({source.Id}) …");
         try
         {
             // Use the dep slug as the live filename so the resulting
@@ -355,7 +376,8 @@ public class MissingDependenciesDialog : Form
                 // Apply and this dialog). Bump to a unique name.
                 dest = Path.Combine(_modsDir, MakeUniqueName(fileName));
             }
-            await Task.Run(() => _mw.DownloadLatestAsync(mwId, dest));
+            await Task.Run(() => _vm.DownloadAsync(source.Id, dest));
+            DownloadedSources.Record(dest, source);
 
             // Library-snapshot so future profile switches don't
             // have to redownload.

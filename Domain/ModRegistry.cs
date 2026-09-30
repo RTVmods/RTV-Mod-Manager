@@ -37,13 +37,19 @@ public class ModRegistry
 
     /// <summary>Overlays mod_config.cfg's active-profile state onto
     /// the freshly-scanned entries: cfg-driven IsEnabled, cfg-driven
-    /// Priority. Files in `mods/Disabled/` keep IsEnabled = false
+    /// Priority, and the recorded source for mods whose mod.txt
+    /// declares none. Files in `mods/Disabled/` keep IsEnabled = false
     /// regardless — the loader doesn't see them, so their cfg state
     /// (if any) is irrelevant.</summary>
     private void ApplyCfg(ModConfig? cfg)
     {
         foreach (var e in Entries)
         {
+            var declared = e.DeclaredSource;
+            e.Source = declared.IsValid || cfg == null
+                ? declared
+                : cfg.GetModSource(e.ModId, e.Version);
+
             // Default Priority = DeclaredPriority (mod.txt) before
             // cfg overlay; cfg.Priority falls back to DeclaredPriority
             // when the cfg has no entry for this mod.

@@ -5,7 +5,7 @@
 //     a whole loadout.
 //   • ModListImport JSON = a batch add — merges entries into the
 //     CURRENT active profile, downloading anything not already on
-//     disk via the listed ModWorkshop ids.
+//     disk from the listed VostokMods sources.
 //
 // On-disk shape (the field names are JSON-snake-case to mirror the
 // rest of the JSON we accept; .NET maps via JsonPropertyName):
@@ -72,8 +72,16 @@ public class ImportEntry
     [JsonPropertyName("display_name")]
     public string DisplayName { get; set; } = "";
 
-    [JsonPropertyName("mod_workshop_id")]
-    public int ModWorkshopId { get; set; }
+    /// <summary>"vostokmods:&lt;slug&gt;", a mod page URL or a bare
+    /// slug.</summary>
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
+    [JsonIgnore]
+    public ModSource SourceRef
+        => VostokModsUrl.TryParseSlug(Source, out var slug)
+            ? ModSource.ForSlug(slug)
+            : ModSource.None;
 
     [JsonPropertyName("version")]
     public string Version { get; set; } = "";
@@ -163,7 +171,7 @@ public class ModListImport
     /// Field merging: the FIRST occurrence's fields are kept; later
     /// occurrences fill in missing values (so a parent that names a
     /// child by mod_id only, plus a sibling re-listing the same
-    /// mod_id with a mod_workshop_id, still gets the MW id).</summary>
+    /// mod_id with a source, still gets the source).</summary>
     public List<FlattenedEntry> Flatten()
     {
         var byKey   = new Dictionary<string, FlattenedEntry>(
@@ -174,15 +182,15 @@ public class ModListImport
         static string KeyFor(ImportEntry e)
             => !string.IsNullOrEmpty(e.ModId)
                 ? e.ModId
-                : (e.ModWorkshopId > 0 ? $"mw#{e.ModWorkshopId}" : "");
+                : e.SourceRef.Key;
 
         static string LabelFor(ImportEntry e)
             => !string.IsNullOrEmpty(e.DisplayName)
                 ? e.DisplayName
                 : (!string.IsNullOrEmpty(e.ModId)
                     ? e.ModId
-                    : (e.ModWorkshopId > 0
-                        ? $"MW {e.ModWorkshopId}"
+                    : (e.SourceRef.IsValid
+                        ? e.SourceRef.Id
                         : "(unknown)"));
 
         void Walk(ImportEntry e)
@@ -210,7 +218,7 @@ public class ModListImport
                     {
                         ModId         = e.ModId,
                         DisplayName   = e.DisplayName,
-                        ModWorkshopId = e.ModWorkshopId,
+                        Source        = e.Source,
                         Version       = e.Version,
                         IsEnabled     = e.IsEnabled,
                         Priority      = e.Priority,
@@ -226,8 +234,8 @@ public class ModListImport
                 if (string.IsNullOrEmpty(first.DisplayName)
                     && !string.IsNullOrEmpty(e.DisplayName))
                     first.DisplayName = e.DisplayName;
-                if (first.ModWorkshopId == 0 && e.ModWorkshopId > 0)
-                    first.ModWorkshopId = e.ModWorkshopId;
+                if (!first.SourceRef.IsValid && e.SourceRef.IsValid)
+                    first.Source = e.Source;
                 if (string.IsNullOrEmpty(first.Version)
                     && !string.IsNullOrEmpty(e.Version))
                     first.Version = e.Version;

@@ -78,9 +78,42 @@ public static class ManifestEditor
         return result;
     }
 
-    /// <summary>Convenience wrapper for `[updates] modworkshop = N`.</summary>
-    public static string SetUpdatesModworkshop(string modTxt, int modworkshopId)
-        => SetValue(modTxt, "updates", "modworkshop", modworkshopId.ToString());
+    /// <summary>Writes `[updates] source = "vostokmods:&lt;slug&gt;"`,
+    /// the line the mod loader reads to find a mod's updates, and
+    /// drops a legacy `modworkshop = N` line from the same section.
+    /// The value is quoted: mod.txt values must be valid Godot
+    /// Variants.</summary>
+    public static string SetUpdatesSource(string modTxt, ModSource source)
+    {
+        modTxt = RemoveKey(modTxt, "updates", "modworkshop");
+        return SetValue(modTxt, "updates", "source", "\"" + source.Key + "\"");
+    }
+
+    /// <summary>Deletes `key` from `[section]`, leaving the rest of
+    /// the file untouched. No-op when the key is absent.</summary>
+    public static string RemoveKey(string modTxt, string section, string key)
+    {
+        var newline = modTxt.Contains("\r\n") ? "\r\n" : "\n";
+        var lines = modTxt.Replace("\r\n", "\n").Split('\n').ToList();
+        var header = $"[{section}]";
+        var keyRegex = new Regex($@"^{Regex.Escape(key)}\s*=", RegexOptions.IgnoreCase);
+        var inSection = false;
+        var removed = false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var t = lines[i].Trim();
+            if (t.StartsWith("[") && t.EndsWith("]") && t.Length >= 2)
+            {
+                inSection = string.Equals(t, header, StringComparison.OrdinalIgnoreCase);
+            }
+            else if (inSection && keyRegex.IsMatch(t))
+            {
+                lines.RemoveAt(i--);
+                removed = true;
+            }
+        }
+        return removed ? string.Join(newline, lines) : modTxt;
+    }
 
     /// <summary>Convenience wrapper for `[mod] priority = N`.</summary>
     public static string SetModPriority(string modTxt, int priority)
@@ -127,25 +160,25 @@ public static class ManifestEditor
     }
 
     /// <summary>Rewrites `[dependency_sources]` from scratch using
-    /// `sources` (mod_id → MW numeric id). Removes the old
+    /// `sources` (mod_id → source). Removes the old
     /// section first so deletions take effect — without that,
     /// keys removed between packs would stick around. Empty
     /// `sources` drops the section entirely, keeping mod.txt
-    /// clean when the user hasn't recorded any MW ids for deps.
+    /// clean when the user hasn't recorded any sources for deps.
     /// </summary>
     public static string SetDependencySourcesSection(
         string modTxt,
-        IReadOnlyDictionary<string, int> sources)
+        IReadOnlyDictionary<string, ModSource> sources)
     {
         modTxt = RemoveSection(modTxt, "dependency_sources");
-        if (sources.Count == 0) return modTxt;
+        if (!sources.Any(k => k.Value.IsValid)) return modTxt;
         // Stable ordering so the file diffs cleanly across packs
         // — git-friendly + comparison-friendly for the user.
-        foreach (var kvp in sources.OrderBy(
+        foreach (var kvp in sources.Where(k => k.Value.IsValid).OrderBy(
             k => k.Key, StringComparer.OrdinalIgnoreCase))
         {
             modTxt = SetValue(modTxt, "dependency_sources",
-                kvp.Key, kvp.Value.ToString());
+                kvp.Key, "\"" + kvp.Value.Key + "\"");
         }
         return modTxt;
     }
@@ -164,25 +197,5 @@ public static class ManifestEditor
     {
         var quoted = modIds.Select(id => "\"" + id.Replace("\"", "\\\"") + "\"");
         return SetValue(modTxt, "dependencies", kind, "[" + string.Join(", ", quoted) + "]");
-    }
-
-    private static readonly Regex _modWorkshopUrlRe = new(
-        @"modworkshop\.net/mods?/(\d+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    /// <summary>Parses a user-entered ModWorkshop reference. Accepts:
-    ///   - bare numeric id ("56398")
-    ///   - full URL ("https://modworkshop.net/mod/56398/some-slug")
-    ///   - URL fragments ("modworkshop.net/mod/56398")
-    /// Returns 0 if nothing valid was found.</summary>
-    public static int ParseModWorkshopIdInput(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return 0;
-        input = input.Trim();
-        if (int.TryParse(input, out var n) && n > 0) return n;
-        var m = _modWorkshopUrlRe.Match(input);
-        if (m.Success && int.TryParse(m.Groups[1].Value, out var id) && id > 0)
-            return id;
-        return 0;
     }
 }

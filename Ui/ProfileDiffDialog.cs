@@ -8,7 +8,7 @@
 //
 // Supports copying rows between the two profiles — pick rows, then
 // "Copy → B" or "Copy ← A" to transplant the metadata (mod_id /
-// display_name / version / priority / is_enabled / mod_workshop_id).
+// display_name / version / priority / is_enabled / source).
 // For "only-in-one" rows the destination gets a brand-new ProfileMod;
 // for "different" rows the destination's existing ProfileMod fields
 // are overwritten with the source's values. After every copy the
@@ -332,7 +332,7 @@ public class ProfileDiffDialog : Form
                 // ArchiveFileName — bundled archives belong to
                 // the source profile's mods/ folder; the
                 // destination gets a metadata-only entry that
-                // resolves via library / MW download on apply.
+                // resolves via library / VostokMods download on apply.
                 dst.Mods.Add(new ProfileMod
                 {
                     ModId           = srcPm.ModId,
@@ -340,7 +340,7 @@ public class ProfileDiffDialog : Form
                     Version         = srcPm.Version,
                     IsEnabled       = srcPm.IsEnabled,
                     Priority        = srcPm.Priority,
-                    ModWorkshopId   = srcPm.ModWorkshopId,
+                    Source          = srcPm.Source,
                     ArchiveFileName = "",
                 });
             }
@@ -350,8 +350,8 @@ public class ProfileDiffDialog : Form
                 dstPm.Version       = srcPm.Version;
                 dstPm.IsEnabled     = srcPm.IsEnabled;
                 dstPm.Priority      = srcPm.Priority;
-                if (srcPm.ModWorkshopId > 0)
-                    dstPm.ModWorkshopId = srcPm.ModWorkshopId;
+                if (srcPm.SourceRef.IsValid)
+                    dstPm.Source = srcPm.Source;
             }
             copied++;
         }

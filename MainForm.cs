@@ -1,6 +1,6 @@
 // Top-level window. v0.3.3 — interactive mods grid: per-row Toggle
 // (enable/disable, moves the .vmz to/from Disabled/) and Update
-// (downloads the latest .vmz from ModWorkshop, swaps it in place).
+// (downloads the latest .vmz from VostokMods, swaps it in place).
 //
 // Conflicts column is still a read-only ListBox; AI Resolve buttons +
 // Settings panel + resolution dialog land in the next commit.
@@ -34,7 +34,7 @@ public class MainForm : Form
 #if AI_RESOLVER
     private readonly ClaudeCodeRunner _claude = new();
 #endif
-    private readonly ModWorkshopClient _mw = new();
+    private readonly VostokModsClient _vm = new();
 #if AI_RESOLVER
     private readonly ConflictResolver _resolver;
 #endif
@@ -45,9 +45,16 @@ public class MainForm : Form
     /// toggles or re-prioritises a mod.</summary>
     private ModConfig _modConfig = new();
 
-    /// <summary>mod_workshop_id → latest version (populated after the
-    /// /mods/versions call).</summary>
-    private readonly Dictionary<int, string> _latestVersions = new();
+    /// <summary>Source key ("vostokmods:&lt;slug&gt;") → latest
+    /// version on VostokMods (populated by CheckUpdatesAsync).</summary>
+    private readonly Dictionary<string, string> _latestVersions
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>VostokMods mod UUID → slug, from the site's listing.
+    /// A mod.txt may name its source by either, so this lets the two
+    /// forms be compared. Empty until the listing has been read.</summary>
+    private readonly Dictionary<string, string> _vmSlugById
+        = new(StringComparer.OrdinalIgnoreCase);
     private List<ConflictDetector.Conflict> _lastConflicts = new();
 
     /// <summary>Backing list for the mods grid, in display order. The
@@ -88,12 +95,15 @@ public class MainForm : Form
     private Label _checkpointLabel = null!;
     private readonly MmlVersionChecker _mml = new();
 
-    /// <summary>The mod manager's own ModWorkshop ID. The page lives
-    /// at https://modworkshop.net/mod/56801. Used by
+    /// <summary>The mod manager's own releases on GitHub. Used by
     /// CheckManagerUpdateAsync to compare the assembly version
     /// against the latest published release, surfacing an "update
     /// available" hint in the Manager status row.</summary>
-    private const int ManagerModWorkshopId = 56801;
+    private readonly ManagerReleaseChecker _managerReleases = new();
+
+    /// <summary>True when the last check found that the manager has
+    /// no published release at all.</summary>
+    private bool _managerNoRelease;
     private DataGridView _modsGrid = null!;
     private DataGridView _conflictsGrid = null!;
     private SplitContainer _split = null!;
@@ -265,9 +275,50 @@ public class MainForm : Form
     private bool Rescan()
     {
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
+        RecordDownloadedSources();
         var ok = _registry.Scan(ModsDir, _modConfig);
         AutoAdoptOrphansIntoActiveProfile();
+        BackfillProfileSources();
         return ok;
+    }
+
+    /// <summary>Writes the source of every mod downloaded since the
+    /// last scan into mod_config.cfg's [mod_sources], which is where
+    /// the registry (and the in-game loader) look up a mod whose
+    /// mod.txt declares no source.</summary>
+    private void RecordDownloadedSources()
+    {
+        var pending = DownloadedSources.Drain();
+        if (pending.Count == 0) return;
+        var dirty = false;
+        foreach (var (modId, version, source) in pending)
+        {
+            if (_modConfig.GetModSource(modId, version) == source) continue;
+            _modConfig.SetModSource(modId, version, source);
+            dirty = true;
+        }
+        if (!dirty) return;
+        try { _modConfig.Save(); }
+        catch { /* best-effort — the mod can be linked again by hand */ }
+    }
+
+    /// <summary>Copies each live mod's source into its active-profile
+    /// entry when the profile has none, so a profile applied on another
+    /// machine knows where to download the mod from.</summary>
+    private void BackfillProfileSources()
+    {
+        if (_activeProfile == null) return;
+        var dirty = false;
+        foreach (var pm in _activeProfile.Mods)
+        {
+            if (pm.SourceRef.IsValid) continue;
+            var entry = _registry.FindById(pm.ModId);
+            if (entry == null || !entry.Source.IsValid) continue;
+            pm.Source = entry.Source.Key;
+            dirty = true;
+        }
+        if (!dirty) return;
+        try { _activeProfile.SaveMetadataOnly(); } catch { /* best-effort */ }
     }
 
     /// <summary>Reconcile the registry against the active profile:
@@ -318,7 +369,7 @@ public class MainForm : Form
                 Version       = entry.Version,
                 IsEnabled     = entry.IsEnabled,
                 Priority      = entry.DeclaredPriority,
-                ModWorkshopId = entry.ModWorkshopId,
+                Source        = entry.Source.Key,
             });
             profileIds.Add(entry.ModId);
 
@@ -917,11 +968,12 @@ public class MainForm : Form
         supportBtn.Click += (_, _) => OpenSupportPackageDialog();
         btnFlow.Controls.Add(supportBtn);
 
-        // Browse ModWorkshop — opens the embedded WebView2 browser on
-        // modworkshop.net; downloading a .vmz (or clicking "Install this
+        // Browse VostokMods — opens the embedded WebView2 browser on
+        // vostokmods.net; downloading a .vmz (or clicking "Install this
         // mod") routes straight into the install pipeline. Right-click
-        // for the no-browser URL-paste install fallback.
-        var browseBtn = ThemedButton("🌐 Browse MW…");
+        // for the no-browser URL-paste install fallback and for linking
+        // installed mods to their VostokMods pages.
+        var browseBtn = ThemedButton("🌐 Browse Mods…");
         browseBtn.Width = 160;
         browseBtn.Height = 40;
         browseBtn.AutoSize = false;
@@ -929,9 +981,12 @@ public class MainForm : Form
         browseBtn.Margin = new Padding(0, 0, 8, 0);
         browseBtn.Click += (_, _) => OpenModBrowserDialog();
         var browseMenu = new ContextMenuStrip();
-        var urlInstallItem = new ToolStripMenuItem("Install from ModWorkshop URL…");
-        urlInstallItem.Click += async (_, _) => await InstallFromModWorkshopUrlAsync();
+        var urlInstallItem = new ToolStripMenuItem("Install from VostokMods URL…");
+        urlInstallItem.Click += async (_, _) => await InstallFromVostokModsUrlAsync();
         browseMenu.Items.Add(urlInstallItem);
+        var autoLinkItem = new ToolStripMenuItem("Link installed mods to VostokMods…");
+        autoLinkItem.Click += async (_, _) => await AutoLinkModsAsync();
+        browseMenu.Items.Add(autoLinkItem);
         browseBtn.ContextMenuStrip = browseMenu;
         btnFlow.Controls.Add(browseBtn);
 
@@ -969,7 +1024,13 @@ public class MainForm : Form
         _modsLabel = NewStatus("Mods: scanning ...");
         root.Controls.Add(_modsLabel, 0, 3);
 
+        // Clicking the row offers to link mods that have no VostokMods
+        // source yet (they can't be update-checked until they do).
         _updatesLabel = NewStatus("Updates: —");
+        _updatesLabel.Click += async (_, _) =>
+        {
+            if (!_busy && UnlinkedMods().Count > 0) await AutoLinkModsAsync();
+        };
         root.Controls.Add(_updatesLabel, 0, 4);
 
         _conflictsLabel = NewStatus("Conflicts: —");
@@ -986,11 +1047,9 @@ public class MainForm : Form
         _mmlLabel.Click += async (_, _) => await HandleMmlClickAsync();
         root.Controls.Add(_mmlLabel, 0, 6);
 
-        // Mod-manager self-update indicator. Same data flow as the
-        // per-mod update column — polls ModWorkshop /mods/versions
-        // with our own modid (ManagerModWorkshopId) and compares
-        // against the assembly version. Clickable: opens the mod page
-        // so the user can grab the new .exe.
+        // Mod-manager self-update indicator. Compares the latest
+        // GitHub release against the assembly version. Clickable:
+        // offers the auto-update, or opens the releases page.
         _managerLabel = NewStatus("Manager: checking …");
         _managerLabel.Cursor = Cursors.Hand;
         _managerLabel.Click += async (_, _) => await HandleManagerLabelClickAsync();
@@ -1327,10 +1386,10 @@ public class MainForm : Form
         // Single icon-style Update column. Five cell states:
         //   "⬆"  in orange    — outdated, click to update
         //   "✓"  in green     — current
-        //   "↑"  in cool blue — local is newer than ModWorkshop
+        //   "↑"  in cool blue — local is newer than VostokMods
         //   "≠"  in lavender  — same release, version strings differ
-        //                       in format (mod.txt vs MW listing)
-        //   "—"  muted        — no MW link / unknown
+        //                       in format (mod.txt vs the listing)
+        //   "—"  muted        — not linked / unknown
         // Using a LinkColumn gets the hand cursor + visited-color
         // semantics for free; non-link states are styled per-cell in
         // PopulateModsGrid. Font is bumped so the single-char icons
@@ -1495,13 +1554,13 @@ public class MainForm : Form
         };
         // Bonus discoverability — double-click a row's Mod cell to
         // open the mod page directly (skip the right-click menu).
-        // No-op for mods without a ModWorkshop ID.
+        // No-op for mods not linked to VostokMods.
         grid.CellDoubleClick += (_, e) =>
         {
             var entry = ModAtRow(e.RowIndex);
             if (entry == null) return;
             if (grid.Columns[e.ColumnIndex].Name != "Name") return;
-            if (entry.ModWorkshopId > 0) OpenModPage(entry);
+            if (entry.Source.IsValid) OpenModPage(entry);
         };
 
         // Drag-reorder priority: press a row + drag up or down,
@@ -1623,9 +1682,10 @@ public class MainForm : Form
     }
 
     /// <summary>Builds a row-specific context menu for the mods grid.
-    /// Item enable-state and labels depend on whether the mod has a
-    /// ModWorkshop ID — Open is greyed when there's nothing to open;
-    /// Set toggles between "Set…" and "Change…" based on presence.</summary>
+    /// Item enable-state and labels depend on whether the mod is
+    /// linked to VostokMods — Open is greyed when there's nothing to
+    /// open; Link toggles between "Link…" and "Change…" based on
+    /// presence.</summary>
     /// <summary>Rebuilds the mods context menu's items for the given
     /// row index. Called from the menu's Opening event so the items
     /// always reflect the right-clicked row's current state (which
@@ -1647,8 +1707,8 @@ public class MainForm : Form
             || ModAtRow(rowIndex) == null) return;
 
         // Multi-select branch: when the user has 2+ rows selected
-        // (Ctrl/Shift-click), the per-row actions (Open MW page,
-        // Set MW id, etc.) don't make sense — we surface only the
+        // (Ctrl/Shift-click), the per-row actions (Open mod page,
+        // Link, etc.) don't make sense — we surface only the
         // batch operations. Right now that's a single "Delete N
         // mods…" item; future bulk actions plug in here too.
         var selectedEntries = GetSelectedModEntries();
@@ -1741,27 +1801,26 @@ public class MainForm : Form
 
         var entry = ModAtRow(rowIndex);
         if (entry == null) return; // pack-header row — no per-mod menu
-        var hasMw = entry.ModWorkshopId > 0;
+        var linked = entry.Source.IsValid;
 
-        var open = new ToolStripMenuItem("Open ModWorkshop page")
+        var open = new ToolStripMenuItem("Open VostokMods page")
         {
-            Enabled = hasMw,
-            ToolTipText = hasMw
-                ? $"Open https://modworkshop.net/mod/{entry.ModWorkshopId} in your browser."
-                : "No ModWorkshop ID linked — use Set ModWorkshop ID first.",
+            Enabled = linked,
+            ToolTipText = linked
+                ? $"Open {entry.Source.PageUrl} in your browser."
+                : "Not linked to VostokMods — use Link to VostokMods first.",
         };
         open.Click += (_, _) => OpenModPage(entry);
         menu.Items.Add(open);
 
         var showDescItem = new ToolStripMenuItem("Show description…")
         {
-            Enabled = hasMw,
-            ToolTipText = hasMw
-                ? "Fetches and displays the mod's description from "
-                  + $"https://api.modworkshop.net/mods/{entry.ModWorkshopId}. "
-                  + "Cached locally on first view; click Refresh in the "
-                  + "dialog to re-fetch."
-                : "No ModWorkshop ID linked — set one to enable description "
+            Enabled = linked,
+            ToolTipText = linked
+                ? "Fetches and displays the mod's description from its "
+                  + "VostokMods page. Cached locally on first view; click "
+                  + "Refresh in the dialog to re-fetch."
+                : "Not linked to VostokMods — link it to enable description "
                   + "lookup.",
         };
         showDescItem.Click += (_, _) => ShowDescription(entry);
@@ -1775,13 +1834,13 @@ public class MainForm : Form
         showInFolderItem.Click += (_, _) => ShowModInFolder(entry);
         menu.Items.Add(showInFolderItem);
 
-        var setLabel = hasMw ? "Change ModWorkshop ID…" : "Set ModWorkshop ID…";
+        var setLabel = linked ? "Change VostokMods link…" : "Link to VostokMods…";
         var setItem = new ToolStripMenuItem(setLabel)
         {
-            ToolTipText = "Edit mod.txt to add or update the [updates] modworkshop = N "
-                + "field. Lets the manager track this mod for updates.",
+            ToolTipText = "Tell the manager which VostokMods page this mod comes "
+                + "from, so it can check for updates and download them.",
         };
-        setItem.Click += async (_, _) => await SetModWorkshopIdAsync(entry);
+        setItem.Click += async (_, _) => await LinkModAsync(entry);
         menu.Items.Add(setItem);
 
         menu.Items.Add(new ToolStripSeparator());
@@ -1874,7 +1933,7 @@ public class MainForm : Form
                   + "revert is itself reversible."
                 : "No backups on disk yet. Backups are created "
                   + "automatically the next time the manager updates "
-                  + "this mod from ModWorkshop.",
+                  + "this mod from VostokMods.",
         };
         revertItem.Click += async (_, _) =>
             await RevertModFromBackupAsync(entry, backups);
@@ -1983,7 +2042,7 @@ public class MainForm : Form
         {
             Ui.ThemedMessageBox.Show(this,
                 $"`{entry.DisplayName}` doesn't ship a CHANGELOG / README "
-                + "file the manager can find. Try the mod's ModWorkshop "
+                + "file the manager can find. Try the mod's VostokMods "
                 + "page for release notes.",
                 "No changelog",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2507,7 +2566,7 @@ public class MainForm : Form
                     + "(Recycle Bin)\n"
                     + "  • Other profiles referencing this version "
                     + "won't be able to add the mod back without "
-                    + "re-downloading from ModWorkshop.\n\n"
+                    + "re-downloading from VostokMods.\n\n"
                     + "Say NO if you might want this version back later.",
                     "Delete from Library?",
                     MessageBoxButtons.YesNo,
@@ -3221,12 +3280,12 @@ public class MainForm : Form
         bool applied;
         List<string> importedIds;
         // Pass the JSON's directory as the companion dir so the
-        // dialog scans alongside .vmz files for fallback MW ids
+        // dialog scans alongside .vmz files for fallback sources
         // when the JSON itself omits them. Covers the common
         // "drop the JSON next to the .vmz files" flow.
         var companionDir = Path.GetDirectoryName(filePath) ?? "";
         using (var importDlg = new Ui.ImportModListDialog(
-            import, _activeProfile, _registry, _mw, ModsDir, companionDir))
+            import, _activeProfile, _registry, _vm, ModsDir, companionDir))
         {
             importDlg.ShowDialog(this);
             applied = importDlg.Applied;
@@ -3253,8 +3312,8 @@ public class MainForm : Form
     /// <summary>Writes a hand-editable mod-pack JSON template to a
     /// path the user picks. The file is structured as a working
     /// example with 4 sample mods, comments explaining each field,
-    /// and `mod_workshop_id` placeholders the user replaces with
-    /// real numbers — exactly what you'd hand to a friend so they
+    /// and `source` placeholders the user replaces with real
+    /// VostokMods slugs — exactly what you'd hand to a friend so they
     /// can drop the file on the manager and merge your pack into
     /// their active profile.
     ///
@@ -3288,9 +3347,10 @@ public class MainForm : Form
   /* Mod pack manifest — drop this file on the mod manager (or use
      Import list…) to merge every listed mod into your ACTIVE profile.
 
-     • mod_workshop_id (numeric, from the modworkshop.net/mod/<n> URL)
-       drives the download. REQUIRED for any mod the recipient
-       doesn't already have installed.
+     • source (""vostokmods:<slug>"", where <slug> is the last part of
+       the mod's page URL, vostokmods.net/mod/<slug>) drives the
+       download. REQUIRED for any mod the recipient doesn't already
+       have installed.
      • mod_id is the manifest mod_id (slug, from mod.txt). If
        you don't know it, leave it as a hint and we'll reconcile
        to the real id after the download.
@@ -3305,7 +3365,7 @@ public class MainForm : Form
     {
       ""mod_id"": ""my-first-mod"",
       ""display_name"": ""My First Mod"",
-      ""mod_workshop_id"": 00000,
+      ""source"": ""vostokmods:my-first-mod"",
       ""version"": ""1.0.0"",
       ""is_enabled"": true,
       ""priority"": 0
@@ -3313,17 +3373,17 @@ public class MainForm : Form
     {
       ""mod_id"": ""my-second-mod"",
       ""display_name"": ""My Second Mod"",
-      ""mod_workshop_id"": 00000
+      ""source"": ""vostokmods:my-second-mod""
     },
     {
       ""mod_id"": ""my-third-mod"",
       ""display_name"": ""My Third Mod"",
-      ""mod_workshop_id"": 00000
+      ""source"": ""vostokmods:my-third-mod""
     },
     {
       ""mod_id"": ""my-fourth-mod"",
       ""display_name"": ""My Fourth Mod"",
-      ""mod_workshop_id"": 00000
+      ""source"": ""vostokmods:my-fourth-mod""
     }
   ]
 }
@@ -3334,9 +3394,9 @@ public class MainForm : Form
             Ui.ThemedMessageBox.Show(this,
                 $"Saved a starter template to:\n\n{dlg.FileName}\n\n"
                 + "Edit the file in any text editor — replace the "
-                + "00000 placeholders with real mod_workshop_id "
-                + "numbers (the digits from each mod's ModWorkshop "
-                + "URL: https://modworkshop.net/mod/<NUMBER>).\n\n"
+                + "placeholder `source` values with each mod's real "
+                + "VostokMods slug (the last part of its page URL: "
+                + "https://vostokmods.net/mod/<SLUG>).\n\n"
                 + "Then either drop the .json on this window or "
                 + "use Import list… to bring those mods into your "
                 + "active profile.",
@@ -3362,10 +3422,10 @@ public class MainForm : Form
     private void OpenModPackagerDialog()
     {
         // Pass the active profile too — its ProfileMod entries
-        // carry mod_workshop_id values that the live mod.txt may
-        // be missing, so the dep grid + Export JSON can surface
-        // MW ids for mods that were originally added via JSON
-        // import / install-list flows.
+        // carry sources that the live mod.txt may be missing, so
+        // the dep grid + Export JSON can surface them for mods
+        // that were originally added via JSON import / install-list
+        // flows.
         using var dlg = new Ui.ModPackagerDialog(_registry, _activeProfile);
         dlg.ShowDialog(this);
     }
@@ -3383,12 +3443,54 @@ public class MainForm : Form
         dlg.ShowDialog(this);
     }
 
-    /// <summary>Install entry point the embedded ModWorkshop browser
-    /// calls back into for a downloaded .vmz. Keeps InstallModFilesAsync
-    /// private while giving the dialog a single async callback that runs
-    /// the full pipeline (copy → library → cfg → deps → rescan).</summary>
+    /// <summary>Install entry point the dialogs call back into for a
+    /// .vmz they hold. Keeps InstallModFilesAsync private while giving
+    /// a dialog a single async callback that runs the full pipeline
+    /// (copy → library → cfg → deps → rescan).</summary>
     internal Task InstallDownloadedModAsync(string path)
         => InstallModFilesAsync(new[] { path });
+
+    /// <summary>As above, for a file downloaded from `source`: the
+    /// source is remembered so the mod can be update-checked. A
+    /// download arrives under a throwaway temp name, so it is installed
+    /// under the file name of the mod it replaces, or else under its
+    /// mod id.</summary>
+    internal async Task InstallDownloadedModAsync(string path, ModSource source)
+    {
+        DownloadedSources.Record(path, source);
+
+        string modId;
+        using (var arch = new ModArchive())
+            modId = arch.Open(path) ? arch.ModId : "";
+        if (string.IsNullOrEmpty(modId))
+        {
+            // Not a readable mod: let the pipeline report why.
+            await InstallModFilesAsync(new[] { path });
+            return;
+        }
+
+        var live = _registry.Entries.FirstOrDefault(e =>
+            e.IsArchive
+            && string.Equals(e.ModId, modId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetDirectoryName(Path.GetFullPath(e.Path)),
+                Path.GetFullPath(ModsDir), StringComparison.OrdinalIgnoreCase));
+        var name = live != null
+            ? Path.GetFileName(live.Path)
+            : Domain.ModProfile.SafeFileName(modId) + ".vmz";
+        var stageDir = Path.Combine(
+            Path.GetTempPath(), "vmm_in_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(stageDir);
+            var staged = Path.Combine(stageDir, name);
+            File.Copy(path, staged);
+            await InstallModFilesAsync(new[] { staged });
+        }
+        finally
+        {
+            try { if (Directory.Exists(stageDir)) Directory.Delete(stageDir, true); } catch { }
+        }
+    }
 
     /// <summary>Opens the Library manager — lists every archived .vmz in
     /// &lt;mods&gt;/Library/ with its live/enabled state and lets the user
@@ -3411,55 +3513,87 @@ public class MainForm : Form
         await Task.CompletedTask;
     }
 
-    /// <summary>Opens the embedded ModWorkshop browser. Installs happen
+    /// <summary>Opens the embedded VostokMods browser. Installs happen
     /// via InstallDownloadedModAsync, which already rescans/refreshes —
     /// so no post-close work is needed here.</summary>
     private void OpenModBrowserDialog()
     {
-        // Snapshot the library's ModWorkshop ids ONCE — ModLibrary.List
-        // opens every .vmz, too heavy to run on each page navigation.
-        // The live registry check (done per-call below) is in-memory and
+        // Snapshot the library's sources ONCE — ModLibrary.List opens
+        // every .vmz, too heavy to run on each page navigation. The
+        // live registry check (done per-call below) is in-memory and
         // already reflects anything installed during this browse session
         // (installs rescan), so the snapshot only needs to cover
         // pre-existing library mods that aren't currently live.
-        var libMwIds = new HashSet<int>();
+        var libSources = new HashSet<ModSource>();
         try
         {
             foreach (var l in Domain.ModLibrary.List(ModsDir))
-                if (l.ModWorkshopId > 0) libMwIds.Add(l.ModWorkshopId);
+            {
+                if (l.Source.IsValid) libSources.Add(l.Source);
+                var recorded = _modConfig.GetModSource(l.ModId, l.Version);
+                if (recorded.IsValid) libSources.Add(recorded);
+            }
         }
         catch { /* best-effort — empty set just means no "already owned" hits */ }
 
-        bool OwnsModWorkshopId(int mwId)
-            => mwId > 0
-               && (libMwIds.Contains(mwId)
-                   || _registry.Entries.Any(e => e.ModWorkshopId == mwId));
+        // A mod.txt may name its source by UUID while the page URL
+        // carries the slug; the listing maps one to the other. Loaded in
+        // the background — until it arrives, UUID-declared mods just
+        // don't show as owned.
+        _ = LoadSlugMapAsync();
+
+        bool OwnsSource(ModSource source)
+        {
+            if (!source.IsValid) return false;
+            source = CanonicalSource(source);
+            return libSources.Any(s => CanonicalSource(s) == source)
+                || _registry.Entries.Any(e => CanonicalSource(e.Source) == source);
+        }
 
         using var dlg = new Ui.ModBrowserDialog(
-            _mw, InstallDownloadedModAsync, OwnsModWorkshopId, _settings);
+            _vm, InstallDownloadedModAsync, OwnsSource, _settings);
         dlg.ShowDialog(this);
     }
 
-    /// <summary>No-browser fallback: prompt for a ModWorkshop mod URL or
-    /// id, download the latest .vmz via the public API, and install it
-    /// through the same pipeline. Works even when the WebView2 runtime
-    /// is unavailable.</summary>
-    private async Task InstallFromModWorkshopUrlAsync()
+    /// <summary>Fills the UUID → slug map from the VostokMods listing.
+    /// Best-effort: on failure the map stays as it was.</summary>
+    private async Task LoadSlugMapAsync()
+    {
+        try
+        {
+            foreach (var m in await _vm.ListAllModsAsync())
+                if (m.Id.Length > 0) _vmSlugById[m.Id] = m.Slug;
+        }
+        catch { /* offline — comparisons fall back to the raw ids */ }
+    }
+
+    /// <summary>The slug form of a source that names its mod by UUID,
+    /// when the listing is known; otherwise the source unchanged.</summary>
+    private ModSource CanonicalSource(ModSource source)
+        => source.IsValid && _vmSlugById.TryGetValue(source.Id, out var slug)
+            ? ModSource.ForSlug(slug)
+            : source;
+
+    /// <summary>No-browser fallback: prompt for a VostokMods mod URL or
+    /// slug, download the latest version via the site's API, and install
+    /// it through the same pipeline. Works even when the WebView2
+    /// runtime is unavailable.</summary>
+    private async Task InstallFromVostokModsUrlAsync()
     {
         string input;
         using (var dlg = new Ui.TextInputDialog(
-            "Install from ModWorkshop",
-            "Paste a ModWorkshop mod URL (e.g. https://modworkshop.net/mod/56801) "
-            + "or a numeric mod id:"))
+            "Install from VostokMods",
+            "Paste a VostokMods mod page URL "
+            + "(e.g. https://vostokmods.net/mod/eventmodifier) or its slug:"))
         {
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             input = dlg.Result;
         }
-        if (!Domain.ModWorkshopUrl.TryParseModId(input, out var id))
+        if (!VostokModsUrl.TryParseSlug(input, out var slug))
         {
             Ui.ThemedMessageBox.Show(this,
-                "Couldn't find a mod id in that text. Expected a modworkshop.net/mod/<id> "
-                + "URL or a plain number.",
+                "That isn't a VostokMods mod. Expected a vostokmods.net/mod/<slug> "
+                + "URL or the slug on its own.",
                 "Not a mod URL",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
@@ -3468,13 +3602,13 @@ public class MainForm : Form
             Path.GetTempPath(), "vmm_dl_" + Guid.NewGuid().ToString("N") + ".vmz");
         try
         {
-            await _mw.DownloadLatestAsync(id, temp);
-            await InstallModFilesAsync(new[] { temp });
+            await _vm.DownloadAsync(slug, temp);
+            await InstallDownloadedModAsync(temp, ModSource.ForSlug(slug));
         }
         catch (Exception ex)
         {
             Ui.ThemedMessageBox.Show(this,
-                $"Couldn't download or install mod {id}:\n{ex.Message}",
+                $"Couldn't download or install `{slug}`:\n{ex.Message}",
                 "Install failed",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
@@ -3840,10 +3974,14 @@ public class MainForm : Form
     {
         var installed = MmlInstall.DetectInstalledVersion(ModsDir);
 
-        // Latest from GitHub — cache-first.
+        // Latest from GitHub — cache-first. A cached "latest" that is
+        // older than what is installed is out of date by definition.
         string latest = "";
         bool fromCache = false;
-        if (!forceFresh && _settings.IsMmlCacheFresh)
+        var cacheUsable = _settings.IsMmlCacheFresh
+            && (string.IsNullOrEmpty(installed)
+                || CompareVersions(installed, _settings.MmlLatestTag) <= 0);
+        if (!forceFresh && cacheUsable)
         {
             latest = _settings.MmlLatestTag;
             fromCache = true;
@@ -3872,6 +4010,8 @@ public class MainForm : Form
     private void RenderMmlLabel(string installed, string latest, bool fromCache)
     {
         var freshness = fromCache ? " (cached)" : "";
+        // Release tags carry a leading "v"; the labels add their own.
+        latest = latest.TrimStart('v', 'V');
         var hasInstalled = !string.IsNullOrEmpty(installed);
         var hasLatest = !string.IsNullOrEmpty(latest);
 
@@ -3927,12 +4067,10 @@ public class MainForm : Form
 
     // --- mod-manager self-update check ----------------------------
 
-    /// <summary>Cache-first check of the manager's own ModWorkshop
-    /// listing. Reuses _mw.CheckVersionsAsync (the same endpoint we
-    /// hit for every other mod) with a single-id batch. Updates
-    /// _managerLabel + persists the freshly-fetched version into
-    /// Settings.ManagerLatestVersion so a re-launch within 24h skips
-    /// the network call entirely.</summary>
+    /// <summary>Cache-first check of the manager's latest GitHub
+    /// release. Updates _managerLabel + persists the freshly-fetched
+    /// version into Settings.ManagerReleaseVersion so a re-launch
+    /// within 24h skips the network call entirely.</summary>
     private async Task CheckManagerUpdateAsync(bool forceFresh = false)
     {
         var installed = ManagerInstalledVersion();
@@ -3941,40 +4079,37 @@ public class MainForm : Form
 
         if (!forceFresh && _settings.IsManagerCacheFresh)
         {
-            latest = _settings.ManagerLatestVersion;
+            latest = _settings.ManagerReleaseVersion;
             fromCache = true;
         }
         else
         {
             _managerLabel.Text = "Manager: checking for update …";
-            try
+            var (status, release) = await _managerReleases.FetchLatestAsync();
+            _managerNoRelease = status == ManagerReleaseStatus.NoRelease;
+            if (status == ManagerReleaseStatus.Found && release != null)
             {
-                var versions = await _mw.CheckVersionsAsync(
-                    new[] { ManagerModWorkshopId });
-                if (versions.TryGetValue(ManagerModWorkshopId, out var v)
-                    && !string.IsNullOrEmpty(v))
+                latest = release.Version;
+                _settings.ManagerReleaseVersion = latest;
+                _settings.ManagerReleaseCheckedAt = DateTime.UtcNow.ToString("o");
+                try { _settings.Save(); } catch { /* best-effort */ }
+            }
+            else if (_managerNoRelease)
+            {
+                // Nothing is published, so a remembered version is
+                // not something the user could download.
+                if (!string.IsNullOrEmpty(_settings.ManagerReleaseVersion))
                 {
-                    latest = v;
-                    _settings.ManagerLatestVersion = v;
-                    _settings.ManagerCheckedAt = DateTime.UtcNow.ToString("o");
+                    _settings.ManagerReleaseVersion = "";
                     try { _settings.Save(); } catch { /* best-effort */ }
                 }
-                else if (!string.IsNullOrEmpty(_settings.ManagerLatestVersion))
-                {
-                    // ModWorkshop returned no row for our id (page
-                    // missing / temporarily 404). Fall back to the
-                    // last good value rather than blanking the row.
-                    latest = _settings.ManagerLatestVersion;
-                    fromCache = true;
-                }
             }
-            catch
+            else if (!string.IsNullOrEmpty(_settings.ManagerReleaseVersion))
             {
-                if (!string.IsNullOrEmpty(_settings.ManagerLatestVersion))
-                {
-                    latest = _settings.ManagerLatestVersion;
-                    fromCache = true;
-                }
+                // The check failed. Fall back to the last good value
+                // rather than blanking the row.
+                latest = _settings.ManagerReleaseVersion;
+                fromCache = true;
             }
         }
         RenderManagerLabel(installed, latest, fromCache);
@@ -4003,9 +4138,11 @@ public class MainForm : Form
         var freshness = fromCache ? " (cached)" : "";
         if (string.IsNullOrEmpty(latest))
         {
-            _managerLabel.Text =
-                $"Manager: installed v{installed}; update check failed — "
-                + "click to open ModWorkshop page.";
+            _managerLabel.Text = _managerNoRelease
+                ? $"Manager: v{installed} — no release published yet; "
+                  + "click to open the releases page."
+                : $"Manager: installed v{installed}; update check failed — "
+                  + "click to open the releases page.";
             return;
         }
         var cmp = CompareVersions(installed, latest);
@@ -4038,13 +4175,13 @@ public class MainForm : Form
             + "·  click to auto-update";
     }
 
-    private void OpenManagerModWorkshopPage()
+    private void OpenManagerReleasesPage()
     {
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = $"https://modworkshop.net/mod/{ManagerModWorkshopId}",
+                FileName = ManagerReleaseChecker.ReleasesUrl,
                 UseShellExecute = true,
             });
         }
@@ -4057,18 +4194,18 @@ public class MainForm : Form
     /// <summary>Click handler for the Manager status row. When an
     /// update is available, prompts the user to either auto-
     /// install (downloads the new .exe and swaps it via a tiny
-    /// batch script) or open the MW page. When up-to-date, just
+    /// batch script) or open the releases page. When up-to-date, just
     /// opens the page (so the user can still browse / report
     /// issues).</summary>
     private async Task HandleManagerLabelClickAsync()
     {
         var installed = ManagerInstalledVersion();
-        var latest = _settings.ManagerLatestVersion;
+        var latest = _settings.ManagerReleaseVersion;
         var outdated = !string.IsNullOrEmpty(latest)
                     && CompareVersions(installed, latest) < 0;
         if (!outdated)
         {
-            OpenManagerModWorkshopPage();
+            OpenManagerReleasesPage();
             return;
         }
         var dr = Ui.ThemedMessageBox.Show(this,
@@ -4076,18 +4213,19 @@ public class MainForm : Form
             + $"(installed v{installed}, latest v{latest}).\n\n"
             + "Yes → download the new build, swap the .exe in place, "
             + "relaunch automatically.\n"
-            + "No → just open the ModWorkshop page in your browser.",
+            + "No → just open the releases page in your browser.",
             "Update mod manager",
             MessageBoxButtons.YesNoCancel,
             MessageBoxIcon.Question,
             MessageBoxDefaultButton.Button1);
         if (dr == DialogResult.Cancel) return;
-        if (dr == DialogResult.No) { OpenManagerModWorkshopPage(); return; }
+        if (dr == DialogResult.No) { OpenManagerReleasesPage(); return; }
         await AutoUpdateManagerAsync();
     }
 
     /// <summary>Download + replace + relaunch flow. Steps:
-    ///   1. Download the latest from ModWorkshop into a temp file.
+    ///   1. Download this edition's build from the latest GitHub
+    ///      release into a temp file.
     ///   2. If it's a .zip / .vmz, extract; look for an .exe whose
     ///      name matches our edition (VostokModManagerAI.exe /
     ///      VostokModManagerIntegrated.exe). Fall back to the
@@ -4118,10 +4256,32 @@ public class MainForm : Form
         {
             Ui.ThemedMessageBox.Show(this,
                 "Couldn't locate the running .exe path — auto-update "
-                + "can't proceed. Open the ModWorkshop page and grab "
+                + "can't proceed. Open the releases page and grab "
                 + "the new build manually.",
                 "Auto-update aborted",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // The release is looked up again rather than taken from the
+        // cache: the cache only holds the version, not the files.
+        _managerLabel.Text = "Manager: looking up the latest release …";
+        var (status, release) = await _managerReleases.FetchLatestAsync();
+        var exeName = Path.GetFileName(currentExe);
+        var asset = release?.AssetFor(exeName);
+        if (status != ManagerReleaseStatus.Found || release == null || asset == null)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                status == ManagerReleaseStatus.Found
+                    ? $"The latest release (v{release?.Version}) has no build named "
+                      + $"`{exeName}`. Open the releases page and grab the new "
+                      + "build manually."
+                    : "Couldn't read the latest release from GitHub. Try again "
+                      + "in a few minutes, or open the releases page and grab "
+                      + "the new build manually.",
+                "Auto-update aborted",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            await CheckManagerUpdateAsync();
             return;
         }
 
@@ -4133,8 +4293,7 @@ public class MainForm : Form
         _managerLabel.Text = $"Manager: downloading update …";
         try
         {
-            await Task.Run(() =>
-                _mw.DownloadLatestAsync(ManagerModWorkshopId, downloadPath));
+            await _managerReleases.DownloadAssetAsync(asset, downloadPath);
         }
         catch (Exception ex)
         {
@@ -4152,7 +4311,7 @@ public class MainForm : Form
         {
             Ui.ThemedMessageBox.Show(this,
                 "Downloaded the update, but couldn't find a .exe inside "
-                + "the package. Open the ModWorkshop page and install "
+                + "the package. Open the releases page and install "
                 + "manually.\n\nThe download is at:\n  " + downloadPath,
                 "Update format not recognised",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -4278,8 +4437,8 @@ public class MainForm : Form
         }
 
         var dr = Ui.ThemedMessageBox.Show(this,
-            $"MML v{installed} is installed; latest is v{latest}.\n\n"
-            + $"Download v{latest}'s `modloader.gd` and `override.cfg` "
+            $"MML v{installed} is installed; latest is {latest}.\n\n"
+            + $"Download {latest}'s `modloader.gd` and `override.cfg` "
             + "and replace the files in your game folder?\n\n"
             + "Existing files will be backed up first as "
             + "<name>.<timestamp>.bak alongside the originals — "
@@ -4824,7 +4983,7 @@ public class MainForm : Form
                     Version       = e.Version,
                     IsEnabled     = e.IsEnabled,
                     Priority      = e.Priority,
-                    ModWorkshopId = e.ModWorkshopId,
+                    Source        = e.Source.Key,
                 });
                 changed++;
             }
@@ -5187,12 +5346,28 @@ public class MainForm : Form
         _modsGrid.Refresh();
     }
 
+    /// <summary>The latest version VostokMods lists for a mod, when
+    /// the mod is linked and the last update check covered it.</summary>
+    private bool TryGetLatest(ModEntry e, out string latest)
+    {
+        latest = "";
+        if (!e.Source.IsValid) return false;
+        if (!_latestVersions.TryGetValue(e.Source.Key, out var v)
+            || string.IsNullOrEmpty(v)) return false;
+        latest = v;
+        return true;
+    }
+
+    /// <summary>Installed mods with no VostokMods source. They can't
+    /// be update-checked until they are linked.</summary>
+    private List<ModEntry> UnlinkedMods()
+        => _registry.Entries
+            .Where(e => !e.Source.IsValid && !string.IsNullOrEmpty(e.ModId))
+            .ToList();
+
     private bool IsOutdated(ModEntry e)
     {
-        var mw = e.ModWorkshopId;
-        if (mw <= 0) return false;
-        if (!_latestVersions.TryGetValue(mw, out var latest)) return false;
-        if (string.IsNullOrEmpty(latest)) return false;
+        if (!TryGetLatest(e, out var latest)) return false;
         // Numeric-aware compare: only flag as outdated when LOCAL
         // is strictly older than REMOTE. String inequality fired
         // false positives when local was newer (e.g. local "1.14"
@@ -5214,7 +5389,7 @@ public class MainForm : Form
     /// is NEVER ambiguous (CompareVersions handles that correctly
     /// even when the strings differ). Used to surface a ≠ glyph in
     /// the Update column instead of a false ⬆ "outdated" when the
-    /// author's mod.txt and the ModWorkshop listing format the same
+    /// author's mod.txt and the VostokMods listing format the same
     /// release differently (the headline example is `0.0.420`
     /// vs `0.4.20_R` — same release, two encodings).</summary>
     internal static bool VersionsAreAmbiguous(string? a, string? b)
@@ -5276,7 +5451,6 @@ public class MainForm : Form
     /// styled to look static even though they're still link cells.</summary>
     private void StyleUpdateCell(DataGridViewCell cell, ModEntry e)
     {
-        var mw = e.ModWorkshopId;
         var muted = Color.FromArgb(120, 130, 150);
         var orange = Color.FromArgb(255, 200, 80);
         var green = Color.FromArgb(120, 220, 140);
@@ -5285,14 +5459,14 @@ public class MainForm : Form
         Color color;
         string tip;
 
-        if (mw <= 0)
+        if (!e.Source.IsValid)
         {
             text = "—";
             color = muted;
-            tip = "No ModWorkshop link in mod.txt — can't check for updates.";
+            tip = "Not linked to VostokMods — can't check for updates. "
+                + "Click to link it.";
         }
-        else if (!_latestVersions.TryGetValue(mw, out var latest)
-                 || string.IsNullOrEmpty(latest))
+        else if (!TryGetLatest(e, out var latest))
         {
             text = "—";
             color = muted;
@@ -5309,34 +5483,34 @@ public class MainForm : Form
             }
             else if (VersionsAreAmbiguous(e.Version, latest))
             {
-                // mod.txt and ModWorkshop list the version in
+                // mod.txt and VostokMods list the version in
                 // formats that can't be reliably ordered (e.g.
                 // "0.0.420" vs "0.4.20_R"). The two strings are
                 // almost certainly the same release written two
                 // ways; we surface a ≠ glyph so the user knows
-                // the file IS the latest one MW serves, the
+                // the file IS the latest one the site serves, the
                 // author's mod.txt just doesn't agree with the
                 // listing's version string.
                 text = "≠";
                 color = Color.FromArgb(200, 160, 220); // soft lavender
                 tip = $"Version mismatch: mod.txt v{e.Version}, "
-                    + $"ModWorkshop reports v{latest}.\n\n"
+                    + $"VostokMods reports v{latest}.\n\n"
                     + "The two strings format differently and can't "
                     + "be reliably ordered — likely the same release "
                     + "written two ways. The local file matches "
-                    + "what ModWorkshop currently serves; the author "
+                    + "what VostokMods currently serves; the author "
                     + "just hasn't matched mod.txt to the listing.";
             }
             else if (cmp > 0)
             {
-                // Local is newer than ModWorkshop's reported version
+                // Local is newer than VostokMods' reported version
                 // — dev build, manually-bumped mod.txt ahead of the
                 // latest release, or the API cache lagging. Distinct
                 // glyph + colour so it doesn't get conflated with
                 // "up to date" or with "outdated".
                 text = "↑";
                 color = Color.FromArgb(110, 190, 240); // cool blue
-                tip = $"Local v{e.Version} is newer than ModWorkshop's "
+                tip = $"Local v{e.Version} is newer than VostokMods' "
                     + $"reported v{latest}. Likely a dev build, a "
                     + "manual bump, or the API cache catching up.";
             }
@@ -5759,15 +5933,13 @@ public class MainForm : Form
     private async Task CheckUpdatesAsync(bool forceFresh = false)
     {
         // Use the persisted cache if it's still inside the 1h TTL —
-        // saves a round-trip to ModWorkshop on every launch and
-        // respects their no-spam policy. The Refresh toolbar button
-        // forces a re-fetch.
+        // saves a round of requests to VostokMods on every launch.
+        // The Refresh toolbar button forces a re-fetch.
         if (!forceFresh && _settings.IsCacheFresh)
         {
             _latestVersions.Clear();
             foreach (var (k, v) in _settings.CachedVersions)
-                if (int.TryParse(k, out var id))
-                    _latestVersions[id] = v;
+                _latestVersions[k] = v;
             var ageMin = (int)Math.Round(_settings.CacheAge.TotalMinutes);
             _updatesLabel.Text =
                 $"Updates: {SummarizeUpdates()}  (cached ~{ageMin} min ago — Refresh to recheck)";
@@ -5775,24 +5947,31 @@ public class MainForm : Form
             return;
         }
 
-        var ids = _registry.Enabled()
-            .Select(e => e.ModWorkshopId)
-            .Where(i => i > 0)
+        var sources = _registry.Enabled()
+            .Select(e => e.Source)
+            .Where(s => s.IsValid)
+            .Distinct()
             .ToList();
-        if (ids.Count == 0)
+        if (sources.Count == 0)
         {
-            _updatesLabel.Text = "Updates: no enabled mods have a ModWorkshop link";
+            _updatesLabel.Text = "Updates: no enabled mods are linked to VostokMods"
+                + UnlinkedHint();
             return;
         }
-        _updatesLabel.Text = $"Updates: checking {ids.Count} mods on ModWorkshop ...";
+        _updatesLabel.Text = $"Updates: checking {sources.Count} mods on VostokMods ...";
+        // VostokMods has no batch endpoint: one request per mod, so
+        // show how far along the check is.
+        var progress = new Progress<(int done, int total)>(p =>
+            _updatesLabel.Text = $"Updates: checking mods on VostokMods ... {p.done}/{p.total}");
         try
         {
-            var versions = await _mw.CheckVersionsAsync(ids);
+            var versions = await _vm.CheckVersionsAsync(
+                sources.Select(s => s.Id), forceFresh, progress);
             _latestVersions.Clear();
-            foreach (var (k, v) in versions) _latestVersions[k] = v;
+            foreach (var s in sources)
+                if (versions.TryGetValue(s.Id, out var v)) _latestVersions[s.Key] = v;
             // Persist for the next launch.
-            _settings.CachedVersions = _latestVersions
-                .ToDictionary(kvp => kvp.Key.ToString(), kvp => kvp.Value);
+            _settings.CachedVersions = new Dictionary<string, string>(_latestVersions);
             _settings.CacheTimestamp = DateTime.UtcNow.ToString("o");
             _settings.Save();
             _updatesLabel.Text = $"Updates: {SummarizeUpdates()}";
@@ -5809,20 +5988,30 @@ public class MainForm : Form
         int outdated = 0, current = 0, unknown = 0, mismatch = 0;
         foreach (var e in _registry.Enabled())
         {
-            var mw = e.ModWorkshopId;
-            if (mw <= 0) continue;
-            if (!_latestVersions.TryGetValue(mw, out var latest))
+            if (!e.Source.IsValid) continue;
+            if (!TryGetLatest(e, out var latest))
             { unknown++; continue; }
             if (latest == e.Version) { current++; continue; }
-            // Ambiguous-format pair (e.g. mod.txt 0.0.420 vs MW
-            // 0.4.20_R) — same release, two encodings — is a
-            // separate category from "outdated".
+            // Ambiguous-format pair (e.g. mod.txt 0.0.420 vs the
+            // listing's 0.4.20_R) — same release, two encodings — is
+            // a separate category from "outdated". So is a local
+            // build that is ahead of the listing.
             if (VersionsAreAmbiguous(e.Version, latest)) { mismatch++; continue; }
+            if (CompareVersions(e.Version, latest) > 0) { current++; continue; }
             outdated++;
         }
         return $"{outdated} outdated, {current} current"
             + (mismatch > 0 ? $", {mismatch} mismatch" : "")
-            + $", {unknown} unknown";
+            + $", {unknown} unknown"
+            + UnlinkedHint();
+    }
+
+    /// <summary>Tail for the Updates row naming how many installed
+    /// mods have no VostokMods source, or "" when all are linked.</summary>
+    private string UnlinkedHint()
+    {
+        var n = UnlinkedMods().Count;
+        return n == 0 ? "" : $"  ·  {n} not linked to VostokMods — click to link";
     }
 
     // --- toolbar actions ------------------------------------------
@@ -5957,7 +6146,7 @@ public class MainForm : Form
     }
 
     /// <summary>Opens an OpenFileDialog seeded at the user's Downloads
-    /// folder (where browsers drop ModWorkshop downloads by default)
+    /// folder (where browsers drop downloads by default)
     /// and installs every selected .vmz via InstallModFilesAsync.</summary>
     private async Task InstallModFromFilePickerAsync()
     {
@@ -6027,7 +6216,8 @@ public class MainForm : Form
                 // both for the library copy AND for the profile-add
                 // step further down, so capture them here once.
                 string  manifestModId, manifestVersion, manifestDisplayName;
-                int     manifestPriority, manifestMwId;
+                int     manifestPriority;
+                ModSource manifestSource;
                 using (var arch = new ModArchive())
                 {
                     if (!arch.Open(src))
@@ -6043,7 +6233,7 @@ public class MainForm : Form
                     manifestDisplayName = string.IsNullOrEmpty(arch.ModName)
                                             ? arch.ModId : arch.ModName;
                     manifestPriority    = arch.ModPriority;
-                    manifestMwId        = arch.ModWorkshopId;
+                    manifestSource      = arch.Source;
                 }
 
                 var dst = Path.Combine(modsDir, Path.GetFileName(src));
@@ -6116,14 +6306,14 @@ public class MainForm : Form
                             Version       = manifestVersion,
                             IsEnabled     = true,
                             Priority      = manifestPriority,
-                            ModWorkshopId = manifestMwId,
+                            Source        = manifestSource.Key,
                         });
                     }
                     else
                     {
                         existingPm.Version     = manifestVersion;
                         existingPm.DisplayName = manifestDisplayName;
-                        if (manifestMwId > 0) existingPm.ModWorkshopId = manifestMwId;
+                        if (manifestSource.IsValid) existingPm.Source = manifestSource.Key;
                     }
                     profileDirty = true;
                 }
@@ -6251,7 +6441,7 @@ public class MainForm : Form
     /// gap against the live registry + local library. Library-
     /// available deps are copied into <mods>/ automatically; the
     /// remaining missing ones surface via MissingDependenciesDialog
-    /// so the user can paste MW URLs / ids and trigger downloads.
+    /// so the user can paste VostokMods URLs and trigger downloads.
     ///
     /// Called from BOTH the install-mod flow (drop / picker) and
     /// the import-list flow — they're the two entry points where
@@ -6290,15 +6480,15 @@ public class MainForm : Form
         // for the user to recognise the chain.
         //
         // ALSO collect parents' [dependency_sources] mappings into
-        // a single dep_id → MW id dictionary. This is the bridge
+        // a single dep_id → source dictionary. This is the bridge
         // that lets us auto-download a missing dep without round-
         // tripping to the user for a URL — when a mod was packed
-        // with the Mod Packager, its mod.txt carries the MW ids
+        // with the Mod Packager, its mod.txt carries the source
         // of every declared dep. Later parents overwrite earlier
         // ones (rare collision; last-wins is arbitrary but stable).
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pending = new List<(string DepId, string ParentName, bool Required)>();
-        var knownMwIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var knownSources = new Dictionary<string, ModSource>(StringComparer.OrdinalIgnoreCase);
         foreach (var modId in ids)
         {
             if (!liveById.TryGetValue(modId, out var entry)) continue;
@@ -6315,7 +6505,7 @@ public class MainForm : Form
                 pending.Add((dep, parentLabel, false));
             }
             foreach (var kvp in entry.DependencySources)
-                knownMwIds[kvp.Key] = kvp.Value;
+                knownSources[kvp.Key] = kvp.Value;
         }
         if (pending.Count == 0) return;
 
@@ -6394,7 +6584,7 @@ public class MainForm : Form
                    + (libraryResolved > 0
                        ? $" ({libraryResolved} other dep(s) auto-copied from your library)."
                        : ".")
-                   + "\n\nOpen the Resolve dialog to paste ModWorkshop URLs and download them?";
+                   + "\n\nOpen the Resolve dialog to paste VostokMods URLs and download them?";
         var answer = Ui.ThemedMessageBox.Show(this, prompt,
             "Missing dependencies",
             MessageBoxButtons.YesNo,
@@ -6404,7 +6594,7 @@ public class MainForm : Form
 
         bool downloadedAny;
         using (var dlg = new Ui.MissingDependenciesDialog(
-            _mw, ModsDir, missing, knownMwIds))
+            _vm, ModsDir, missing, knownSources))
         {
             dlg.ShowDialog(this);
             downloadedAny = dlg.AnyDownloaded;
@@ -6474,26 +6664,23 @@ public class MainForm : Form
             case "Update":
                 if (IsOutdated(entry))
                     await UpdateModAsync(entry);
-                // The muted "—" state means we have no ModWorkshop ID
-                // for this mod. Repurpose the click to "tell me the
-                // ID" — most discoverable place to fix the missing
-                // link.
-                else if (entry.ModWorkshopId <= 0)
-                    await SetModWorkshopIdAsync(entry);
-                // The ≠ state: the local mod.txt and ModWorkshop's
+                // The muted "—" state means the mod isn't linked to
+                // VostokMods. Repurpose the click to "link it" — most
+                // discoverable place to fix the missing link.
+                else if (!entry.Source.IsValid)
+                    await LinkModAsync(entry);
+                // The ≠ state: the local mod.txt and the VostokMods
                 // listing format the version differently. Clicking
                 // is informational — show the explainer in the
                 // status row instead of silently doing nothing
                 // (re-downloading the same file would be wasteful).
-                else if (entry.ModWorkshopId > 0
-                    && _latestVersions.TryGetValue(entry.ModWorkshopId, out var latest)
-                    && !string.IsNullOrEmpty(latest)
+                else if (TryGetLatest(entry, out var latest)
                     && VersionsAreAmbiguous(entry.Version, latest))
                 {
                     _updatesLabel.Text =
                         $"≠ {entry.DisplayName}: mod.txt v{entry.Version} "
-                        + $"vs ModWorkshop v{latest} — same release written "
-                        + "two ways. Local file matches what MW serves; no "
+                        + $"vs VostokMods v{latest} — same release written "
+                        + "two ways. Local file matches what the site serves; no "
                         + "download needed. (Hover the ≠ icon for the long "
                         + "explanation.)";
                 }
@@ -6752,18 +6939,18 @@ public class MainForm : Form
         catch { return false; }
     }
 
-    /// <summary>Open the mod's ModWorkshop page in the user's default
-    /// browser. No-op (with a status message) if the mod has no MW ID
+    /// <summary>Open the mod's VostokMods page in the user's default
+    /// browser. No-op (with a status message) if the mod isn't
     /// linked — the context menu's Open item is greyed in that case,
     /// so this only triggers if something else called it.</summary>
     private void OpenModPage(ModEntry e)
     {
-        if (e.ModWorkshopId <= 0)
+        if (!e.Source.IsValid)
         {
-            _modsLabel.Text = $"`{e.DisplayName}` has no ModWorkshop ID linked.";
+            _modsLabel.Text = $"`{e.DisplayName}` isn't linked to VostokMods.";
             return;
         }
-        var url = $"https://modworkshop.net/mod/{e.ModWorkshopId}";
+        var url = e.Source.PageUrl;
         try
         {
             // UseShellExecute = true so the OS resolves the default
@@ -6851,10 +7038,10 @@ public class MainForm : Form
     /// back into settings.json so the next launch sees them too.</summary>
     private void ShowDescription(ModEntry e)
     {
-        var key = e.ModWorkshopId.ToString();
+        var key = e.Source.Key;
         _settings.CachedDescriptions.TryGetValue(key, out var cached);
         using var dlg = new DescriptionDialog(
-            e, _mw, cached ?? "",
+            e, _vm, cached ?? "",
             onCached: text =>
             {
                 _settings.CachedDescriptions[key] = text;
@@ -6864,11 +7051,6 @@ public class MainForm : Form
         dlg.ShowDialog(this);
     }
 
-    /// <summary>Prompts for a ModWorkshop ID (or URL — we parse either)
-    /// and rewrites the mod's mod.txt to set [updates] modworkshop = N.
-    /// Backs up archive mods to a .bak first; for directory mods we
-    /// just overwrite mod.txt in place. Refreshes the registry on
-    /// success so the Update column re-renders with the new state.</summary>
     /// <summary>Reads the mod's mod.txt, applies `transform` to the
     /// content, and writes it back — handling the archive vs
     /// directory-mod split, .bak backups, and error reporting in one
@@ -6914,41 +7096,155 @@ public class MainForm : Form
         }
     }
 
-    private async Task SetModWorkshopIdAsync(ModEntry e)
+    /// <summary>Prompts for the mod's VostokMods page (URL or slug),
+    /// checks the page exists, and links the mod to it. The link is
+    /// recorded in mod_config.cfg's [mod_sources], next to the ones the
+    /// in-game loader keeps, so the mod's own archive is left alone.
+    /// The exception is a mod whose mod.txt already declares a source:
+    /// that declaration outranks the record, so it is the one rewritten
+    /// (archive mods are backed up to a .bak first). Refreshes the
+    /// registry on success so the Update column re-renders.</summary>
+    private async Task LinkModAsync(ModEntry e)
     {
-        var current = e.ModWorkshopId > 0 ? e.ModWorkshopId.ToString() : "";
+        var current = e.Source.IsValid ? e.Source.PageUrl : "";
         var prompt =
-            $"Enter the ModWorkshop ID for `{e.DisplayName}`.\n\n"
-            + "Accepts either a numeric ID (e.g. 56398) or the full mod URL "
-            + "(e.g. https://modworkshop.net/mod/56398/optional-slug).\n\n"
-            + "This rewrites the mod's mod.txt to add or update its "
-            + "[updates] modworkshop = N field.";
-        var input = TextInputDialog.Prompt(this, "Set ModWorkshop ID", prompt, current);
+            $"Paste the VostokMods page for `{e.DisplayName}`.\n\n"
+            + "Accepts the mod page URL "
+            + "(e.g. https://vostokmods.net/mod/eventmodifier) or just its "
+            + "slug (eventmodifier).\n\n"
+            + "The manager uses the link to check for updates and download them.";
+        var input = TextInputDialog.Prompt(this, "Link to VostokMods", prompt, current);
         if (input == null) return;
-        var newId = ManifestEditor.ParseModWorkshopIdInput(input);
-        if (newId <= 0)
+        if (!VostokModsUrl.TryParseSlug(input, out var slug))
         {
             Ui.ThemedMessageBox.Show(this,
-                $"Couldn't parse a ModWorkshop ID from:\n  {input}\n\n"
-                + "Expected a positive integer or a URL like "
-                + "https://modworkshop.net/mod/56398.",
+                $"That isn't a VostokMods mod:\n  {input}\n\n"
+                + "Expected a URL like https://vostokmods.net/mod/eventmodifier "
+                + "or the slug on its own. Numeric ids and links to other "
+                + "sites are not accepted.",
                 "Invalid input",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        if (newId == e.ModWorkshopId)
+
+        // Confirm the page exists before recording it, and take the
+        // slug as the site spells it.
+        VmModDetail detail;
+        try { detail = await _vm.GetModAsync(slug); }
+        catch (VostokModsException ex)
         {
-            _modsLabel.Text = $"`{e.DisplayName}` already linked to ModWorkshop {newId}.";
+            Ui.ThemedMessageBox.Show(this,
+                ex.Kind == VostokModsError.NotFound
+                    ? $"VostokMods has no mod at `{slug}`. Check the URL and try again."
+                    : $"Couldn't reach VostokMods to check `{slug}`:\n{ex.Message}",
+                "Not linked",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        var bak = await EditModTxtAsync(e, txt => ManifestEditor.SetUpdatesModworkshop(txt, newId));
-        if (bak == null) return;
-        _modsLabel.Text = $"Linked `{e.DisplayName}` → ModWorkshop {newId}. {bak}";
+        var source = detail.Source;
+        if (detail.Matches(e.Source))
+        {
+            _modsLabel.Text = $"`{e.DisplayName}` is already linked to {source.PageUrl}.";
+            return;
+        }
+
+        var note = "";
+        if (e.DeclaredSource.IsValid)
+        {
+            var bak = await EditModTxtAsync(e, txt => ManifestEditor.SetUpdatesSource(txt, source));
+            if (bak == null) return;
+            note = " " + bak;
+        }
+        else
+        {
+            _modConfig.SetModSource(e.ModId, e.Version, source);
+            if (!SaveModConfigSafely()) return;
+        }
+        _modsLabel.Text = $"Linked `{e.DisplayName}` → {detail.Name} ({source.PageUrl}).{note}";
 
         // Re-scan + re-check updates so the new link kicks in.
         Rescan();
         UpdateModsStatus();
         PopulateModsGrid();
+        await CheckUpdatesAsync(forceFresh: true);
+    }
+
+    /// <summary>Links installed mods that have no source to their
+    /// VostokMods pages by matching names against the site's listing.
+    /// Only unambiguous exact-name matches are proposed, and nothing is
+    /// recorded until the user confirms the list.</summary>
+    private async Task AutoLinkModsAsync()
+    {
+        var unlinked = UnlinkedMods();
+        if (unlinked.Count == 0)
+        {
+            _updatesLabel.Text = "Updates: every installed mod is linked to VostokMods.";
+            return;
+        }
+
+        _updatesLabel.Text = "Updates: reading the VostokMods mod list ...";
+        List<VmModSummary> listing;
+        try { listing = await _vm.ListAllModsAsync(); }
+        catch (Exception ex)
+        {
+            _updatesLabel.Text = $"Updates: couldn't read the VostokMods mod list — {ex.Message}";
+            return;
+        }
+        foreach (var m in listing)
+            if (m.Id.Length > 0) _vmSlugById[m.Id] = m.Slug;
+
+        var matches = ModLinker.Match(unlinked, listing.Select(m => (m.Slug, m.Name)));
+        var unmatched = unlinked.Count - matches.Count;
+        const string byHand = "Right-click a mod → Link to VostokMods… to link it by hand.";
+        if (matches.Count == 0)
+        {
+            _updatesLabel.Text = $"Updates: {SummarizeUpdates()}";
+            Ui.ThemedMessageBox.Show(this,
+                $"None of the {unlinked.Count} unlinked mod"
+                + (unlinked.Count == 1 ? "" : "s")
+                + " has an exact name match on VostokMods.\n\n" + byHand,
+                "Link to VostokMods",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var ordered = matches
+            .OrderBy(m => m.Key.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        const int shown = 20;
+        var lines = string.Join("\n", ordered.Take(shown).Select(m =>
+            $"   {(string.IsNullOrEmpty(m.Key.DisplayName) ? m.Key.ModId : m.Key.DisplayName)}"
+            + $"  →  vostokmods.net/mod/{m.Value}"));
+        if (ordered.Count > shown) lines += $"\n   …and {ordered.Count - shown} more";
+        var answer = Ui.ThemedMessageBox.Show(this,
+            $"Found a VostokMods page with the same name for {matches.Count} of "
+            + $"{unlinked.Count} unlinked mod" + (unlinked.Count == 1 ? "" : "s") + ":\n\n"
+            + lines + "\n\n"
+            + "Link them? The mod files are not changed, and any link can be "
+            + "changed later from the mod's right-click menu."
+            + (unmatched > 0
+                ? $"\n\n{unmatched} other mod" + (unmatched == 1 ? " has" : "s have")
+                  + " no exact name match and will stay unlinked."
+                : ""),
+            "Link to VostokMods",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button1);
+        if (answer != DialogResult.Yes)
+        {
+            _updatesLabel.Text = $"Updates: {SummarizeUpdates()}";
+            return;
+        }
+
+        foreach (var (entry, slug) in matches)
+            _modConfig.SetModSource(entry.ModId, entry.Version, ModSource.ForSlug(slug));
+        if (!SaveModConfigSafely()) return;
+
+        Rescan();
+        UpdateModsStatus();
+        PopulateModsGrid();
+        _modsLabel.Text = $"Linked {matches.Count} mod" + (matches.Count == 1 ? "" : "s")
+            + " to VostokMods."
+            + (unmatched > 0 ? $" {unmatched} still unlinked. {byHand}" : "");
         await CheckUpdatesAsync(forceFresh: true);
     }
 
@@ -7152,6 +7448,7 @@ public class MainForm : Form
         var oldEnabled = _modConfig.IsEnabled(modId, oldVersion, fallback: true);
         var hadCfgPriority = _modConfig.HasEntry(modId, oldVersion);
         var oldCfgPriority = _modConfig.Priority(modId, oldVersion, e.DeclaredPriority);
+        var oldSource = _modConfig.GetModSource(modId, oldVersion);
 
         _busy = true;
         _updatesLabel.Text = $"Reverting {e.DisplayName} …";
@@ -7191,6 +7488,7 @@ public class MainForm : Form
                 if (hadCfgPriority)
                     _modConfig.SetPriority(modId, newVersion, oldCfgPriority);
                 _modConfig.RemoveEntry(modId, oldVersion);
+                MoveSourceRecord(modId, oldVersion, newVersion, oldSource);
                 SaveModConfigSafely();
                 Rescan();
             }
@@ -7226,10 +7524,21 @@ public class MainForm : Form
         await Task.CompletedTask;
     }
 
+    /// <summary>mod_config.cfg keys a mod's source record by
+    /// mod-id@version, so when a mod's version changes the record has
+    /// to follow it or the mod would come up unlinked.</summary>
+    private void MoveSourceRecord(
+        string modId, string oldVersion, string newVersion, ModSource oldSource)
+    {
+        if (oldSource.IsValid && !_modConfig.GetModSource(modId, newVersion).IsValid)
+            _modConfig.SetModSource(modId, newVersion, oldSource);
+        _modConfig.RemoveModSource(modId, oldVersion);
+    }
+
     private async Task UpdateModAsync(ModEntry e)
     {
-        var mw = e.ModWorkshopId;
-        if (mw <= 0) return;
+        var source = e.Source;
+        if (!source.IsValid) return;
         var label = string.IsNullOrEmpty(e.DisplayName)
             ? Path.GetFileName(e.Path)
             : e.DisplayName;
@@ -7254,6 +7563,7 @@ public class MainForm : Form
         var oldEnabled = _modConfig.IsEnabled(modId, oldVersion, fallback: true);
         var hadCfgPriority = _modConfig.HasEntry(modId, oldVersion);
         var oldCfgPriority = _modConfig.Priority(modId, oldVersion, e.DeclaredPriority);
+        var oldSource = _modConfig.GetModSource(modId, oldVersion);
 
         var finalPath = e.Path;
         var tempPath = finalPath + ".download";
@@ -7278,7 +7588,8 @@ public class MainForm : Form
             catch { /* best-effort; revert still works via any
                        earlier backups for this mod */ }
 
-            await _mw.DownloadLatestAsync(mw, tempPath);
+            await _vm.DownloadAsync(source.Id, tempPath);
+            DownloadedSources.Record(tempPath, source);
 
             // Swap the file. If the original is locked (game running
             // and reading it), File.Delete throws — we leave the temp
@@ -7315,6 +7626,7 @@ public class MainForm : Form
                 if (hadCfgPriority)
                     _modConfig.SetPriority(modId, newVersion, oldCfgPriority);
                 _modConfig.RemoveEntry(modId, oldVersion);
+                MoveSourceRecord(modId, oldVersion, newVersion, oldSource);
                 SaveModConfigSafely();
                 Rescan();
                 migrated = true;
@@ -7335,7 +7647,7 @@ public class MainForm : Form
             // post-update version, not the stale pre-update one.
             SyncActiveProfileFromEntry(modId);
 
-            // Force-refresh the ModWorkshop /mods/versions cache —
+            // Force-refresh the VostokMods version cache —
             // we just downloaded a new file, and the cached API
             // value on _our_ side is likely stale (the cached
             // "outdated" check is what told us to update in the
@@ -7351,7 +7663,7 @@ public class MainForm : Form
             UpdateModsStatus();
             PopulateModsGrid();
 
-            var apiVersion = _latestVersions.TryGetValue(mw, out var av) ? av : "";
+            var apiVersion = _latestVersions.TryGetValue(source.Key, out var av) ? av : "";
             if (string.IsNullOrEmpty(apiVersion))
             {
                 _updatesLabel.Text = $"Updated {label} → v{newVersion}"
@@ -7365,12 +7677,12 @@ public class MainForm : Form
             else
             {
                 // Could be either side lagging — author hasn't
-                // bumped mod.txt yet, OR ModWorkshop's CDN hasn't
+                // bumped mod.txt yet, OR the site's listing hasn't
                 // caught up to a brand-new release. Don't take
                 // sides; just describe what we see.
                 _updatesLabel.Text =
                     $"Updated {label}: file's mod.txt is v{newVersion}, "
-                    + $"ModWorkshop API reports v{apiVersion}. The Update "
+                    + $"VostokMods reports v{apiVersion}. The Update "
                     + "column may still show ⬆ until both sides agree — "
                     + "click Refresh in a couple of minutes.";
             }
@@ -7557,7 +7869,7 @@ public class MainForm : Form
     private async Task OpenProfilesDialogAsync()
     {
         using var dlg = new Ui.ProfileManagerDialog(
-            _registry, _mw, _modConfig, ModsDir, _settings.LockedMods);
+            _registry, _vm, _modConfig, ModsDir, _settings.LockedMods);
         dlg.ShowDialog(this);
 
         // The dialog can change which profile is active in two ways:

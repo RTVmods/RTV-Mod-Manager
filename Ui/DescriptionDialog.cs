@@ -1,11 +1,11 @@
-// Modal that shows a mod's ModWorkshop description text. Read-only
-// in v1 — Refresh re-fetches /mods/<id> on demand. The caller
+// Modal that shows a mod's VostokMods description text. Read-only
+// in v1 — Refresh re-fetches the mod on demand. The caller
 // decides whether to pass cached text (instant open, no spinner)
 // or empty (forces an immediate fetch).
 //
 // The body is a RichTextBox with a tiny markdown renderer so the
 // `## v1.3` headers, `**bold**` runs, and `- bullet` lists that
-// mod authors actually use on ModWorkshop come through styled
+// mod authors actually use on VostokMods come through styled
 // instead of as raw markup characters.
 
 using System.Text.RegularExpressions;
@@ -17,7 +17,7 @@ namespace VostokModManager.Ui;
 public class DescriptionDialog : Form
 {
     private readonly ModEntry _entry;
-    private readonly ModWorkshopClient _client;
+    private readonly VostokModsClient _client;
     private readonly Action<string>? _onCached;
     private readonly RichTextBox _body;
     private readonly Label _status;
@@ -41,7 +41,7 @@ public class DescriptionDialog : Form
     /// so subsequent opens are instant.</summary>
     public DescriptionDialog(
         ModEntry entry,
-        ModWorkshopClient client,
+        VostokModsClient client,
         string cached,
         Action<string>? onCached = null)
     {
@@ -107,9 +107,9 @@ public class DescriptionDialog : Form
             Margin = new Padding(0, 0, 0, 6),
             Font = new Font("Segoe UI", 14f, FontStyle.Bold),
             Text = $"{DisplayLabel(entry)} (v{entry.Version})"
-                + (entry.ModWorkshopId > 0
-                    ? $"  ·  ModWorkshop {entry.ModWorkshopId}"
-                    : "  ·  no ModWorkshop link"),
+                + (entry.Source.IsValid
+                    ? $"  ·  VostokMods {entry.Source.Id}"
+                    : "  ·  no VostokMods link"),
         };
 
         // Reverse-add for Dock layout: bottom-most rows first.
@@ -159,20 +159,20 @@ public class DescriptionDialog : Form
 
     private async Task FetchAsync()
     {
-        if (_entry.ModWorkshopId <= 0)
+        if (!_entry.Source.IsValid)
         {
-            _status.Text = "No ModWorkshop ID linked — set one via right-click → Set ModWorkshop ID.";
-            RenderRaw("(no description available — mod isn't linked to ModWorkshop)");
+            _status.Text = "Not linked to VostokMods — link the mod from its right-click menu.";
+            RenderRaw("(no description available — mod isn't linked to VostokMods)");
             return;
         }
         _refresh.Enabled = false;
-        _status.Text = $"Fetching from /mods/{_entry.ModWorkshopId} …";
+        _status.Text = $"Fetching {_entry.Source.Id} from VostokMods …";
         try
         {
-            var details = await _client.GetModDetailsAsync(_entry.ModWorkshopId);
+            var details = await _client.GetModAsync(_entry.Source.Id);
             var desc = details.Description?.Trim() ?? "";
             if (string.IsNullOrEmpty(desc))
-                RenderRaw("(ModWorkshop returned no description for this mod.)");
+                RenderRaw("(VostokMods returned no description for this mod.)");
             else
                 RenderMarkdown(desc);
             _status.Text = $"Last fetched just now"
@@ -197,7 +197,7 @@ public class DescriptionDialog : Form
         _body.AppendText(text);
     }
 
-    /// <summary>Tiny markdown renderer for the subset ModWorkshop
+    /// <summary>Tiny markdown renderer for the subset VostokMods
     /// authors actually use:
     ///   - `# / ## / ###` headers (different sizes, accent color)
     ///   - `**bold**` runs

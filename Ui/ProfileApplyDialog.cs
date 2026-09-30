@@ -4,7 +4,7 @@
 // builds a plan table showing what will happen for each profile mod.
 // With bundled-archive profiles (the default for "Save Current"), the
 // plan can RESTORE the exact version from the bundle — no network round
-// trip required. Profiles without bundles fall back to ModWorkshop
+// trip required. Profiles without bundles fall back to VostokMods
 // downloads.
 //
 // Row states:
@@ -12,9 +12,9 @@
 //   ↔  Replace    — installed at wrong version, bundled archive available;
 //                   will overwrite the live .vmz with the bundled copy
 //   ⬇  Install    — not installed, bundled archive available; will copy in
-//   ⬆  Update DL  — installed but older, no bundle; will download from MW
-//   ⬇  Missing DL — not installed, no bundle, has MW ID; will download
-//   ✗  No source  — not installed, no bundle, no MW ID; skipped
+//   ⬆  Update DL  — installed but older, no bundle; will download from VostokMods
+//   ⬇  Missing DL — not installed, no bundle, has a VostokMods link; will download
+//   ✗  No source  — not installed, no bundle, no VostokMods link; skipped
 
 using VostokModManager.Api;
 using VostokModManager.Domain;
@@ -33,7 +33,7 @@ public class ProfileApplyDialog : Form
 
     private readonly ModProfile        _profile;
     private readonly ModRegistry       _registry;
-    private readonly ModWorkshopClient _mw;
+    private readonly VostokModsClient  _vm;
     private readonly ModConfig         _modConfig;
     private readonly string            _modsDir;
     /// <summary>Mod IDs the user has explicitly locked. Locked mods
@@ -86,7 +86,7 @@ public class ProfileApplyDialog : Form
         public const string KeepCurrent = "Keep current";
         public const string UseBundle   = "Use bundle";
         public const string UseLibrary  = "Use library";
-        public const string DownloadMW  = "Download new";
+        public const string Download    = "Download new";
         public const string Skip        = "Skip";
         public const string Locked      = "Locked (skip)";
     }
@@ -107,14 +107,14 @@ public class ProfileApplyDialog : Form
     public ProfileApplyDialog(
         ModProfile profile,
         ModRegistry registry,
-        ModWorkshopClient mw,
+        VostokModsClient vm,
         ModConfig modConfig,
         string modsDir,
         IEnumerable<string>? lockedModIds = null)
     {
         _profile      = profile;
         _registry     = registry;
-        _mw           = mw;
+        _vm           = vm;
         _modConfig    = modConfig;
         _modsDir      = modsDir;
         _lockedModIds = new HashSet<string>(
@@ -151,7 +151,7 @@ public class ProfileApplyDialog : Form
             byId.TryGetValue(pm.ModId, out var installed);
             var bundle = _profile.ResolveBundledArchive(pm);
             var hasBundle = !string.IsNullOrEmpty(bundle);
-            var hasMw     = pm.ModWorkshopId > 0;
+            var hasSource = pm.SourceRef.IsValid;
 
             // Library lookup. Exact (mod_id, version) match wins; if
             // none exists (common for older profiles whose pm.Version
@@ -207,10 +207,10 @@ public class ProfileApplyDialog : Form
                     row = new PlanRow(RowKind.ReplaceFromLibrary, pm, installed, "", libPath,
                         "↔", $"Will {direction} from library (installed {installed.Version} → {pm.Version})", true);
                 }
-                else if (cmp < 0 && hasMw)
+                else if (cmp < 0 && hasSource)
                 {
                     row = new PlanRow(RowKind.UpdateDownload, pm, installed, "", "",
-                        "⬆", "Outdated — update available from ModWorkshop", true);
+                        "⬆", "Outdated — update available from VostokMods", true);
                 }
                 else
                 {
@@ -232,15 +232,15 @@ public class ProfileApplyDialog : Form
                 row = new PlanRow(RowKind.InstallFromLibrary, pm, null, "", libPath,
                     "⬇", "Will install from library (already downloaded)", true);
             }
-            else if (hasMw)
+            else if (hasSource)
             {
                 row = new PlanRow(RowKind.MissingDownload, pm, null, "", "",
-                    "⬇", "Not installed — will download from ModWorkshop", true);
+                    "⬇", "Not installed — will download from VostokMods", true);
             }
             else
             {
                 row = new PlanRow(RowKind.NoSource, pm, null, "", "",
-                    "✗", "Not installed (no bundle, no library, no ModWorkshop ID)", false);
+                    "✗", "Not installed (no bundle, no library, no VostokMods link)", false);
             }
             _plan.Add(row);
         }
@@ -277,11 +277,11 @@ public class ProfileApplyDialog : Form
         var isInstalled = row.Installed != null;
         var hasBundle   = !string.IsNullOrEmpty(row.BundlePath);
         var hasLibrary  = !string.IsNullOrEmpty(row.LibraryPath);
-        var hasMw       = row.ProfileMod.ModWorkshopId > 0;
+        var hasSource   = row.ProfileMod.SourceRef.IsValid;
         if (isInstalled) choices.Add(SourceChoice.KeepCurrent);
         if (hasBundle)   choices.Add(SourceChoice.UseBundle);
         if (hasLibrary)  choices.Add(SourceChoice.UseLibrary);
-        if (hasMw)       choices.Add(SourceChoice.DownloadMW);
+        if (hasSource)   choices.Add(SourceChoice.Download);
         if (choices.Count == 0) choices.Add(SourceChoice.Skip);
         return choices;
     }
@@ -296,8 +296,8 @@ public class ProfileApplyDialog : Form
         RowKind.InstallFromBundle   => SourceChoice.UseBundle,
         RowKind.ReplaceFromLibrary  => SourceChoice.UseLibrary,
         RowKind.InstallFromLibrary  => SourceChoice.UseLibrary,
-        RowKind.UpdateDownload      => SourceChoice.DownloadMW,
-        RowKind.MissingDownload     => SourceChoice.DownloadMW,
+        RowKind.UpdateDownload      => SourceChoice.Download,
+        RowKind.MissingDownload     => SourceChoice.Download,
         RowKind.NoSource            => SourceChoice.Skip,
         _                           => SourceChoice.Skip,
     };
@@ -318,7 +318,7 @@ public class ProfileApplyDialog : Form
             SourceChoice.UseLibrary  => isInstalled
                                             ? RowKind.ReplaceFromLibrary
                                             : RowKind.InstallFromLibrary,
-            SourceChoice.DownloadMW  => isInstalled
+            SourceChoice.Download    => isInstalled
                                             ? RowKind.UpdateDownload
                                             : RowKind.MissingDownload,
             SourceChoice.Locked      => RowKind.LockedSkip,
@@ -418,8 +418,8 @@ public class ProfileApplyDialog : Form
         if (installs     > 0) parts.Add($"{installs} from bundle (install)");
         if (libReplaces  > 0) parts.Add($"{libReplaces} from library (replace)");
         if (libInstalls  > 0) parts.Add($"{libInstalls} from library (install)");
-        if (updates      > 0) parts.Add($"{updates} update via MW");
-        if (downloads    > 0) parts.Add($"{downloads} download via MW");
+        if (updates      > 0) parts.Add($"{updates} update via VostokMods");
+        if (downloads    > 0) parts.Add($"{downloads} download via VostokMods");
         if (noSrc        > 0) parts.Add($"{noSrc} unavailable");
         if (locked       > 0) parts.Add($"{locked} 🔒 locked (skipped)");
 
@@ -487,7 +487,7 @@ public class ProfileApplyDialog : Form
         // ModName + Status are both Fill columns sharing leftover
         // width 50/50. Previously Status was fixed at 320px and got
         // cut off on long messages like "Not installed — will
-        // download from ModWorkshop", while ProfileVer/Installed
+        // download from VostokMods", while ProfileVer/Installed
         // hogged 100px each for content as short as "1.0.0" / "—".
         // The two version columns are now sized to their realistic
         // max (centered, monospace cell font, ~7 chars).
@@ -635,9 +635,9 @@ public class ProfileApplyDialog : Form
         RowKind.InstallFromLibrary
             => ("⬇", "Install from library (already downloaded)"),
         RowKind.UpdateDownload
-            => ("⬆", "Download latest from ModWorkshop"),
+            => ("⬆", "Download latest from VostokMods"),
         RowKind.MissingDownload
-            => ("⬇", "Download from ModWorkshop"),
+            => ("⬇", "Download from VostokMods"),
         RowKind.NoSource
             => ("✗", "Skipped"),
         RowKind.LockedSkip
@@ -826,15 +826,15 @@ public class ProfileApplyDialog : Form
                 .Select(p => p.ModId)
                 .Where(id => !string.IsNullOrEmpty(id)),
             StringComparer.OrdinalIgnoreCase);
-        // Parallel MW-id set for the wipe predicate. Some profiles
+        // Parallel source set for the wipe predicate. Some profiles
         // (especially JSON-spec imports) carry URL-slug ModIds that
         // don't match the manifest id of the live .vmz; without a
         // second key we'd wipe a mod that's actually in the profile
         // just because the string ids disagree.
-        var profileMwIds = new HashSet<int>(
+        var profileSources = new HashSet<ModSource>(
             _profile.Mods
-                .Select(p => p.ModWorkshopId)
-                .Where(i => i > 0));
+                .Select(p => p.SourceRef)
+                .Where(s => s.IsValid));
 
         // Snapshot live entries once — _registry.Entries mutates on
         // rescan and we read it again in Phase 3.
@@ -869,10 +869,10 @@ public class ProfileApplyDialog : Form
             if (ct.IsCancellationRequested) break;
             if (_lockedModIds.Contains(entry.ModId)) continue;
             // Keep when EITHER identity matches the profile — the
-            // string id (manifest match) or the MW id (recovers when
+            // string id (manifest match) or the source (recovers when
             // the profile carries a slug instead of the manifest id).
             if (profileModIds.Contains(entry.ModId)) continue;
-            if (entry.ModWorkshopId > 0 && profileMwIds.Contains(entry.ModWorkshopId)) continue;
+            if (entry.Source.IsValid && profileSources.Contains(entry.Source)) continue;
             try
             {
                 File.Delete(entry.Path);
@@ -888,7 +888,7 @@ public class ProfileApplyDialog : Form
 
         // ── Phase 1: File operations ─────────────────────────────────
         // Local sources first (bundle + library — both are free), then
-        // MW downloads. Library copies short-circuit a redownload when
+        // VostokMods downloads. Library copies short-circuit a redownload when
         // we already have the .vmz on disk from a previous profile.
 
         // Local-bundle ops
@@ -951,7 +951,7 @@ public class ProfileApplyDialog : Form
                 // Library files are named `<safeId>__v<ver>.vmz`; live
                 // mods conventionally use just `<safeId>.vmz`. Use the
                 // safe-id form so the layout in `<mods>/` stays clean
-                // and matches what an MW download would have produced.
+                // and matches what a VostokMods download would have produced.
                 var pm = row.ProfileMod;
                 var liveName = $"{ModProfile.SafeFileName(pm.ModId)}.vmz";
                 var dst      = Path.Combine(_modsDir, liveName);
@@ -969,7 +969,7 @@ public class ProfileApplyDialog : Form
             }
         }
 
-        // MW downloads
+        // VostokMods downloads
         var downloads = actions
             .Where(a => a.optIn && (a.kind == RowKind.UpdateDownload
                                   || a.kind == RowKind.MissingDownload))
@@ -980,10 +980,30 @@ public class ProfileApplyDialog : Form
             var pm = row.ProfileMod;
             var fileName = $"{ModProfile.SafeFileName(pm.ModId)}.vmz";
             var dest = Path.Combine(_modsDir, fileName);
-            Advance($"⬇ {pm.DisplayName} (MW {pm.ModWorkshopId}) …");
+            var source = pm.SourceRef;
+            if (!source.IsValid)
+            {
+                Advance($"  ✗ {pm.DisplayName}: no VostokMods link — can't download.");
+                continue;
+            }
+            Advance($"⬇ {pm.DisplayName} (VostokMods {source.Id}) …");
             try
             {
-                await Task.Run(() => _mw.DownloadLatestAsync(pm.ModWorkshopId, dest, ct), ct);
+                // The profile's recorded version first; when the host
+                // doesn't carry it, the newest one (Phase 3 reconciles
+                // the profile's version with what landed on disk).
+                var wanted = string.IsNullOrWhiteSpace(pm.Version) ? null : pm.Version;
+                try
+                {
+                    await Task.Run(() => _vm.DownloadAsync(source.Id, dest, wanted, ct), ct);
+                }
+                catch (VostokModsException ex)
+                    when (wanted != null && ex.Kind == VostokModsError.VersionNotFound)
+                {
+                    Log($"  ↳ v{wanted} isn't on VostokMods — downloading the newest version");
+                    await Task.Run(() => _vm.DownloadAsync(source.Id, dest, null, ct), ct);
+                }
+                DownloadedSources.Record(dest, source);
                 // Snapshot the freshly-downloaded .vmz into the
                 // library too. Library is canonical for the new
                 // profile model — without this step a .json-spec
@@ -1041,7 +1061,7 @@ public class ProfileApplyDialog : Form
         // what's actually on disk after the file ops + rescan. This
         // is critical for the next profile switch: the library is
         // keyed by (mod_id, MANIFEST version), so a stale
-        // pm.Version (e.g. the spec version "0.0.420" while the MW
+        // pm.Version (e.g. the spec version "0.0.420" while the
         // download contains "0.4.20_R" in its mod.txt) would cause
         // ProfileSwitcher.Find to miss the library file entirely
         // and report it as "missing from library (skipped)".
@@ -1066,22 +1086,23 @@ public class ProfileApplyDialog : Form
             // the manifest id straight out of the live mod.txt).
             var entry = _registry.Entries.FirstOrDefault(
                 e => string.Equals(e.ModId, pm.ModId, StringComparison.OrdinalIgnoreCase));
-            // Fallback: MW id. Profiles imported from a .json spec
-            // commonly use the ModWorkshop URL slug as `pm.ModId`,
+            // Fallback: source. Profiles imported from a .json spec
+            // commonly use the mod page URL slug as `pm.ModId`,
             // which doesn't match what the author wrote in mod.txt.
-            // The numeric MW id is stable across both, so when the
+            // The source is stable across both, so when the
             // string ids don't agree we recover via that — and
             // reconcile pm.ModId to the manifest's real id so the
             // next apply / switch matches on the primary path.
-            if (entry == null && pm.ModWorkshopId > 0)
+            var pmSource = pm.SourceRef;
+            if (entry == null && pmSource.IsValid)
             {
                 entry = _registry.Entries.FirstOrDefault(
-                    e => e.ModWorkshopId == pm.ModWorkshopId
+                    e => e.Source == pmSource
                       && !string.IsNullOrEmpty(e.ModId));
                 if (entry != null)
                 {
                     Log($"  ↳ {pm.DisplayName}: profile id '{pm.ModId}' "
-                        + $"→ archive id '{entry.ModId}' (matched via MW {pm.ModWorkshopId})");
+                        + $"→ archive id '{entry.ModId}' (matched via VostokMods {pmSource.Id})");
                     pm.ModId = entry.ModId;
                     profileDirty = true;
                 }
