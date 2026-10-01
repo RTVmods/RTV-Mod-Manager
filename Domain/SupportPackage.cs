@@ -166,7 +166,7 @@ public static class SupportPackage
                     var jsonEntry = zip.CreateEntry("profile.json", CompressionLevel.Optimal);
                     using var es = jsonEntry.Open();
                     using var sw = new StreamWriter(es);
-                    sw.Write(JsonSerializer.Serialize(profile, _opts));
+                    sw.Write(MetroProfile.Serialize(profile));
                 }
                 catch (Exception ex)
                 {

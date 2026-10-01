@@ -6,13 +6,16 @@
 // On-disk layout under %APPDATA%\VostokModManager\profiles\:
 //
 //   <profile-name>/
-//     profile.json          ← metadata
+//     profile.json          ← metadata, in the mod loader's metroprofile
+//                             schema (see MetroProfile.cs)
 //     mods/
 //       <orig-filename>.vmz ← byte-for-byte copies of every bundled mod
 //
 // Export wraps the whole folder into a single .vmprofile zip the user
 // can hand around. Import accepts either a .vmprofile zip, a loose
 // .json file (legacy / metadata-only), or a folder layout above.
+// Because profile.json is a metroprofile, the same zip is a modpack the
+// mod loader accepts on its Modpacks tab.
 //
 // When a profile is applied, mods with a bundled archive are restored
 // from the bundle (deterministic — exact version pinning). Mods without
@@ -20,7 +23,6 @@
 // downloading from VostokMods.
 
 using System.IO.Compression;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -78,12 +80,6 @@ public class ModProfile
     public string FolderPath { get; set; } = "";
 
     // ── Persistence ──────────────────────────────────────────────────
-
-    private static readonly JsonSerializerOptions _opts = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-    };
 
     /// <summary>Root folder for all profile subfolders.</summary>
     public static string ProfilesDir =>
@@ -163,7 +159,7 @@ public class ModProfile
             try
             {
                 var txt = File.ReadAllText(f);
-                var p = JsonSerializer.Deserialize<ModProfile>(txt, _opts);
+                var p = MetroProfile.Parse(txt);
                 if (p != null)
                 {
                     // No FolderPath — bundles aren't available, the
@@ -189,7 +185,7 @@ public class ModProfile
         try
         {
             var txt = File.ReadAllText(jsonPath);
-            var p = JsonSerializer.Deserialize<ModProfile>(txt, _opts);
+            var p = MetroProfile.Parse(txt);
             if (p == null) return null;
             p.FolderPath = folderPath;
             return p;
@@ -204,9 +200,61 @@ public class ModProfile
         try
         {
             var txt = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<ModProfile>(txt, _opts);
+            return MetroProfile.Parse(txt);
         }
         catch { return null; }
+    }
+
+    /// <summary>Rewrites every stored profile.json that is still in
+    /// the manager's earlier schema as a metroprofile. Each original
+    /// is first copied to `_backup_&lt;timestamp&gt;/` inside
+    /// ProfilesDir. Bundled archives are not touched. Returns the
+    /// number of profiles converted; safe to call on every start.</summary>
+    public static int MigrateStore()
+    {
+        var dir = ProfilesDir;
+        if (!Directory.Exists(dir)) return 0;
+        var backup = System.IO.Path.Combine(
+            dir, "_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        var converted = 0;
+
+        foreach (var sub in Directory.GetDirectories(dir))
+        {
+            var jsonPath = System.IO.Path.Combine(sub, "profile.json");
+            if (!File.Exists(jsonPath)) continue;
+            try
+            {
+                var txt = File.ReadAllText(jsonPath);
+                if (MetroProfile.IsMetro(txt)) continue;
+                var p = MetroProfile.Parse(txt);
+                if (p == null) continue;
+                var keep = System.IO.Path.Combine(backup, System.IO.Path.GetFileName(sub));
+                Directory.CreateDirectory(keep);
+                File.Copy(jsonPath, System.IO.Path.Combine(keep, "profile.json"), overwrite: true);
+                File.WriteAllText(jsonPath, MetroProfile.Serialize(p));
+                converted++;
+            }
+            catch { /* leave this one as it is; it still loads */ }
+        }
+
+        // Single-JSON profiles at the top level become folders, unless
+        // a folder of that name is already there.
+        foreach (var f in Directory.GetFiles(dir, "*.json"))
+        {
+            try
+            {
+                var p = MetroProfile.Parse(File.ReadAllText(f));
+                if (p == null || string.IsNullOrWhiteSpace(p.Name)) continue;
+                if (Directory.Exists(p.DefaultFolderPath)) continue;
+                Directory.CreateDirectory(backup);
+                File.Copy(f, System.IO.Path.Combine(backup, System.IO.Path.GetFileName(f)), overwrite: true);
+                p.SaveMetadataOnly();
+                File.Delete(f);
+                converted++;
+            }
+            catch { /* leave this one as it is; it still loads */ }
+        }
+        return converted;
     }
 
     /// <summary>Loads a profile from a .vmprofile zip. Extracts it
@@ -225,7 +273,7 @@ public class ModProfile
             if (jsonEntry == null) return null;
             using var s = jsonEntry.Open();
             using var r = new StreamReader(s);
-            meta = JsonSerializer.Deserialize<ModProfile>(r.ReadToEnd(), _opts);
+            meta = MetroProfile.Parse(r.ReadToEnd());
         }
         catch { return null; }
         if (meta == null) return null;
@@ -299,7 +347,7 @@ public class ModProfile
         FolderPath = folder;
         File.WriteAllText(
             System.IO.Path.Combine(folder, "profile.json"),
-            JsonSerializer.Serialize(this, _opts));
+            MetroProfile.Serialize(this));
         return failed;
     }
 
@@ -326,7 +374,7 @@ public class ModProfile
         Directory.CreateDirectory(folder);
         File.WriteAllText(
             System.IO.Path.Combine(folder, "profile.json"),
-            JsonSerializer.Serialize(this, _opts));
+            MetroProfile.Serialize(this));
         FolderPath = folder;
     }
 
@@ -379,6 +427,7 @@ public class ModProfile
                 IsEnabled       = m.IsEnabled,
                 Priority        = m.Priority,
                 Source          = m.Source,
+                PackName        = m.PackName,
                 ArchiveFileName = "", // recomputed below per library lookup
             }).ToList(),
         };
@@ -409,7 +458,43 @@ public class ModProfile
         var jsonEntry = zip.CreateEntry("profile.json", CompressionLevel.Optimal);
         using (var es = jsonEntry.Open())
         using (var sw = new StreamWriter(es))
-            sw.Write(JsonSerializer.Serialize(exportProfile, _opts));
+            sw.Write(MetroProfile.Serialize(exportProfile));
+    }
+
+    /// <summary>Writes this profile as a modpack for the mod loader: a
+    /// zip holding only profile.json. The loader lists a .zip like this
+    /// on its Modpacks tab when it is placed in the game's mods folder,
+    /// and downloads each mod from its recorded source; a mod with no
+    /// source has to be installed already.</summary>
+    public void ExportAsModpackZip(string path)
+    {
+        var dir = System.IO.Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        if (File.Exists(path)) File.Delete(path);
+
+        var pack = new ModProfile
+        {
+            Name        = Name,
+            Description = Description,
+            CreatedAt   = CreatedAt,
+            UpdatedAt   = DateTime.UtcNow,
+            Mods        = Mods.Select(m => new ProfileMod
+            {
+                ModId       = m.ModId,
+                DisplayName = m.DisplayName,
+                Version     = m.Version,
+                IsEnabled   = m.IsEnabled,
+                Priority    = m.Priority,
+                Source      = m.Source,
+                PackName    = m.PackName,
+            }).ToList(),
+        };
+        using var fs  = File.Create(path);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        var jsonEntry = zip.CreateEntry("profile.json", CompressionLevel.Optimal);
+        using var es = jsonEntry.Open();
+        using var sw = new StreamWriter(es);
+        sw.Write(MetroProfile.Serialize(pack));
     }
 
     /// <summary>Deletes the entire profile folder (including bundled

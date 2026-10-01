@@ -1,10 +1,12 @@
 # RTV Mod Manager
 
-A standalone desktop app for managing [Road to Vostok](https://modworkshop.net/mod/56801) mods. Detects every kind of conflict the Vostok Mod Loader (MML) cares about, lets you enable / disable / reorder mods with live persistence to `mod_config.cfg`, downloads updates from ModWorkshop, supports named profiles with bundled-archive snapshots, ships a mod-pack importer for sharing curated mod lists as JSON, includes a **Mod Packager** tool for authoring your own `.vmz` releases, and resolves missing dependencies on install with one click.
+A standalone desktop app for managing Road to Vostok mods. Detects every kind of conflict the Metro Mod Loader (MML) cares about, lets you enable / disable / reorder mods with live persistence to `mod_config.cfg`, browses, installs and updates mods from [VostokMods](https://vostokmods.net), supports named profiles with bundled-archive snapshots, ships a mod-pack importer for sharing curated mod lists as JSON, includes a **Mod Packager** tool for authoring your own `.vmz` releases, and resolves missing dependencies on install with one click.
 
 A single self-contained `.exe`. No installer, no .NET runtime to fetch, no extra dependencies.
 
-**ModWorkshop:** <https://modworkshop.net/mod/56801>
+**Downloads:** <https://github.com/RTVmods/RTV-Mod-Manager/releases>
+
+Built for Road to Vostok Build 2 and MML 3.4 or later.
 
 ---
 
@@ -25,7 +27,8 @@ Both editions detect the same conflicts, share the same `settings.json`, and wor
 
 ### Mods grid
 - **Enable / disable** any mod — toggles move the `.vmz` between the live mods folder and `mods/Disabled/`, and rewrite `mod_config.cfg` in lockstep.
-- **Update column** — `⬆` when a newer release is on ModWorkshop, `✓` when current, `—` when the mod has no link. Click `⬆` to fetch and swap in the latest `.vmz` (replaced version is auto-backed-up first).
+- **Update column** — `⬆` when a newer release is on VostokMods, `✓` when current, `—` when the mod has no link. Click `⬆` to fetch and swap in the latest `.vmz` (replaced version is auto-backed-up first). Click `—` to link the mod to its VostokMods page.
+- **Browse Mods…** — an embedded VostokMods browser. Downloading a mod there, or clicking **Install this mod** on its page, installs it straight into the active profile.
 - **Load-order priority** — edit in place; persisted to `mod_config.cfg` immediately.
 - **Drag-and-drop install** — drop `.vmz` files to install, or a `.json` mod-pack to open the importer.
 - **Filter, bulk enable/disable, multi-select batch delete**, per-column width persistence.
@@ -48,18 +51,28 @@ Every detected conflict appears under one of three severity tiers:
 
 The **AI edition** can additionally submit `file_overlap` `.gd` conflicts to Claude, which returns a `merge_safe` / `order_resolves` / `incompatible` verdict (with merged source when safe).
 
+### Where a mod comes from
+A mod's source is `vostokmods:<slug>`, where the slug is the last part of its page URL (`vostokmods.net/mod/<slug>`). The manager reads it from the same two places the mod loader does:
+
+- `mod.txt`: `[updates]` `source="vostokmods:<slug>"`, set by the mod's author.
+- `mod_config.cfg`: the `[mod_sources]` record for the mod, written when the manager (or the loader) downloads it, or when you link it by hand.
+
+Right-click a mod → **Link to VostokMods…** to link one, or right-click **Browse Mods…** → **Link installed mods to VostokMods…** to link every mod whose name matches exactly one page on the site.
+
 ### Profiles
 Save / apply / clone / import / export complete mod loadouts as `.vmprofile` files. A profile bundles byte-for-byte `.vmz` copies so it's a full restore point even on a fresh machine. Applying a profile reconciles the live folder, the Library, and `mod_config.cfg`. Locked mods survive profile switches untouched.
 
+A profile's `profile.json` uses the mod loader's own modpack schema (`metroprofile` 1), so a profile exported as **Mod loader modpack (.zip)** and placed in the game's `mods` folder shows up on the loader's Modpacks tab.
+
 ### Mod packs
-Lightweight JSON files listing mods to merge into the active profile (distinct from full profiles). Import via drag-drop or the **Import list…** button; author via the Mod Packager's **Export JSON…**.
+Lightweight JSON files listing mods to merge into the active profile (distinct from full profiles). Import via drag-drop or the **Import list…** button; author via the Mod Packager's **Export JSON…**. Right-click **Import list…** to import a modpack published on VostokMods, at the versions the pack lists.
 
 ### Mod Packager (creator tool)
 Package a folder or existing `.vmz` into a fresh archive with edited manifest fields and a proper `[dependencies]` section — output uses forward-slash entry paths so the in-game loader accepts it. Also exports mod-pack JSON.
 
 ### Dependencies, updates, crash checkpoints
 - One-click resolution of missing dependencies on install, with recursive re-checking.
-- Per-mod update checks against ModWorkshop; MML loader version checks against GitHub releases; the manager checks its own latest version too.
+- Per-mod update checks against VostokMods; MML loader version checks against GitHub releases; the manager checks its own latest GitHub release and can update itself in place.
 - Two-tier crash rollback (LastLaunch / LastKnownGood) captured on launch and promoted on clean exit.
 
 ---
@@ -67,8 +80,8 @@ Package a folder or existing `.vmz` into a fresh archive with edited manifest fi
 ## File formats
 
 - **`.vmz`** — a mod: zip of mod files + a `mod.txt` manifest (Godot INI format).
-- **`.vmprofile`** — an exported profile: zip of `profile.json` + bundled `mods/*.vmz`.
-- **`mod_config.cfg`** — the in-game loader's per-profile enabled / priority / active-profile state.
+- **`.vmprofile`** — an exported profile: zip of `profile.json` (metroprofile schema) + bundled `mods/*.vmz`.
+- **`mod_config.cfg`** — the in-game loader's per-profile enabled / priority / active-profile state and its `[mod_sources]` records. The manager changes only the entries it manages and writes everything else back exactly as it found it.
 
 ---
 
@@ -91,7 +104,7 @@ The single version source is `<Version>` in `VostokModManager.csproj`. The `AI_R
 | Folder | Contents |
 |---|---|
 | `Domain/` | Core logic: registry, archive parsing, conflict detection, profiles, library, packager, backups, checkpoints. |
-| `Api/` | ModWorkshop client, MML GitHub release checker, Claude CLI runner. |
+| `Api/` | VostokMods client, GitHub release checkers (MML and the manager itself), Claude CLI runner. |
 | `Ai/` | AI conflict resolver (AI edition only). |
 | `Ui/` | Dialogs (profiles, packager, settings, themed message boxes, etc.). |
 | `MainForm.cs` | The main window. |

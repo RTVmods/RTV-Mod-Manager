@@ -17,22 +17,23 @@
 //       {
 //         "mod_id":          "weapon-rig-api",
 //         "display_name":    "Weapon Rig API",
-//         "mod_workshop_id": 56123,
+//         "source":          "vostokmods:weapon-rig-api",
 //         "version":         "1.2.0",        // informational
 //         "is_enabled":      true,           // default true
 //         "priority":        0,              // default 0
 //         "dependencies":  [
-//           { "mod_id": "weapon-rigger", "mod_workshop_id": 56124 }
+//           { "mod_id": "weapon-rigger", "source": "vostokmods:weapon-rigger" }
 //         ]
 //       }
 //     ]
 //   }
 //
-// Either mod_id OR mod_workshop_id MUST be present per entry — without
-// at least one we can't dedupe or download. `dependencies` may be
-// nested arbitrarily deep; Flatten() walks the tree and returns a
-// deduped flat list keyed first by mod_id (case-insensitive), then
-// by mod_workshop_id when an entry has no id.
+// Either mod_id OR source MUST be present per entry — without
+// at least one we can't dedupe or download. `source` is a
+// "vostokmods:<slug>" key, a mod page URL or a bare slug.
+// `dependencies` may be nested arbitrarily deep; Flatten() walks the
+// tree and returns a deduped flat list keyed first by mod_id
+// (case-insensitive), then by source when an entry has no id.
 //
 // Multiple deps per mod — fully supported via the array form:
 //
@@ -40,11 +41,11 @@
 //     "mods": [
 //       {
 //         "mod_id": "mega-mod",
-//         "mod_workshop_id": 56999,
+//         "source": "vostokmods:mega-mod",
 //         "dependencies": [
-//           { "mod_id": "core-lib",   "mod_workshop_id": 56100 },
-//           { "mod_id": "ui-toolkit", "mod_workshop_id": 56101 },
-//           { "mod_id": "audio-pack", "mod_workshop_id": 56102 }
+//           { "mod_id": "core-lib",   "source": "vostokmods:core-lib" },
+//           { "mod_id": "ui-toolkit", "source": "vostokmods:ui-toolkit" },
+//           { "mod_id": "audio-pack", "source": "vostokmods:audio-pack" }
 //         ]
 //       }
 //     ]
@@ -127,6 +128,18 @@ public class ModListImport
     [JsonPropertyName("mods")]
     public List<ImportEntry> Mods { get; set; } = new();
 
+    /// <summary>When true, each entry's `version` is the version to
+    /// download rather than a note. Set for a modpack imported from
+    /// VostokMods, whose manifest pins every mod.</summary>
+    [JsonIgnore]
+    public bool PinVersions { get; set; }
+
+    /// <summary>Expected SHA-256 (lowercase hex) of a mod's download,
+    /// keyed by source key. A download that does not match is
+    /// rejected. Empty for a hand-written list.</summary>
+    [JsonIgnore]
+    public Dictionary<string, string> Checksums { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions _opts = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -152,7 +165,7 @@ public class ModListImport
     /// dependencies[]) producing a deduped flat list with lineage.
     ///
     /// Dedup key: mod_id case-insensitive when present, else
-    /// `mw#<id>`. Entries with NEITHER a mod_id NOR a mod_workshop_id
+    /// the source key. Entries with NEITHER a mod_id NOR a source
     /// are silently dropped — there's no way to download or dedupe
     /// them.
     ///

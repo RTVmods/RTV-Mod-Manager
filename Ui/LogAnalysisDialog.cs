@@ -135,7 +135,16 @@ public class LogAnalysisDialog : Form
             _logPicker.Items.Add(new LogItem { Path = p, Label = label });
         }
         _logPicker.DisplayMember = nameof(LogItem.Label);
-        if (_logPicker.Items.Count > 0) _logPicker.SelectedIndex = 0;
+        // Start on the newest log the mod loader actually ran in.
+        if (_logPicker.Items.Count > 0)
+        {
+            var preferred = GodotLogAnalyzer.LatestLoaderLog();
+            var at = 0;
+            for (var i = 0; i < _logPicker.Items.Count; i++)
+                if (string.Equals((_logPicker.Items[i] as LogItem)?.Path, preferred,
+                        StringComparison.OrdinalIgnoreCase)) { at = i; break; }
+            _logPicker.SelectedIndex = at;
+        }
         _logPicker.SelectedIndexChanged += (_, _) => ReloadAnalysis();
         pickerRow.Controls.Add(_logPicker);
 
@@ -206,7 +215,7 @@ public class LogAnalysisDialog : Form
 
     private void ReloadAnalysis()
     {
-        var path = (_logPicker.SelectedItem as LogItem)?.Path ?? GodotLogAnalyzer.LatestLog();
+        var path = (_logPicker.SelectedItem as LogItem)?.Path ?? GodotLogAnalyzer.LatestLoaderLog();
         _analysis = GodotLogAnalyzer.Analyze(path);
 
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -217,9 +226,14 @@ public class LogAnalysisDialog : Form
         {
             _headerLabel.Text =
                 $"Engine {_analysis.EngineVersion}   ·   "
+                + (_analysis.LoaderVersion.Length > 0
+                    ? $"Mod loader v{_analysis.LoaderVersion}   ·   "
+                    : "Mod loader did not run   ·   ")
                 + $"{_analysis.LoadOrder.Count} mods loaded   ·   "
-                + $"{_analysis.Hooks.Count} hooks   ·   "
-                + $"{_analysis.HookClashes.Count} hook clash(es)   ·   "
+                + (_analysis.HooksNotLogged
+                    ? "hooks not logged   ·   "
+                    : $"{_analysis.Hooks.Count} hooks   ·   "
+                      + $"{_analysis.HookClashes.Count} hook clash(es)   ·   ")
                 + $"{_analysis.Clashes.Count} script-override clash(es)   ·   "
                 + $"{_analysis.Issues.Count} issue(s)";
         }
@@ -232,7 +246,9 @@ public class LogAnalysisDialog : Form
             if (c.Mods.Count >= 3)
                 _hookGrid.Rows[idx].Cells["Count"].Style.ForeColor = Color.FromArgb(255, 200, 80);
         }
-        if (_analysis.HookClashes.Count == 0)
+        if (_analysis.HooksNotLogged)
+            _hookGrid.Rows.Add("(not logged)", "", GodotLogAnalyzer.HooksNotLoggedHint);
+        else if (_analysis.HookClashes.Count == 0)
             _hookGrid.Rows.Add("(none)", "", "No function was hooked by more than one mod in this session.");
 
         _clashGrid.Rows.Clear();

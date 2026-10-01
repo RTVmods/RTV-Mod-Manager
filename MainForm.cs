@@ -177,6 +177,11 @@ public class MainForm : Form
         _isFirstRun = !File.Exists(Settings.Path);
         _settings = Settings.Load();
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
+        // Stored profiles are kept in the mod loader's profile schema;
+        // bring any from an earlier build of the manager up to it
+        // before the first one is read.
+        MetroProfile.ModloaderVersion = MmlInstall.DetectInstalledVersion(ModsDir);
+        try { ModProfile.MigrateStore(); } catch { /* they still load as they are */ }
 #if AI_RESOLVER
         _claude.OverridePath = _settings.ClaudePath;
         _resolver = new ConflictResolver(_claude, _registry)
@@ -3090,17 +3095,17 @@ public class MainForm : Form
         // plus their deps" manifest the user dropped in). Adds to
         // the CURRENT active profile — never creates / replaces a
         // profile, never wipes anything. Each entry's
-        // mod_workshop_id drives the download. Distinct enough from
+        // source drives the download. Distinct enough from
         // Install mod… that it gets its own button rather than a
         // dropdown — the user shouldn't have to dig through a menu
         // to grab a 50-mod bundle a friend shared as JSON.
         var importList = ThemedButton("Import list…");
         importList.Margin = new Padding(0, 2, 4, 2);
         importList.Click += async (_, _) => await ImportModListFromFilePickerAsync();
-        // Right-click on Import list… → save a hand-editable JSON
-        // template. Keeps the template feature discoverable without
-        // adding another toolbar column; the tooltip below tells
-        // the user about both actions.
+        // Right-click on Import list… → import a modpack published on
+        // VostokMods, or save a hand-editable JSON template. Keeps both
+        // discoverable without adding another toolbar column; the
+        // tooltip below tells the user about them.
         var importMenu = new ContextMenuStrip
         {
             Font = new Font("Segoe UI", 11f),
@@ -3111,12 +3116,19 @@ public class MainForm : Form
                         + "to list the mods you want bundled.",
         };
         saveTemplateItem.Click += (_, _) => SaveSampleModListTemplate();
+        var hostedPackItem = new ToolStripMenuItem("🌐 Import modpack from VostokMods…")
+        {
+            ToolTipText = "Add every mod of a modpack published on VostokMods "
+                        + "to the active profile, at the versions the pack lists.",
+        };
+        hostedPackItem.Click += async (_, _) => await ImportModpackFromVostokModsAsync();
+        importMenu.Items.Add(hostedPackItem);
         importMenu.Items.Add(saveTemplateItem);
         importList.ContextMenuStrip = importMenu;
         var importTip = new ToolTip();
         importTip.SetToolTip(importList,
             "Import a mod-pack JSON into the active profile.\n"
-            + "Right-click for a starter template.");
+            + "Right-click to import a VostokMods modpack, or for a starter template.");
         btnFlow.Controls.Add(importList);
 
         var enableAll = ThemedButton("Enable all");
@@ -3213,16 +3225,7 @@ public class MainForm : Form
     /// merge into; we don't want to silently create one).</summary>
     private async Task ImportModListFromFilePickerAsync(string preselectedPath = "")
     {
-        if (_activeProfile == null)
-        {
-            Ui.ThemedMessageBox.Show(this,
-                "Import adds mods to the ACTIVE profile, but no profile "
-                + "is active yet.\n\nOpen Profiles… to create or activate "
-                + "a profile first, then try Import list… again.",
-                "No active profile",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
+        if (!RequireActiveProfileForImport()) return;
 
         string filePath;
         if (!string.IsNullOrEmpty(preselectedPath) && File.Exists(preselectedPath))
@@ -3260,7 +3263,7 @@ public class MainForm : Form
                 + "Expected shape:\n"
                 + "{\n"
                 + "  \"mods\": [\n"
-                + "    { \"mod_id\": \"x\", \"mod_workshop_id\": 12345 }\n"
+                + "    { \"mod_id\": \"x\", \"source\": \"vostokmods:x\" }\n"
                 + "  ]\n"
                 + "}",
                 "Import failed",
@@ -3277,13 +3280,35 @@ public class MainForm : Form
             return;
         }
 
-        bool applied;
-        List<string> importedIds;
         // Pass the JSON's directory as the companion dir so the
         // dialog scans alongside .vmz files for fallback sources
         // when the JSON itself omits them. Covers the common
         // "drop the JSON next to the .vmz files" flow.
-        var companionDir = Path.GetDirectoryName(filePath) ?? "";
+        await RunModListImportAsync(import, Path.GetDirectoryName(filePath) ?? "");
+    }
+
+    /// <summary>Import adds mods to the active profile, so there has
+    /// to be one. Tells the user and returns false when there isn't.</summary>
+    private bool RequireActiveProfileForImport()
+    {
+        if (_activeProfile != null) return true;
+        Ui.ThemedMessageBox.Show(this,
+            "Import adds mods to the ACTIVE profile, but no profile "
+            + "is active yet.\n\nOpen Profiles… to create or activate "
+            + "a profile first, then try the import again.",
+            "No active profile",
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return false;
+    }
+
+    /// <summary>Shows the import plan for a mod list and, once the
+    /// dialog closes, refreshes everything that depends on what was
+    /// installed.</summary>
+    private async Task RunModListImportAsync(Domain.ModListImport import, string? companionDir)
+    {
+        if (_activeProfile == null) return;
+        bool applied;
+        List<string> importedIds;
         using (var importDlg = new Ui.ImportModListDialog(
             import, _activeProfile, _registry, _vm, ModsDir, companionDir))
         {
@@ -3307,6 +3332,119 @@ public class MainForm : Form
         // resolve any that aren't yet installed.
         if (importedIds.Count > 0)
             await CheckAndPromptMissingDepsAsync(importedIds);
+    }
+
+    /// <summary>The mod loader's own page on VostokMods. Modpacks list
+    /// it as a member, but it is not a mod the manager installs: it is
+    /// updated from the MML status row.</summary>
+    private const string ModLoaderSlug = "metro-mod-loader";
+
+    /// <summary>Imports a modpack published on VostokMods: asks for
+    /// the pack, reads its manifest, and runs the regular import plan
+    /// with each mod pinned to the version the pack lists.</summary>
+    private async Task ImportModpackFromVostokModsAsync()
+    {
+        if (!RequireActiveProfileForImport()) return;
+
+        // Name the packs that exist, so the user doesn't have to go
+        // and find a URL first.
+        var hint = "";
+        try
+        {
+            var packs = await _vm.ListModpacksAsync();
+            if (packs.Items.Count > 0)
+                hint = "\n\nOn VostokMods now:\n" + string.Join("\n",
+                    packs.Items.Take(12).Select(p => $"   {p.Slug}  —  {p.Name}"));
+        }
+        catch { /* the prompt works without the list */ }
+
+        var input = TextInputDialog.Prompt(this, "Import modpack from VostokMods",
+            "Paste the modpack's page URL "
+            + "(e.g. https://vostokmods.net/modpack/vostok-enhanced) or its slug." + hint);
+        if (input == null) return;
+        input = input.Trim();
+        if (!VostokModsUrl.TryParseModpackSlug(input, out var slug))
+        {
+            if (!VostokModsUrl.TryParseSlug(input, out slug) || input.Contains('/'))
+            {
+                Ui.ThemedMessageBox.Show(this,
+                    $"That isn't a VostokMods modpack:\n  {input}\n\n"
+                    + "Expected a URL like https://vostokmods.net/modpack/vostok-enhanced "
+                    + "or the slug on its own.",
+                    "Invalid input",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
+
+        VmModpackManifest manifest;
+        try { manifest = await _vm.GetModpackManifestAsync(slug); }
+        catch (VostokModsException ex)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                ex.Kind == VostokModsError.NotFound
+                    ? $"VostokMods has no modpack at `{slug}`. Check the URL and try again."
+                    : $"Couldn't read the modpack `{slug}` from VostokMods:\n{ex.Message}",
+                "Import failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var import = new Domain.ModListImport
+        {
+            Name        = manifest.Name.Length > 0 ? manifest.Name : slug,
+            Description = manifest.Summary,
+            PinVersions = true,
+        };
+        var notes = new List<string>();
+        foreach (var m in manifest.Mods.OrderBy(m => m.LoadOrder))
+        {
+            var label = m.Name.Length > 0 ? m.Name : m.Slug;
+            if (string.Equals(m.Slug, ModLoaderSlug, StringComparison.OrdinalIgnoreCase))
+            {
+                notes.Add($"{label}: the mod loader itself — update it from the MML status row.");
+                continue;
+            }
+            if (!m.Available)
+            {
+                notes.Add($"{label}: not available on VostokMods"
+                    + (m.Reason.Length > 0 ? $" ({m.Reason})." : "."));
+                continue;
+            }
+            var source = ModSource.ForSlug(m.Slug);
+            import.Mods.Add(new Domain.ImportEntry
+            {
+                DisplayName = label,
+                Source      = source.Key,
+                Version     = m.Version,
+                IsEnabled   = true,
+                Priority    = m.LoadOrder,
+            });
+            if (m.Sha256.Length > 0) import.Checksums[source.Key] = m.Sha256;
+        }
+        if (manifest.McmConfigJson.Length > 0)
+            notes.Add("The pack also carries mod settings (MCM). The manager installs "
+                + "the mods only; apply the pack from the in-game Modpacks tab to get "
+                + "its settings too.");
+
+        if (import.Mods.Count == 0)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"`{import.Name}` lists no mods that can be installed."
+                + (notes.Count > 0 ? "\n\n" + string.Join("\n", notes) : ""),
+                "Nothing to import",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (notes.Count > 0)
+            Ui.ThemedMessageBox.Show(this,
+                $"`{import.Name}` has {import.Mods.Count} mod"
+                + (import.Mods.Count == 1 ? "" : "s") + " to import. Left out:\n\n"
+                + string.Join("\n", notes.Select(n => "   • " + n)),
+                "Import modpack",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+        await RunModListImportAsync(import, companionDir: null);
     }
 
     /// <summary>Writes a hand-editable mod-pack JSON template to a

@@ -99,13 +99,31 @@ public static class GodotLogAnalyzer
     {
         public string LogPath       { get; set; } = "";
         public string EngineVersion { get; set; } = "";
+        /// <summary>The mod loader's version as the log announces it
+        /// ("3.4.1"), or "" when the loader did not run.</summary>
+        public string LoaderVersion { get; set; } = "";
         public List<LogOverride>   Overrides   { get; set; } = new();
         public List<LogHook>       Hooks       { get; set; } = new();
         public List<LogLoadEntry>  LoadOrder   { get; set; } = new();
         public List<LogIssue>      Issues      { get; set; } = new();
         public List<OverrideClash> Clashes     { get; set; } = new();
         public List<HookClash>     HookClashes { get; set; } = new();
+
+        /// <summary>True when the log has no hook declarations because
+        /// the loader did not write them, not because no mod hooks
+        /// anything: from 3.4 the loader logs them only in its
+        /// Developer Mode.</summary>
+        public bool HooksNotLogged
+            => Hooks.Count == 0
+               && LoaderVersion.Length > 0
+               && ModRegistry.CompareVersions(LoaderVersion, "3.4") >= 0;
     }
+
+    /// <summary>What to tell the user when <see cref="LogAnalysis.HooksNotLogged"/>.</summary>
+    public const string HooksNotLoggedHint =
+        "This mod loader version only writes hook declarations to the log in "
+        + "Developer Mode. Turn on Developer Mode in the mod loader's settings "
+        + "and launch the game once to see which mods hook the same function.";
 
     // ── Log discovery ─────────────────────────────────────────────────
 
@@ -128,6 +146,35 @@ public static class GodotLogAnalyzer
     /// when there are none.</summary>
     public static string LatestLog() => AvailableLogs().FirstOrDefault() ?? "";
 
+    /// <summary>The newest log from a session in which the mod loader
+    /// got as far as printing its load order. A launch that never
+    /// reached the loader leaves a newer log with nothing in it to
+    /// analyse. Falls back to the newest log when none qualifies.</summary>
+    public static string LatestLoaderLog()
+    {
+        var logs = AvailableLogs();
+        foreach (var path in logs.Take(12))
+            if (HasLoadOrder(path)) return path;
+        return logs.FirstOrDefault() ?? "";
+    }
+
+    private static bool HasLoadOrder(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(
+                path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs, Encoding.UTF8);
+            string? line;
+            // The block is printed during startup, well inside this.
+            for (var n = 0; n < 20_000 && (line = sr.ReadLine()) != null; n++)
+                if (line.Contains("=== Load Order", StringComparison.Ordinal)) return true;
+        }
+        catch { /* unreadable: not a candidate */ }
+        return false;
+    }
+
     // ── Regexes ───────────────────────────────────────────────────────
 
     private static readonly Regex _reLoad = new(
@@ -148,6 +195,10 @@ public static class GodotLogAnalyzer
 
     private static readonly Regex _reEngine = new(
         @"^Godot Engine (v\S+)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex _reLoader = new(
+        @"^\[ModLoader\]\[Info\]\s+.*Mod Loader v(\d[\w.\-]*)",
         RegexOptions.Compiled);
 
     // Mod-hint extraction: a res://mods/<slug>/ token, or a <name>__v…vmz
@@ -206,6 +257,12 @@ public static class GodotLogAnalyzer
             {
                 var em = _reEngine.Match(line);
                 if (em.Success) { a.EngineVersion = em.Groups[1].Value; }
+            }
+
+            if (a.LoaderVersion.Length == 0)
+            {
+                var vm = _reLoader.Match(line);
+                if (vm.Success) { a.LoaderVersion = vm.Groups[1].Value; continue; }
             }
 
             var lm = _reLoad.Match(line);

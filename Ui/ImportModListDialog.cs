@@ -806,8 +806,7 @@ public class ImportModListDialog : Form
                 if (File.Exists(dst)) dst = Path.Combine(
                     _modsDir, MakeUniqueName(liveName));
                 Advance($"⬇ {DisplayLabel(row.Entry)} ({source.Id}) …");
-                await Task.Run(() => _vm.DownloadAsync(
-                    source.Id, dst, ct: ct), ct);
+                await DownloadEntryAsync(row.Entry, source, dst, Log, ct);
                 DownloadedSources.Record(dst, source);
                 // Snapshot into library so a future profile switch
                 // can short-circuit the redownload.
@@ -933,6 +932,40 @@ public class ImportModListDialog : Form
     /// <summary>Locate the just-installed registry entry for an
     /// import row. Mod_id first, then source — mirrors the
     /// fallback path the Apply dialog uses.</summary>
+    /// <summary>Downloads one entry to `dst`. A list that pins
+    /// versions gets the entry's exact version, falling back to the
+    /// newest when the host no longer has it. When the list carries a
+    /// checksum for the mod, a file that does not match is deleted and
+    /// the download fails.</summary>
+    private async Task DownloadEntryAsync(
+        ImportEntry entry, ModSource source, string dst, Action<string> log, CancellationToken ct)
+    {
+        var pinned = _import.PinVersions && !string.IsNullOrWhiteSpace(entry.Version)
+            ? entry.Version.Trim() : null;
+        VmFile file;
+        try
+        {
+            file = await Task.Run(() => _vm.DownloadAsync(source.Id, dst, pinned, ct), ct);
+        }
+        catch (VostokModsException ex) when (pinned != null && ex.Kind == VostokModsError.VersionNotFound)
+        {
+            log($"  ! v{pinned} is no longer on VostokMods — downloading the newest version instead.");
+            pinned = null;
+            file = await Task.Run(() => _vm.DownloadAsync(source.Id, dst, null, ct), ct);
+        }
+
+        // A checksum describes the pinned file only.
+        if (pinned == null || !_import.Checksums.TryGetValue(source.Key, out var expected)) return;
+        string actual;
+        using (var fs = File.OpenRead(dst))
+            actual = Convert.ToHexString(
+                await System.Security.Cryptography.SHA256.HashDataAsync(fs, ct)).ToLowerInvariant();
+        if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) return;
+        try { File.Delete(dst); } catch { }
+        throw new InvalidDataException(
+            $"the downloaded file (v{file.Version}) does not match the modpack's checksum, so it was discarded.");
+    }
+
     private ModEntry? ResolveRegistryEntry(ImportEntry entry)
     {
         if (!string.IsNullOrEmpty(entry.ModId))

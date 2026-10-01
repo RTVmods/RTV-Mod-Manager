@@ -1440,6 +1440,7 @@ public class ProfileManagerDialog : Form
         {
             Title    = "Export Profile",
             Filter   = "Profile bundle (*.vmprofile)|*.vmprofile"
+                     + "|Mod loader modpack, no mod files (*.zip)|*.zip"
                      + "|Profile JSON only (*.json)|*.json",
             FileName = ModProfile.SafeFileName(profile.Name) + ".vmprofile",
         };
@@ -1449,7 +1450,14 @@ public class ProfileManagerDialog : Form
         try
         {
             var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
-            if (ext == ".vmprofile" || ext == ".zip")
+            if (ext == ".zip")
+            {
+                // A modpack for the mod loader's Modpacks tab: the
+                // profile's mod list only. The loader downloads each
+                // mod from its recorded source.
+                profile.ExportAsModpackZip(dlg.FileName);
+            }
+            else if (ext == ".vmprofile")
             {
                 // Two export paths for .vmprofile depending on where
                 // the bundles live:
@@ -1483,11 +1491,10 @@ public class ProfileManagerDialog : Form
                         IsEnabled = m.IsEnabled,
                         Priority = m.Priority,
                         Source = m.Source,
+                        PackName = m.PackName,
                     }).ToList(),
                 };
-                File.WriteAllText(dlg.FileName,
-                    System.Text.Json.JsonSerializer.Serialize(copy,
-                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(dlg.FileName, MetroProfile.Serialize(copy));
             }
             ThemedMessageBox.Show(this,
                 $"Profile exported to:\n{dlg.FileName}",

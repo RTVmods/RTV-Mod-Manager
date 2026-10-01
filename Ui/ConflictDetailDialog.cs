@@ -208,7 +208,7 @@ public class ConflictDetailDialog : Form
 
         try
         {
-            var logPath = GodotLogAnalyzer.LatestLog();
+            var logPath = GodotLogAnalyzer.LatestLoaderLog();
             if (string.IsNullOrEmpty(logPath))
             {
                 note.Text = "Runtime (last play session) — no godot.log found";
@@ -219,7 +219,12 @@ public class ConflictDetailDialog : Form
             var clashes = a.HookClashes
                 .Where(c => string.Equals(c.VanillaPath, _conflict.Key, StringComparison.Ordinal))
                 .ToList();
-            if (clashes.Count == 0)
+            if (a.HooksNotLogged)
+            {
+                note.Text = "Runtime (last play session) — hooks were not logged";
+                grid.Rows.Add("(not logged)", GodotLogAnalyzer.HooksNotLoggedHint);
+            }
+            else if (clashes.Count == 0)
             {
                 note.Text = "Runtime (last play session) — no multi-mod hook on this script in the last log";
                 grid.Rows.Add("(none)", "No method on this script was hooked by 2+ mods at runtime.");
