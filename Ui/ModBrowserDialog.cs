@@ -11,6 +11,8 @@
 //   2. "Install this mod" button — when the current URL is a mod page,
 //      the slug is parsed and the latest file is fetched via the
 //      public API (VostokModsClient.DownloadAsync), then installed.
+//      On a modpack page the same button installs the whole pack
+//      through the callback MainForm supplies for that.
 //
 // WebView2 needs the Edge WebView2 Runtime (preinstalled on Win10/11).
 // If EnsureCoreWebView2Async fails, we show a themed message pointing at
@@ -38,6 +40,9 @@ public class ModBrowserDialog : Form
     /// already present locally (live mods or the library). Drives the
     /// "Already in library" button state.</summary>
     private readonly Func<ModSource, bool> _ownsSource;
+    /// <summary>Installs the modpack with the given slug into the
+    /// active profile.</summary>
+    private readonly Func<string, Task> _installModpackCallback;
     private readonly Settings _settings;
 
     private WebView2 _web = null!;
@@ -60,11 +65,13 @@ public class ModBrowserDialog : Form
         VostokModsClient vm,
         Func<string, ModSource, Task> installCallback,
         Func<ModSource, bool> ownsSource,
-        Settings settings)
+        Settings settings,
+        Func<string, Task> installModpackCallback)
     {
         _vm = vm;
         _installCallback = installCallback;
         _ownsSource = ownsSource;
+        _installModpackCallback = installModpackCallback;
         _settings = settings;
         InitUi();
     }
@@ -258,12 +265,23 @@ public class ModBrowserDialog : Form
         if (_installing)
             return; // mid-install: leave button/status as set by the install flow
 
+        if (VostokModsUrl.TryParseModpackSlug(url, out var packSlug))
+        {
+            _installBtn.Text = "⬇ Install this modpack";
+            _installBtn.Enabled = true;
+            SetInstallButtonColor(installed: false);
+            _statusLabel.Text =
+                $"On modpack page ({packSlug}) — click “Install this modpack” to add "
+                + "every mod in it to your active profile.";
+            return;
+        }
+
         if (!VostokModsUrl.TryParseModPageSlug(url, out var slug))
         {
             _installBtn.Text = "⬇ Install this mod";
             _installBtn.Enabled = false;
             SetInstallButtonColor(installed: false);
-            _statusLabel.Text = "Browse to a mod page to enable one-click install.";
+            _statusLabel.Text = "Browse to a mod or modpack page to enable one-click install.";
             return;
         }
 
@@ -374,6 +392,32 @@ public class ModBrowserDialog : Form
     private async Task InstallCurrentModAsync()
     {
         var url = _web.Source?.ToString() ?? "";
+        if (VostokModsUrl.TryParseModpackSlug(url, out var packSlug))
+        {
+            _installing = true;
+            _installBtn.Enabled = false;
+            _statusLabel.Text = $"Installing modpack {packSlug}…";
+            try
+            {
+                await _installModpackCallback(packSlug);
+                InstalledCount++;
+                _statusLabel.Text = "Modpack import finished. Browse for more, or close to return.";
+            }
+            catch (Exception ex)
+            {
+                _statusLabel.Text = "Install failed.";
+                ThemedMessageBox.Show(this,
+                    "Couldn't install this modpack:\n" + ex.Message,
+                    "Install failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _installing = false;
+                UpdateChrome();
+            }
+            return;
+        }
         if (!VostokModsUrl.TryParseModPageSlug(url, out var slug))
         {
             ThemedMessageBox.Show(this,

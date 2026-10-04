@@ -3128,8 +3128,20 @@ public class MainForm : Form
         var importTip = new ToolTip();
         importTip.SetToolTip(importList,
             "Import a mod-pack JSON into the active profile.\n"
-            + "Right-click to import a VostokMods modpack, or for a starter template.");
+            + "Right-click to import a VostokMods modpack by URL, or for a starter template.");
         btnFlow.Controls.Add(importList);
+
+        // Modpacks published on VostokMods — pick one from the list
+        // and every mod in it lands in the active profile at the
+        // versions the pack lists.
+        var modpacks = ThemedButton("📦 Modpacks");
+        modpacks.Margin = new Padding(0, 2, 4, 2);
+        modpacks.Click += async (_, _) => await OpenModpacksDialogAsync();
+        var modpacksTip = new ToolTip();
+        modpacksTip.SetToolTip(modpacks,
+            "Browse the modpacks published on VostokMods and install one "
+            + "into the active profile.");
+        btnFlow.Controls.Add(modpacks);
 
         var enableAll = ThemedButton("Enable all");
         enableAll.Margin = new Padding(0, 2, 4, 2);
@@ -3376,6 +3388,28 @@ public class MainForm : Form
                 return;
             }
         }
+        await ImportModpackAsync(slug);
+    }
+
+    /// <summary>Opens the list of modpacks published on VostokMods.
+    /// Installing one runs ImportModpackAsync; the grid and status
+    /// rows are refreshed by that import, so nothing is redone here.</summary>
+    private async Task OpenModpacksDialogAsync()
+    {
+        if (!RequireActiveProfileForImport()) return;
+        using var dlg = new Ui.ModpackBrowserDialog(
+            _vm, _activeProfile?.Name ?? "", ImportModpackAsync);
+        dlg.ShowDialog(this);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Reads a VostokMods modpack's manifest and runs the
+    /// regular import plan with each mod pinned to the version the
+    /// pack lists. Used by the Modpacks dialog, the URL prompt and the
+    /// embedded browser's Install button on a modpack page.</summary>
+    private async Task ImportModpackAsync(string slug)
+    {
+        if (!RequireActiveProfileForImport()) return;
 
         VmModpackManifest manifest;
         try { manifest = await _vm.GetModpackManifestAsync(slug); }
@@ -3689,7 +3723,7 @@ public class MainForm : Form
         }
 
         using var dlg = new Ui.ModBrowserDialog(
-            _vm, InstallDownloadedModAsync, OwnsSource, _settings);
+            _vm, InstallDownloadedModAsync, OwnsSource, _settings, ImportModpackAsync);
         dlg.ShowDialog(this);
     }
 
