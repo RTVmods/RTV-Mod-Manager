@@ -60,7 +60,7 @@ A mod's source is `vostokmods:<slug>`, where the slug is the last part of its pa
 Right-click a mod → **Link to VostokMods…** to link one, or right-click **Browse Mods…** → **Link installed mods to VostokMods…** to link every mod whose name matches exactly one page on the site.
 
 ### Profiles
-Save / apply / clone / import / export complete mod loadouts as `.vmprofile` files. A profile bundles byte-for-byte `.vmz` copies so it's a full restore point even on a fresh machine. Applying a profile reconciles the live folder, the Library, and `mod_config.cfg`. Locked mods survive profile switches untouched.
+Save / apply / clone / import / export complete mod loadouts as `.vmprofile` files. A profile bundles byte-for-byte `.vmz` copies so it's a full restore point even on a fresh machine. Applying a profile reconciles the live folder, the Library, and `mod_config.cfg`. Locked mods survive profile switches untouched. The active profile follows the version of each mod that is actually live, however it got there (manager update, in-game loader update, a file dropped into the folder), so switching away and back never reinstalls an older version.
 
 A profile's `profile.json` uses the mod loader's own modpack schema (`metroprofile` 1), so a profile exported as **Mod loader modpack (.zip)** and placed in the game's `mods` folder shows up on the loader's Modpacks tab.
 

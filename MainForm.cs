@@ -283,8 +283,64 @@ public class MainForm : Form
         RecordDownloadedSources();
         var ok = _registry.Scan(ModsDir, _modConfig);
         AutoAdoptOrphansIntoActiveProfile();
+        FollowLiveVersions();
         BackfillProfileSources();
         return ok;
+    }
+
+    /// <summary>Makes the active profile record the version of each
+    /// mod that is actually live. A mod can change version without
+    /// the manager doing it (a file dropped into the mods folder, an
+    /// update from the in-game loader), and a profile that still names
+    /// the old version would reinstall that old version from the
+    /// library on the next switch back. The live file is archived so
+    /// the switch can restore it, and the old version's cfg state
+    /// (enabled, priority, source) is carried to the new key when the
+    /// new one has none, as the manager's own update does.</summary>
+    private void FollowLiveVersions()
+    {
+        if (_activeProfile == null) return;
+        var profileDirty = false;
+        var cfgDirty = false;
+        foreach (var pm in _activeProfile.Mods)
+        {
+            if (string.IsNullOrEmpty(pm.ModId)) continue;
+            var live = _registry.FindById(pm.ModId);
+            if (live == null || string.IsNullOrEmpty(live.Version)) continue;
+            if (string.Equals(pm.Version, live.Version, StringComparison.Ordinal)) continue;
+
+            var oldVersion = pm.Version;
+            if (!string.IsNullOrEmpty(oldVersion)
+                && _modConfig.HasEntry(pm.ModId, oldVersion)
+                && !_modConfig.HasEntry(pm.ModId, live.Version))
+            {
+                _modConfig.SetEnabled(pm.ModId, live.Version,
+                    _modConfig.IsEnabled(pm.ModId, oldVersion, fallback: true));
+                _modConfig.SetPriority(pm.ModId, live.Version,
+                    _modConfig.Priority(pm.ModId, oldVersion, live.DeclaredPriority));
+                _modConfig.RemoveEntry(pm.ModId, oldVersion);
+                MoveSourceRecord(pm.ModId, oldVersion, live.Version,
+                    _modConfig.GetModSource(pm.ModId, oldVersion));
+                cfgDirty = true;
+            }
+            pm.Version = live.Version;
+            if (live.IsArchive && File.Exists(live.Path))
+            {
+                try { Domain.ModLibrary.Add(ModsDir, live.Path); }
+                catch { /* best-effort; the live file is still in place */ }
+            }
+            profileDirty = true;
+        }
+        if (cfgDirty)
+        {
+            try { _modConfig.Save(); } catch { /* best-effort */ }
+            _registry.Scan(ModsDir, _modConfig);
+        }
+        if (profileDirty)
+        {
+            _activeProfile.UpdatedAt = DateTime.UtcNow;
+            try { _activeProfile.SaveMetadataOnly(); } catch { /* best-effort */ }
+        }
     }
 
     /// <summary>Writes the source of every mod downloaded since the
