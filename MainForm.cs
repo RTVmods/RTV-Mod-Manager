@@ -307,23 +307,42 @@ public class MainForm : Form
         catch { /* best-effort — the mod can be linked again by hand */ }
     }
 
-    /// <summary>Copies each live mod's source into its active-profile
-    /// entry when the profile has none, so a profile applied on another
-    /// machine knows where to download the mod from.</summary>
+    /// <summary>Keeps the active profile and the live mods agreeing on
+    /// where each mod comes from. A live mod's source is copied into
+    /// its profile entry when the profile has none, so a profile applied
+    /// on another machine knows where to download the mod from; and a
+    /// profile entry's source is recorded for a live mod that has none
+    /// (the profile learned it from a pack or an earlier link), so the
+    /// mod shows as linked and update checks cover it.</summary>
     private void BackfillProfileSources()
     {
         if (_activeProfile == null) return;
-        var dirty = false;
+        var profileDirty = false;
+        var cfgDirty = false;
         foreach (var pm in _activeProfile.Mods)
         {
-            if (pm.SourceRef.IsValid) continue;
             var entry = _registry.FindById(pm.ModId);
-            if (entry == null || !entry.Source.IsValid) continue;
-            pm.Source = entry.Source.Key;
-            dirty = true;
+            if (entry == null) continue;
+            if (!pm.SourceRef.IsValid && entry.Source.IsValid)
+            {
+                pm.Source = entry.Source.Key;
+                profileDirty = true;
+            }
+            else if (pm.SourceRef.IsValid && !entry.Source.IsValid)
+            {
+                _modConfig.SetModSource(entry.ModId, entry.Version, pm.SourceRef);
+                entry.Source = pm.SourceRef;
+                cfgDirty = true;
+            }
         }
-        if (!dirty) return;
-        try { _activeProfile.SaveMetadataOnly(); } catch { /* best-effort */ }
+        if (profileDirty)
+        {
+            try { _activeProfile.SaveMetadataOnly(); } catch { /* best-effort */ }
+        }
+        if (cfgDirty)
+        {
+            try { _modConfig.Save(); } catch { /* best-effort */ }
+        }
     }
 
     /// <summary>Reconcile the registry against the active profile:

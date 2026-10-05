@@ -212,18 +212,33 @@ public class ImportModListDialog : Form
                 live = _registry.Entries.FirstOrDefault(
                     e => SameSource(e.Source, source)
                       && !string.IsNullOrEmpty(e.ModId));
+            // Name fallback: a pack names a mod by its site page, and
+            // a mod installed by hand and never linked carries no
+            // source, so the two can only meet on the name. When
+            // exactly one live mod has the pack entry's name (or its
+            // slug) as its own name or id, it is that mod; the link
+            // is recorded so the next import matches by source.
+            if (live == null)
+            {
+                live = MatchLiveByName(entry);
+                if (live != null && source.IsValid && !live.Source.IsValid && live.IsArchive)
+                    DownloadedSources.Record(live.Path, source);
+            }
+            // From here on the live mod's own id is the one that
+            // counts: the pack's id may be empty or spelled differently.
+            var modId = live?.ModId ?? entry.ModId;
 
             // Library path, by mod_id only; a row the library can't
             // match by mod_id goes to the download path.
             string libPath = "";
-            if (!string.IsNullOrEmpty(entry.ModId)
-                && libByMod.TryGetValue(entry.ModId, out var le))
+            if (!string.IsNullOrEmpty(modId)
+                && libByMod.TryGetValue(modId, out var le))
                 libPath = le.Path;
 
             // Is this id already in the profile?
             bool inProfile = false;
-            if (!string.IsNullOrEmpty(entry.ModId)
-                && profileIds.Contains(entry.ModId))
+            if (!string.IsNullOrEmpty(modId)
+                && profileIds.Contains(modId))
                 inProfile = true;
             // Profile-by-source fallback. Same reason as the live
             // lookup — mod_id mismatches.
@@ -978,11 +993,31 @@ public class ImportModListDialog : Form
         var source = entry.SourceRef;
         if (source.IsValid)
         {
-            return _registry.Entries.FirstOrDefault(e =>
+            var bySource = _registry.Entries.FirstOrDefault(e =>
                 SameSource(e.Source, source)
                 && !string.IsNullOrEmpty(e.ModId));
+            if (bySource != null) return bySource;
         }
-        return null;
+        return MatchLiveByName(entry);
+    }
+
+    /// <summary>The one live mod whose name or id equals the entry's
+    /// name, id or slug, ignoring case, spacing and punctuation; null
+    /// when none or several do.</summary>
+    private ModEntry? MatchLiveByName(ImportEntry entry)
+    {
+        var keys = new[] { entry.DisplayName, entry.ModId, entry.SourceRef.Id }
+            .Select(ModLinker.Normalize)
+            .Where(k => k.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        if (keys.Count == 0) return null;
+        var hits = _registry.Entries
+            .Where(e => !string.IsNullOrEmpty(e.ModId)
+                && (keys.Contains(ModLinker.Normalize(e.DisplayName))
+                    || keys.Contains(ModLinker.Normalize(e.ModId))))
+            .GroupBy(e => e.ModId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return hits.Count == 1 ? hits[0].First() : null;
     }
 
     /// <summary>True when both sources are valid and name the same
