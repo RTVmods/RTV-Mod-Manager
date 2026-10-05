@@ -24,6 +24,9 @@ public class TranslucentGrid : DataGridView
     /// in the empty area below the rows.</summary>
     public int EmptyAlpha { get; set; } = 120;
 
+    /// <summary>Opacity of a column header's colour over the backdrop.</summary>
+    public int HeaderAlpha { get; set; } = 205;
+
     protected override void PaintBackground(Graphics graphics, Rectangle clipBounds, Rectangle gridBounds)
     {
         base.PaintBackground(graphics, clipBounds, gridBounds);
@@ -37,13 +40,16 @@ public class TranslucentGrid : DataGridView
         // Subscribers go first; a handler that paints the cell itself
         // (the conflicts grid's banner rows) keeps its result.
         base.OnCellPainting(e);
-        if (e.Handled || e.RowIndex < 0 || e.ColumnIndex < 0 || e.Graphics == null) return;
+        if (e.Handled || e.ColumnIndex < 0 || e.Graphics == null) return;
         if (!DrawBackdrop(e.Graphics, e.CellBounds)) return;
 
-        var selected = (e.State & DataGridViewElementStates.Selected) != 0;
-        var style = e.CellStyle ?? DefaultCellStyle;
+        // Column headers (row -1) are treated like cells, a little
+        // more opaque, so the backdrop isn't cut off by a solid band.
+        var header = e.RowIndex < 0;
+        var selected = !header && (e.State & DataGridViewElementStates.Selected) != 0;
+        var style = e.CellStyle ?? (header ? ColumnHeadersDefaultCellStyle : DefaultCellStyle);
         var back = selected ? style.SelectionBackColor : style.BackColor;
-        using (var brush = new SolidBrush(Color.FromArgb(CellAlpha, back)))
+        using (var brush = new SolidBrush(Color.FromArgb(header ? HeaderAlpha : CellAlpha, back)))
             e.Graphics.FillRectangle(brush, e.CellBounds);
         e.Paint(e.ClipBounds,
             e.PaintParts & ~(DataGridViewPaintParts.Background | DataGridViewPaintParts.SelectionBackground));

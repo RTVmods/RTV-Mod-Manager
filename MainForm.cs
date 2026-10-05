@@ -661,9 +661,12 @@ public class MainForm : Form
         using (var wf = new Font("Impact", 110f, FontStyle.Bold))
         using (var wb = new SolidBrush(Color.FromArgb(52, 210, 210, 230)))
         {
+            // Rises to the right so its tail fills the empty space
+            // beside the status rows, top right, while its head sits
+            // behind the mods list.
             var st = g.Save();
-            g.TranslateTransform(50, h * 0.36f);
-            g.RotateTransform(-6f);
+            g.TranslateTransform(20, h * 0.44f);
+            g.RotateTransform(-11f);
             g.DrawString(watermark, wf, wb, 0, 0);
             g.Restore(st);
         }
