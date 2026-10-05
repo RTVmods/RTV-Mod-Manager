@@ -1274,7 +1274,14 @@ public class MainForm : Form
         var jsons = files
             .Where(f => f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        var zips = files
+            .Where(f => f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         if (vmz.Count > 0) await InstallModFilesAsync(vmz);
+        // A .zip is a modpack (profile.json at its root) or nothing
+        // the manager installs.
+        foreach (var zip in zips)
+            await ImportModpackFileAsync(zip);
         // Each .json gets its own Import list session — multiple
         // packs at once would otherwise serialise their plan
         // dialogs into a single mega-list, which makes the
@@ -3225,6 +3232,7 @@ public class MainForm : Form
     {
         if (string.IsNullOrEmpty(path)) return false;
         return path.EndsWith(".vmz",  StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".zip",  StringComparison.OrdinalIgnoreCase)
             || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -6324,8 +6332,8 @@ public class MainForm : Form
     {
         using var dlg = new OpenFileDialog
         {
-            Title = "Install mod from .vmz",
-            Filter = "Vostok mod (*.vmz)|*.vmz|All files (*.*)|*.*",
+            Title = "Install mod or modpack",
+            Filter = "Vostok mod or modpack (*.vmz;*.zip)|*.vmz;*.zip|Vostok mod (*.vmz)|*.vmz|All files (*.*)|*.*",
             Multiselect = true,
             CheckFileExists = true,
         };
@@ -6336,7 +6344,48 @@ public class MainForm : Form
             if (Directory.Exists(downloads)) dlg.InitialDirectory = downloads;
         }
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        await InstallModFilesAsync(dlg.FileNames);
+        var zips = dlg.FileNames
+            .Where(f => f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var mods = dlg.FileNames.Except(zips).ToList();
+        if (mods.Count > 0) await InstallModFilesAsync(mods);
+        foreach (var zip in zips)
+            await ImportModpackFileAsync(zip);
+    }
+
+    /// <summary>Installs the mods a modpack zip lists (the mod
+    /// loader's format, which a VostokMods modpack also takes once
+    /// downloaded) into the active profile, at the versions it pins.</summary>
+    private async Task ImportModpackFileAsync(string path)
+    {
+        if (!Domain.ModpackFile.TryRead(path, out var import, out var skipped))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"`{Path.GetFileName(path)}` isn't a modpack: it has no mod list "
+                + "(profile.json) at its root. A mod is a .vmz file, not a .zip.",
+                "Not a modpack",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (!RequireActiveProfileForImport()) return;
+        if (import.Mods.Count == 0)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                $"`{import.Name}` lists no mod with a VostokMods source, so there is "
+                + "nothing to download."
+                + (skipped.Count > 0 ? "\n\nListed without a source:\n" + string.Join("\n", skipped.Select(s => "   • " + s)) : ""),
+                "Nothing to import",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (skipped.Count > 0)
+            Ui.ThemedMessageBox.Show(this,
+                $"`{import.Name}` has {import.Mods.Count} mod"
+                + (import.Mods.Count == 1 ? "" : "s") + " to import. Left out (no VostokMods source):\n\n"
+                + string.Join("\n", skipped.Select(s => "   • " + s)),
+                "Import modpack",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        await RunModListImportAsync(import, companionDir: Path.GetDirectoryName(path));
     }
 
     /// <summary>Copies one or more .vmz files into the mods folder,

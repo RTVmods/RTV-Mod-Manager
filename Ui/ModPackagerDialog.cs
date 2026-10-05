@@ -504,6 +504,22 @@ public class ModPackagerDialog : Form
         exportBtn.Click += (_, _) => ExportModPackJson();
         btnRow.Controls.Add(exportBtn);
 
+        // 📦 Build modpack — the same mod set as a modpack zip in the
+        // mod loader's format (the form a VostokMods modpack takes on
+        // disk): profile.json naming each mod by its VostokMods
+        // source and pinned version. The loader lists it on its
+        // Modpacks tab and the manager imports it when dropped on it.
+        var modpackBtn = MainForm.ThemedButton("📦 Build modpack…");
+        modpackBtn.Width  = 190;
+        modpackBtn.Height = 40;
+        modpackBtn.AutoSize = false;
+        modpackBtn.BackColor = Color.FromArgb(45, 70, 100);
+        modpackBtn.ForeColor = Color.FromArgb(225, 240, 255);
+        modpackBtn.FlatAppearance.BorderColor = Color.FromArgb(90, 140, 200);
+        modpackBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 90, 130);
+        modpackBtn.Click += (_, _) => BuildModpackZip();
+        btnRow.Controls.Add(modpackBtn);
+
         // 📂 Open pack JSON — load a previously-exported (or hand-
         // authored) mod-pack JSON back into the packager so the
         // user can add / remove mods + re-export. Edit-in-place
@@ -1481,13 +1497,21 @@ public class ModPackagerDialog : Form
     /// Dedup is by mod_id (case-insensitive) primary, source
     /// secondary — so the same mod ticked AND pasted as a URL
     /// only shows up once.</summary>
-    private void ExportModPackJson()
+    /// <summary>The mod set the dialog describes, as import entries:
+    /// the Main mod (when it is a real mod), every ticked dependency
+    /// and every custom-text dependency, deduplicated. Shared by
+    /// Export JSON and Build modpack. Null when there is nothing to
+    /// export or the Main mod's source is invalid (already logged).</summary>
+    private List<ImportEntry>? CollectPackEntries(out string packName, out string packDescription)
     {
+        packName = "";
+        packDescription = _descBox.Text.Trim();
+
         // Main mod manifest fields.
         var mainModId  = _modIdBox.Text.Trim();
         var mainName   = _nameBox.Text.Trim();
         var mainVer    = _versionBox.Text.Trim();
-        if (!TryReadMainSource(out var mainSource)) return;
+        if (!TryReadMainSource(out var mainSource)) return null;
 
         var entries = new List<ImportEntry>();
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1601,17 +1625,25 @@ public class ModPackagerDialog : Form
         AddFromCustomBox(_customReqBox.Text, isOptional: false);
         AddFromCustomBox(_customOptBox.Text, isOptional: true);
 
+        packName = !string.IsNullOrEmpty(mainName)
+            ? mainName
+            : (!string.IsNullOrEmpty(mainModId) ? mainModId : "Mod pack");
         if (entries.Count == 0)
         {
             Log("✗ Nothing to export. Fill in Main mod or tick at least one dependency.");
-            return;
+            return null;
         }
+        return entries;
+    }
 
+    /// <summary>Save-as dialog seeded next to the source path.</summary>
+    private string? PickExportPath(string title, string filter, string fileName)
+    {
         using var dlg = new SaveFileDialog
         {
-            Title    = "Export mod pack JSON",
-            Filter   = "Mod pack (*.json)|*.json",
-            FileName = SuggestedExportFilename(),
+            Title    = title,
+            Filter   = filter,
+            FileName = fileName,
             OverwritePrompt = true,
         };
         var src = _srcPath.Text.Trim();
@@ -1622,26 +1654,86 @@ public class ModPackagerDialog : Form
                 : Path.GetDirectoryName(src) ?? "";
             if (!string.IsNullOrEmpty(dir)) dlg.InitialDirectory = dir;
         }
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
+    }
+
+    private void ExportModPackJson()
+    {
+        var entries = CollectPackEntries(out var packName, out var packDescription);
+        if (entries == null) return;
+        var path = PickExportPath("Export mod pack JSON", "Mod pack (*.json)|*.json", SuggestedExportFilename());
+        if (path == null) return;
 
         var import = new ModListImport
         {
-            Name = !string.IsNullOrEmpty(mainName)
-                ? mainName
-                : (!string.IsNullOrEmpty(mainModId) ? mainModId : "Mod pack"),
-            Description = _descBox.Text.Trim(),
+            Name = packName,
+            Description = packDescription,
             Mods = entries,
         };
-
         try
         {
             var json = JsonSerializer.Serialize(import, _jsonExportOpts);
-            File.WriteAllText(dlg.FileName, json);
-            Log($"📤 Exported {entries.Count} mod(s) → {dlg.FileName}");
+            File.WriteAllText(path, json);
+            Log($"📤 Exported {entries.Count} mod(s) → {path}");
         }
         catch (Exception ex)
         {
             Log($"✗ Export failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Writes the mod set as a modpack zip in the mod loader's
+    /// format. Only mods with a VostokMods source can be in a modpack
+    /// (the loader downloads each one from its source), so entries
+    /// without one are reported and left out. Each mod is pinned to
+    /// the version installed here, or the version typed for the Main
+    /// mod; the list order is the load order.</summary>
+    private void BuildModpackZip()
+    {
+        var entries = CollectPackEntries(out var packName, out var packDescription);
+        if (entries == null) return;
+
+        var mods = new List<ModpackFile.Entry>();
+        var skipped = new List<string>();
+        foreach (var e in entries)
+        {
+            var label = !string.IsNullOrEmpty(e.DisplayName) ? e.DisplayName
+                : (!string.IsNullOrEmpty(e.ModId) ? e.ModId : e.SourceRef.Id);
+            var src = e.SourceRef;
+            if (!src.IsValid)
+            {
+                skipped.Add(label);
+                continue;
+            }
+            var version = e.Version;
+            if (string.IsNullOrEmpty(version) && !string.IsNullOrEmpty(e.ModId))
+                version = _registry.FindById(e.ModId)?.Version ?? "";
+            mods.Add(new ModpackFile.Entry(src.Id, label, version, mods.Count + 1));
+        }
+        if (mods.Count == 0)
+        {
+            Log("✗ No mod in this set has a VostokMods source, so there is nothing a modpack could list. "
+                + "Link each mod to its VostokMods page (or paste page URLs) and try again.");
+            return;
+        }
+
+        var path = PickExportPath("Build modpack", "Mod loader modpack (*.zip)|*.zip",
+            ModProfile.SafeFileName(packName) + ".zip");
+        if (path == null) return;
+        try
+        {
+            ModpackFile.Write(path, packName, packDescription, author: "", mods);
+            Log($"📦 Built modpack with {mods.Count} mod(s) → {path}");
+            foreach (var m in mods)
+                Log($"    {m.LoadOrder,2}. {m.Name}  ({m.Slug}" + (m.Version.Length > 0 ? $" v{m.Version})" : ", newest)"));
+            foreach (var s in skipped)
+                Log($"  ! {s}: no VostokMods source — left out.");
+            Log("  Put the zip in the game's mods folder for the loader's Modpacks tab, "
+                + "or drop it on the manager to install everything in it.");
+        }
+        catch (Exception ex)
+        {
+            Log($"✗ Modpack build failed: {ex.Message}");
         }
     }
 
