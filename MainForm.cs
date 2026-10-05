@@ -590,7 +590,41 @@ public class MainForm : Form
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         base.OnPaintBackground(e);
-        PaintSovietDecorations(e.Graphics);
+        var decor = Backdrop();
+        if (decor != null) e.Graphics.DrawImageUnscaled(decor, 0, 0);
+    }
+
+    /// <summary>The decorations rendered once per form size into a
+    /// bitmap. The form paints it as its background, and the grids
+    /// paint the slice behind them so the decorations show through
+    /// their rows (a DataGridView cannot be transparent itself).</summary>
+    private Bitmap? _decor;
+
+    private Bitmap? Backdrop()
+    {
+        var w = ClientSize.Width;
+        var h = ClientSize.Height;
+        if (w <= 0 || h <= 0) return null;
+        if (_decor == null || _decor.Width != w || _decor.Height != h)
+        {
+            _decor?.Dispose();
+            _decor = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var g = Graphics.FromImage(_decor);
+            g.Clear(BackColor);
+            PaintSovietDecorations(g);
+        }
+        return _decor;
+    }
+
+    /// <summary>Wires a grid to paint the form's decorations behind
+    /// its rows.</summary>
+    private void ShowBackdropThrough(Ui.TranslucentGrid grid)
+    {
+        grid.Backdrop = () =>
+        {
+            if (!grid.IsHandleCreated || !IsHandleCreated) return (null, Point.Empty);
+            return (Backdrop(), PointToClient(grid.PointToScreen(Point.Empty)));
+        };
     }
 
     protected override void OnResize(EventArgs e)
@@ -1168,6 +1202,7 @@ public class MainForm : Form
 
         // Left: interactive mods grid + toolbar (filter, bulk, refresh).
         _modsGrid = BuildModsGrid();
+        ShowBackdropThrough((Ui.TranslucentGrid)_modsGrid);
         ApplyColumnWidths(_modsGrid, "mods");
         _split.Panel1.Controls.Add(
             WrapInPanel("Installed mods", _modsGrid, BuildModsToolbar()));
@@ -1179,6 +1214,7 @@ public class MainForm : Form
         // top of the panel while the mods headers sat below the
         // toolbar, looking misaligned across the splitter.
         _conflictsGrid = BuildConflictsGrid();
+        ShowBackdropThrough((Ui.TranslucentGrid)_conflictsGrid);
         ApplyColumnWidths(_conflictsGrid, "conflicts");
         var conflictsSpacer = new Panel
         {
@@ -1418,7 +1454,7 @@ public class MainForm : Form
 
     private DataGridView BuildModsGrid()
     {
-        var grid = new DataGridView
+        var grid = new Ui.TranslucentGrid
         {
             Dock = DockStyle.Fill,
             AutoGenerateColumns = false,
@@ -2781,7 +2817,7 @@ public class MainForm : Form
 
     private DataGridView BuildConflictsGrid()
     {
-        var grid = new DataGridView
+        var grid = new Ui.TranslucentGrid
         {
             Dock = DockStyle.Fill,
             AutoGenerateColumns = false,
