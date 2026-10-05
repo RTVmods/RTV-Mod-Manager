@@ -68,7 +68,7 @@ A profile's `profile.json` uses the mod loader's own modpack schema (`metroprofi
 Lightweight JSON files listing mods to merge into the active profile (distinct from full profiles). Import via drag-drop or the **Import list…** button; author via the Mod Packager's **Export JSON…**.
 
 ### VostokMods modpacks
-The **Modpacks** button lists every modpack published on VostokMods. Installing one adds every mod in it to the active profile at the versions the pack lists, verified against the pack's checksums. The embedded browser's install button does the same on a modpack page, and **Import list…** → right-click accepts a modpack URL.
+The **Modpacks** button lists every modpack published on VostokMods. Installing one adds every mod in it at the versions the pack lists, verified against the pack's checksums. Every import first asks where it should go: the active profile, a new profile named after the pack, or another saved profile (the manager switches to it first). The embedded browser's install button does the same on a modpack page, and **Import list…** → right-click accepts a modpack URL.
 
 ### Mod Packager (creator tool)
 Package a folder or existing `.vmz` into a fresh archive with edited manifest fields and a proper `[dependencies]` section — output uses forward-slash entry paths so the in-game loader accepts it. Also exports mod-pack JSON, and **builds a modpack `.zip`** in the mod loader's format (the same form a VostokMods modpack takes): `profile.json` naming each mod by its VostokMods source and pinned version. Such a zip works on the loader's Modpacks tab and can be dropped on the manager, which installs everything in it.

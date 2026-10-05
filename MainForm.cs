@@ -3321,12 +3321,52 @@ public class MainForm : Form
         return false;
     }
 
-    /// <summary>Shows the import plan for a mod list and, once the
-    /// dialog closes, refreshes everything that depends on what was
-    /// installed.</summary>
+    /// <summary>Asks which profile the import should land in (the
+    /// active one, a new one named after the pack, or another saved
+    /// one), switches to it when it isn't the active one, then shows
+    /// the import plan. Once the dialog closes, refreshes everything
+    /// that depends on what was installed.</summary>
     private async Task RunModListImportAsync(Domain.ModListImport import, string? companionDir)
     {
         if (_activeProfile == null) return;
+
+        using (var pick = new Ui.ImportTargetDialog(import.Name, _activeProfile, _allProfiles))
+        {
+            if (pick.ShowDialog(this) != DialogResult.OK) return;
+            Domain.ModProfile? target = null;
+            if (pick.Choice == Ui.ImportTarget.NewProfile)
+            {
+                var fresh = new Domain.ModProfile
+                {
+                    Name        = pick.NewProfileName,
+                    Description = import.Description,
+                    CreatedAt   = DateTime.UtcNow,
+                };
+                try { fresh.SaveMetadataOnly(); }
+                catch (Exception ex)
+                {
+                    ShowError("Couldn't create the profile", ex);
+                    return;
+                }
+                ReloadProfiles();
+                target = _allProfiles.FirstOrDefault(p =>
+                    string.Equals(p.Name, fresh.Name, StringComparison.OrdinalIgnoreCase));
+            }
+            else if (pick.Choice == Ui.ImportTarget.ExistingProfile)
+            {
+                target = pick.ExistingProfile;
+            }
+            if (target != null)
+            {
+                SwitchActiveProfile(target);
+                // SwitchActiveProfile reports its own failure; the
+                // import must not then land in the wrong profile.
+                if (_activeProfile == null || !string.Equals(
+                        _activeProfile.Name, target.Name, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+
         bool applied;
         List<string> importedIds;
         using (var importDlg = new Ui.ImportModListDialog(
