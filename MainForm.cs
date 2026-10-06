@@ -8083,6 +8083,16 @@ public class MainForm : Form
 
     // --- settings + setup banner ----------------------------------
 
+    /// <summary>Takes back the skip-launcher marker when the launch
+    /// never happened, so a later launch from Steam itself still
+    /// shows the loader's launcher.</summary>
+    private void RemoveSkipUiMarker()
+    {
+        var gameDir = Path.GetDirectoryName(ModsDir);
+        if (string.IsNullOrEmpty(gameDir)) return;
+        try { File.Delete(Path.Combine(gameDir, MmlInstall.SkipUiOnceFile)); } catch { }
+    }
+
     /// <summary>Launches Road to Vostok via Steam. Auto-detects the
     /// app id from the steamapps appmanifest matching the parent of
     /// our ModsDir, then fires steam://rungameid/&lt;id&gt;. Steam
@@ -8126,8 +8136,16 @@ public class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        // The mods are already set up here, so ask the loader to go
+        // straight into the game instead of showing its launcher.
+        // The marker is written just before the launch and the loader
+        // deletes it on that launch; it is left alone for a loader
+        // that wouldn't understand it.
+        var skipUi = _settings.SkipLoaderUi && MmlInstall.WriteSkipUiOnce(ModsDir);
+
         if (!SteamLauncher.LaunchAppId(appId))
         {
+            if (skipUi) RemoveSkipUiMarker();
             Ui.ThemedMessageBox.Show(this,
                 $"Steam protocol launch failed for app id {appId}. "
                 + "Is Steam installed and running?",
@@ -8135,7 +8153,8 @@ public class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        _modsLabel.Text = $"Launching Vostok via Steam (app id {appId})…";
+        _modsLabel.Text = $"Launching Vostok via Steam (app id {appId})…"
+            + (skipUi ? "  (mod loader launcher skipped)" : "");
     }
 
     /// <summary>Five-pointed star polygon, used for the title-row

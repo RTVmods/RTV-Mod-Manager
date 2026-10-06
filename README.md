@@ -77,6 +77,7 @@ Package a folder or existing `.vmz` into a fresh archive with edited manifest fi
 - One-click resolution of missing dependencies on install, with recursive re-checking.
 - Per-mod update checks against VostokMods; MML loader version checks against GitHub releases; the manager checks its own latest GitHub release and can update itself in place.
 - Two-tier crash rollback (LastLaunch / LastKnownGood) captured on launch and promoted on clean exit.
+- **Launch Game** starts the game through Steam and, with Metro Mod Loader 3.4.2 or later, skips the loader's launcher window (the mods are already set up here); the active profile loads straight away. Off switch in Settings.
 
 ---
 

@@ -15,6 +15,7 @@ public class SettingsDialog : Form
 {
     private readonly Settings _settings;
     private readonly TextBox _modsBox;
+    private readonly CheckBox _skipLoaderUi;
     private readonly TextBox _claudeBox;
     private readonly TextBox _decompBox;
 
@@ -41,7 +42,7 @@ public class SettingsDialog : Form
         // clipping.
         MinimumSize = new Size(840, 660);
         Width = 920;
-        Height = 700;
+        Height = 800;
         ShowInTaskbar = false;
         Padding = new Padding(18, 16, 18, 16);
 
@@ -84,6 +85,38 @@ public class SettingsDialog : Form
             current.ModsDir,
             isFolder: true);
 
+        var skipPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            BackColor = Color.Transparent,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 0, 14),
+        };
+        _skipLoaderUi = new CheckBox
+        {
+            Text = "Skip the mod loader's launcher window when launching from here",
+            Checked = current.SkipLoaderUi,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            ForeColor = Color.FromArgb(220, 225, 235),
+        };
+        var skipExplain = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            MaximumSize = new Size(740, 0),
+            ForeColor = Color.FromArgb(140, 150, 170),
+            Font = new Font("Segoe UI", 11f),
+            Padding = new Padding(26, 2, 0, 0),
+            Text = "The active profile loads as if Launch had been clicked in the "
+                + "loader (Metro Mod Loader 3.4.2 or later; older loaders show "
+                + "the launcher as usual). Launching from Steam itself still "
+                + "shows it.",
+        };
+        skipPanel.Controls.Add(skipExplain);
+        skipPanel.Controls.Add(_skipLoaderUi);
+
         // The OS title-bar font is system-controlled and looks tiny
         // next to our 13pt body text. Add a big in-form title label
         // so users get a properly-sized visual heading without us
@@ -107,6 +140,7 @@ public class SettingsDialog : Form
         Controls.Add(decompPanel);
         Controls.Add(claudePanel);
 #endif
+        Controls.Add(skipPanel);
         Controls.Add(modsPanel);
         Controls.Add(titleLabel);
     }
@@ -268,6 +302,7 @@ public class SettingsDialog : Form
         _settings.ModsDir = _modsBox.Text.Trim();
         _settings.ClaudePath = _claudeBox.Text.Trim();
         _settings.GameSourcePath = _decompBox.Text.Trim();
+        _settings.SkipLoaderUi = _skipLoaderUi.Checked;
         Close();
     }
 }

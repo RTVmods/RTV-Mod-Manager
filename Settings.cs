@@ -146,6 +146,12 @@ public class Settings
     /// proportions.</summary>
     public bool ConflictsVisible { get; set; } = true;
 
+    /// <summary>When the game is launched from here, ask the mod
+    /// loader (3.4.2+) to skip its launcher window and load the
+    /// active profile straight away: the mods are already set up in
+    /// the manager, so the launcher would only repeat the choice.</summary>
+    public bool SkipLoaderUi { get; set; } = true;
+
     /// <summary>Mod IDs the user has explicitly locked. Locked mods
     /// are skipped by Enable all / Disable all bulk toggles — useful
     /// when a single mod (e.g. Mod Configuration Menu) should always

@@ -45,6 +45,42 @@ public static class MmlInstall
         }
     }
 
+    /// <summary>The file the loader looks for beside the game to skip
+    /// its launcher for one launch (MML 3.4.2+). A manager that
+    /// starts the game through Steam cannot pass a command-line
+    /// argument, so this is the Steam-safe form of
+    /// `--modloader-skip-ui`. The loader deletes it on that launch.</summary>
+    public const string SkipUiOnceFile = "modloader_skip_ui_once";
+
+    /// <summary>True when the installed modloader.gd knows the
+    /// skip-launcher marker. Read from the script itself rather than
+    /// its version, so a build of the loader that carries the feature
+    /// under another version string still counts.</summary>
+    public static bool SupportsSkipUi(string modsDir)
+    {
+        var path = ResolveModloaderPath(modsDir);
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+        try { return File.ReadAllText(path).Contains(SkipUiOnceFile, StringComparison.Ordinal); }
+        catch { return false; }
+    }
+
+    /// <summary>Writes the skip-launcher marker beside the game.
+    /// Returns false when the loader doesn't support it or the file
+    /// couldn't be written; the launch goes ahead either way, the
+    /// loader just shows its launcher as usual.</summary>
+    public static bool WriteSkipUiOnce(string modsDir)
+    {
+        if (!SupportsSkipUi(modsDir)) return false;
+        var gameDir = Path.GetDirectoryName(modsDir);
+        if (string.IsNullOrEmpty(gameDir)) return false;
+        try
+        {
+            File.WriteAllText(Path.Combine(gameDir, SkipUiOnceFile), "");
+            return true;
+        }
+        catch { return false; }
+    }
+
     /// <summary>The expected on-disk path for the modloader script,
     /// derived from `modsDir`. Returns empty when modsDir is empty
     /// or has no parent.</summary>

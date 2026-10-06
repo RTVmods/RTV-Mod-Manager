@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.8 (2026-10-07)
+
+- Launch Game skips the mod loader's launcher window when the installed loader supports it (Metro Mod Loader 3.4.2+): the manager writes the loader's `modloader_skip_ui_once` marker beside the game before the Steam launch, and the active profile loads straight away. A Settings toggle turns this off.
+
 ## 0.6.7 (2026-10-05)
 
 - The background watermark rises into the top-right space, and the grids' column headers let it through.
