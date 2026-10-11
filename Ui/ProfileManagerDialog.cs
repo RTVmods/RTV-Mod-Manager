@@ -87,7 +87,7 @@ public class ProfileManagerDialog : Form
         // ── Main title ──────────────────────────────────────────────
         var title = new Label
         {
-            Text      = "★  MOD  PROFILES  ★",
+            Text      = "⌘  MOD  PROFILES  ⌘",
             Dock      = DockStyle.Top,
             AutoSize  = true,
             Font      = new Font("Consolas", 16f, FontStyle.Bold),

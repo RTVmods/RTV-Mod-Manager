@@ -57,7 +57,7 @@ public class RevertModDialog : Form
 
         var title = new Label
         {
-            Text      = $"★  REVERT  {_entry.DisplayName.ToUpperInvariant()}  ★",
+            Text      = $"⌘  REVERT  {_entry.DisplayName.ToUpperInvariant()}  ⌘",
             Dock      = DockStyle.Top,
             AutoSize  = true,
             Font      = new Font("Consolas", 14f, FontStyle.Bold),

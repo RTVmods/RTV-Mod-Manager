@@ -582,8 +582,9 @@ public class MainForm : Form
     /// background BEHIND every control. Three layers:
     ///   1. weathered noise texture (subtle stippled greys)
     ///   2. faux-Cyrillic watermark (large diagonal stencil-style
-    ///      banner — `★ ВФSТФК ★ МФD ★ МАNАGЕЯ ★`)
-    ///   3. red stencil divider with a `★ MOD CATALOG ★` label below
+    ///      banner — `ВФSТФК ⌘ МФD ⌘ МАNАGЕЯ`, the ⌘ being the
+    ///      Hannunvaakuna emblem)
+    ///   3. red stencil divider with a `⌘ MOD CATALOG ⌘` label below
     ///      the title row
     /// All layered at low opacity so the actual UI text on top
     /// stays primary. Repainted on every form resize.</summary>
@@ -657,9 +658,12 @@ public class MainForm : Form
         var prevText = g.TextRenderingHint;
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-        var watermark = "★ ВФSТФК ★ МФD ★ МАNАGЕЯ ★";
+        // The words are separated by the emblem, drawn as a shape
+        // rather than a glyph so it matches the one by the title.
+        var words = new[] { "ВФSТФК", "МФD", "МАNАGЕЯ" };
+        var ink = Color.FromArgb(52, 210, 210, 230);
         using (var wf = new Font("Impact", 110f, FontStyle.Bold))
-        using (var wb = new SolidBrush(Color.FromArgb(52, 210, 210, 230)))
+        using (var wb = new SolidBrush(ink))
         {
             // Rises to the right so its tail fills the empty space
             // beside the status rows, top right, while its head sits
@@ -667,11 +671,24 @@ public class MainForm : Form
             var st = g.Save();
             g.TranslateTransform(20, h * 0.44f);
             g.RotateTransform(-11f);
-            g.DrawString(watermark, wf, wb, 0, 0);
+            var lineHeight = wf.GetHeight(g);
+            var x = 0f;
+            for (var i = 0; i < words.Length; i++)
+            {
+                if (i > 0)
+                {
+                    var r = lineHeight * 0.26f;
+                    DrawHannunvaakuna(g, x + r + 22, lineHeight * 0.56f, r,
+                        ink, Color.FromArgb(24, 0, 0, 0), Color.FromArgb(40, 0, 0, 0));
+                    x += 2 * r + 44;
+                }
+                g.DrawString(words[i], wf, wb, x, 0);
+                x += g.MeasureString(words[i], wf).Width - 8;
+            }
             g.Restore(st);
         }
 
-        // --- Layer 3: stencil divider with "★ MOD CATALOG ★" label
+        // --- Layer 3: stencil divider with "⌘ MOD CATALOG ⌘" label
         // Just below the title row. The label uses Latin so it stays
         // readable; the faux-Cyrillic is reserved for purely
         // decorative elements (watermark above). Bumped to ~2x for
@@ -682,19 +699,23 @@ public class MainForm : Form
         var dividerY = 86f;
         using (var dp = new Pen(Color.FromArgb(110, 200, 50, 60), 3f))
             g.DrawLine(dp, 24, dividerY, w - 24, dividerY);
-        var label = "★  MOD  CATALOG  ★";
+        var label = "MOD  CATALOG";
         using (var lf = new Font("Consolas", 24f, FontStyle.Bold))
         using (var bgBrush = new SolidBrush(BackColor))
         using (var lb = new SolidBrush(Color.FromArgb(220, 200, 50, 60)))
         {
             var sz = g.MeasureString(label, lf);
             var labelX = (w - sz.Width) / 2f;
-            // Erase the line behind the label so the text floats on
-            // a clean background. Padding bumped with the font to
-            // keep the same visual breathing room around the label.
-            g.FillRectangle(bgBrush, labelX - 18, dividerY - sz.Height / 2f,
-                sz.Width + 36, sz.Height);
+            // Erase the line behind the label and its two emblems so
+            // they float on a clean background.
+            const float emblemR = 15f;
+            const float gap = 24f;
+            g.FillRectangle(bgBrush,
+                labelX - gap - 2 * emblemR - 14, dividerY - sz.Height / 2f,
+                sz.Width + 2 * (gap + 2 * emblemR + 14), sz.Height);
             g.DrawString(label, lf, lb, labelX, dividerY - sz.Height / 2f);
+            DrawHannunvaakuna(g, labelX - gap - emblemR, dividerY, emblemR);
+            DrawHannunvaakuna(g, labelX + sz.Width + gap + emblemR, dividerY, emblemR);
         }
         g.SmoothingMode = prev;
         g.TextRenderingHint = prevText;
@@ -899,9 +920,9 @@ public class MainForm : Form
             Margin = new Padding(0),
         };
 
-        // Decorative red star ornament next to the title — pure
-        // soviet-aesthetic flourish, no behaviour. Painted via
-        // OnPaint so it can be a proper polygon at any DPI.
+        // Decorative emblem next to the title: the Hannunvaakuna
+        // used across the mod catalogue's art. No behaviour. Painted
+        // via OnPaint so it is a proper shape at any DPI.
         var titleStar = new Panel
         {
             Width = 44,
@@ -910,9 +931,7 @@ public class MainForm : Form
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 8, 12, 0),
         };
-        titleStar.Paint += (s, e) => DrawStar(
-            e.Graphics, 22, 22, 18,
-            Color.FromArgb(220, 200, 50, 60));
+        titleStar.Paint += (s, e) => DrawHannunvaakuna(e.Graphics, 22, 22, 20);
         leftBlock.Controls.Add(titleStar);
 
         // Title in faux-Cyrillic — Я for R (distinctive mirror) and
@@ -8159,21 +8178,49 @@ public class MainForm : Form
 
     /// <summary>Five-pointed star polygon, used for the title-row
     /// ornament + the watermark separators. Filled solid.</summary>
-    internal static void DrawStar(Graphics g, float cx, float cy, float r, Color color)
+    /// <summary>The steel colour of the Hannunvaakuna emblem, as in
+    /// the mods' banner art.</summary>
+    internal static readonly Color EmblemSteel = Color.FromArgb(0x9c, 0x9a, 0x90);
+
+    /// <summary>Draws the Hannunvaakuna (⌘, St. John's Arms) on a dark
+    /// plate: the emblem the mod catalogue's art carries. `r` is the
+    /// plate radius; the geometry is the banner SVG's (plate 14.5,
+    /// square ±6.9, corner loops 2.7) scaled to it.</summary>
+    internal static void DrawHannunvaakuna(Graphics g, float cx, float cy, float r)
+        => DrawHannunvaakuna(g, cx, cy, r, EmblemSteel,
+            Color.FromArgb(0x0c, 0x0e, 0x08), Color.FromArgb(0x1a, 0x11, 0x09));
+
+    internal static void DrawHannunvaakuna(
+        Graphics g, float cx, float cy, float r, Color steel, Color plate, Color shadow)
     {
-        var pts = new PointF[10];
-        for (var i = 0; i < 10; i++)
-        {
-            var rr = (i % 2 == 0) ? r : r * 0.4f;
-            var angle = (i * 36 - 90) * Math.PI / 180.0;
-            pts[i] = new PointF(
-                cx + (float)(Math.Cos(angle) * rr),
-                cy + (float)(Math.Sin(angle) * rr));
-        }
+        var s = r / 14.5f;
+        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+        // The square with a loop at each corner, traced clockwise in
+        // unit coordinates; each loop is 270° around the corner point.
+        path.AddLine(-6.9f, -4.2f, 6.9f, -4.2f);
+        path.AddArc(6.9f - 2.7f, -6.9f - 2.7f, 5.4f, 5.4f, 90f, -270f);
+        path.AddLine(4.2f, -6.9f, 4.2f, 6.9f);
+        path.AddArc(6.9f - 2.7f, 6.9f - 2.7f, 5.4f, 5.4f, 180f, -270f);
+        path.AddLine(6.9f, 4.2f, -6.9f, 4.2f);
+        path.AddArc(-6.9f - 2.7f, 6.9f - 2.7f, 5.4f, 5.4f, 270f, -270f);
+        path.AddLine(-4.2f, 6.9f, -4.2f, -6.9f);
+        path.AddArc(-6.9f - 2.7f, -6.9f - 2.7f, 5.4f, 5.4f, 0f, -270f);
+        path.CloseFigure();
+        using var m = new System.Drawing.Drawing2D.Matrix();
+        m.Translate(cx, cy);
+        m.Scale(s, s);
+        path.Transform(m);
+
         var prev = g.SmoothingMode;
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        using var brush = new SolidBrush(color);
-        g.FillPolygon(brush, pts);
+        using (var plateBrush = new SolidBrush(plate))
+            g.FillEllipse(plateBrush, cx - r, cy - r, 2 * r, 2 * r);
+        using (var ring = new Pen(Color.FromArgb(0x3a, 0x3f, 0x2e), Math.Max(0.7f * s, 0.7f)))
+            g.DrawEllipse(ring, cx - r, cy - r, 2 * r, 2 * r);
+        using (var under = new Pen(shadow, 3.6f * s) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+            g.DrawPath(under, path);
+        using (var top = new Pen(steel, 2f * s) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+            g.DrawPath(top, path);
         g.SmoothingMode = prev;
     }
 

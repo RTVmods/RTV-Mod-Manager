@@ -39,7 +39,7 @@ def instrument():
     return "\n    ".join(out)
 
 
-def svg(width, height, inst_x, inst_y, inst_scale, title_x, title_y, title_size, sub_size):
+def svg(width, height, inst_x, inst_y, inst_scale, title_x, title_y, title_size, sub_size, emblem):
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="'Arial Narrow','Helvetica Condensed',sans-serif">
   <defs>
@@ -76,6 +76,12 @@ def svg(width, height, inst_x, inst_y, inst_scale, title_x, title_y, title_size,
   </g>
 
   <text x="{cx}" y="46" text-anchor="middle" font-size="12" font-weight="800" letter-spacing="6" fill="#c8b893" opacity="0.9">FIELD MANUAL · LOAD ORDER AND SUPPLY</text>
+
+  <g transform="translate({ex} {ey}) scale({es})">
+    <circle r="14.5" fill="#0c0e08" stroke="#3a3f2e" stroke-width="0.7"/>
+    <path d="M -6.9,-4.2 L 6.9,-4.2 A 2.7 2.7 0 1 0 4.2,-6.9 L 4.2,6.9 A 2.7 2.7 0 1 0 6.9,4.2 L -6.9,4.2 A 2.7 2.7 0 1 0 -4.2,6.9 L -4.2,-6.9 A 2.7 2.7 0 1 0 -6.9,-4.2 Z" fill="none" stroke="#1a1109" stroke-width="3.6" stroke-linejoin="round"/>
+    <path d="M -6.9,-4.2 L 6.9,-4.2 A 2.7 2.7 0 1 0 4.2,-6.9 L 4.2,6.9 A 2.7 2.7 0 1 0 6.9,4.2 L -6.9,4.2 A 2.7 2.7 0 1 0 -4.2,6.9 L -4.2,-6.9 A 2.7 2.7 0 1 0 -6.9,-4.2 Z" fill="none" stroke="#9c9a90" stroke-width="2" stroke-linejoin="round"/>
+  </g>
   <line x1="90" y1="56" x2="{lx}" y2="56" stroke="#8a7a48" stroke-width="0.8" opacity="0.4"/>
 
   <g transform="translate({ix} {iy}) scale({isc})">
@@ -99,12 +105,13 @@ def svg(width, height, inst_x, inst_y, inst_scale, title_x, title_y, title_size,
            ix=inst_x, iy=inst_y, isc=inst_scale, inst=instrument(),
            tx=title_x, ty=title_y, ts=title_size, ul=int(title_size * 6.4),
            ss=sub_size, s1=14 + sub_size + 11, s2=14 + 2 * sub_size + 18,
-           fl=height - 54, ft=height - 34)
+           fl=height - 54, ft=height - 34,
+           ex=emblem[0], ey=emblem[1], es=round(emblem[2] / 9.6, 3))
 
 
 FILES = {
-    "thumbnail": svg(600, 300, 130, 160, 1.0, 236, 150, 41, 11),
-    "banner": svg(1000, 250, 190, 136, 0.86, 330, 124, 62, 14),
+    "thumbnail": svg(600, 300, 130, 160, 1.0, 236, 150, 41, 11, (58, 68, 13)),
+    "banner": svg(1000, 250, 190, 136, 0.86, 330, 124, 62, 14, (76, 84, 15)),
 }
 
 for name, text in FILES.items():

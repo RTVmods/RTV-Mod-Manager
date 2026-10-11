@@ -35,7 +35,7 @@ public class WelcomeDialog : Form
         // ── Title ───────────────────────────────────────────────────
         var title = new Label
         {
-            Text      = "★  ЯOAD TO VOSTOK MOD MAИAGEЯ  ★",
+            Text      = "⌘  ЯOAD TO VOSTOK MOD MAИAGEЯ  ⌘",
             Font      = new Font("Segoe UI", 16f, FontStyle.Bold),
             ForeColor = Color.FromArgb(225, 230, 240),
             AutoSize  = true,
@@ -77,7 +77,7 @@ public class WelcomeDialog : Form
         // ── What will be included (the actual paths) ───────────────
         var detailHeader = new Label
         {
-            Text      = "★  WILL BE INCLUDED  ★",
+            Text      = "⌘  WILL BE INCLUDED  ⌘",
             Font      = new Font("Consolas", 10f, FontStyle.Bold),
             ForeColor = Color.FromArgb(200, 50, 60),
             AutoSize  = true,

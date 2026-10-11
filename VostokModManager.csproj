@@ -11,7 +11,7 @@
          dialog via Assembly.GetName().Version. Bumping it here updates
          both editions and the Win32 file-version resource embedded in
          the .exe (Properties → Details in Explorer). -->
-    <Version>0.6.8</Version>
+    <Version>0.6.9</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
     <Authors>Joni</Authors>
     <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>
@@ -77,11 +77,9 @@
     <Compile Remove="Ui\ResolutionDialog.cs" />
   </ItemGroup>
 
-  <!-- Per-edition application icon. icon.ico is the red soviet star
-       used by the AI edition; icon-integrated.ico is the same
-       artwork run through a desaturate + cool-blue tint so the
-       integrated .exe is visually distinct in the taskbar and on
-       disk. -->
+  <!-- Per-edition application icon: a "V" on a red plate for the AI
+       edition, on a cool-blue plate for the Integrated edition, so
+       the two .exe files are told apart in the taskbar and on disk. -->
   <PropertyGroup Condition="'$(EnableAI)' == 'true'">
     <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>

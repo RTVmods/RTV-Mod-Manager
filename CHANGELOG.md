@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.9 (2026-10-11)
+
+- The red stars are gone: the title ornament, the MOD CATALOG divider, the watermark and the dialog headers carry the Hannunvaakuna (⌘) emblem used across the mod catalogue's art. The page banner and thumbnail get the same corner emblem.
+
 ## 0.6.8 (2026-10-07)
 
 - Launch Game skips the mod loader's launcher window when the installed loader supports it (Metro Mod Loader 3.4.2+): the manager writes the loader's `modloader_skip_ui_once` marker beside the game before the Steam launch, and the active profile loads straight away. A Settings toggle turns this off.

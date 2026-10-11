@@ -43,7 +43,7 @@ public class MigrationDialog : Form
 
         var title = new Label
         {
-            Text      = "★  MOD MANAGER  ·  PROFILE MODEL  ★",
+            Text      = "⌘  MOD MANAGER  ·  PROFILE MODEL  ⌘",
             Dock      = DockStyle.Top,
             AutoSize  = true,
             Font      = new Font("Consolas", 13f, FontStyle.Bold),

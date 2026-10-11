@@ -66,16 +66,16 @@ public class AboutDialog : Form
             BackColor = Color.Transparent,
             Margin    = new Padding(0, 4, 14, 0),
         };
-        star.Paint += (_, e) => DrawStar(
-            e.Graphics, 28, 28, 24,
-            // Edition-specific accent: red for AI, blue for Integrated —
-            // matches the per-edition .exe icon colour treatment.
+        // Edition-specific accent on the emblem: red for AI, blue for
+        // Integrated, matching the per-edition .exe icon colours.
+        star.Paint += (_, e) => MainForm.DrawHannunvaakuna(
+            e.Graphics, 28, 28, 26,
 #if AI_RESOLVER
-            Color.FromArgb(220, 200, 50, 60)
+            Color.FromArgb(220, 200, 50, 60),
 #else
-            Color.FromArgb(220, 70, 130, 200)
+            Color.FromArgb(220, 70, 130, 200),
 #endif
-        );
+            Color.FromArgb(0x0c, 0x0e, 0x08), Color.FromArgb(0x1a, 0x11, 0x09));
         topRow.Controls.Add(star, 0, 0);
 
         var titleStack = new TableLayoutPanel
@@ -138,7 +138,7 @@ public class AboutDialog : Form
         // ── Links section ───────────────────────────────────────────
         var linksHeader = new Label
         {
-            Text      = "★  LINKS  ★",
+            Text      = "⌘  LINKS  ⌘",
             Font      = new Font("Consolas", 11f, FontStyle.Bold),
             ForeColor = Color.FromArgb(200, 50, 60),
             AutoSize  = true,
@@ -244,28 +244,5 @@ public class AboutDialog : Form
             catch { /* user has no default browser configured — give up */ }
         };
         return lk;
-    }
-
-    /// <summary>Five-pointed star polygon, same algorithm as MainForm's
-    /// title star (just duplicated here so the AboutDialog has no
-    /// reverse dependency on the main form). Centered at (cx, cy)
-    /// with outer radius r.</summary>
-    private static void DrawStar(Graphics g, int cx, int cy, int r, Color color)
-    {
-        var pts = new PointF[10];
-        var inner = r * 0.4f;
-        for (var i = 0; i < 10; i++)
-        {
-            var angle = -Math.PI / 2 + i * Math.PI / 5;
-            var rad   = (i % 2 == 0) ? r : inner;
-            pts[i] = new PointF(
-                cx + (float)(rad * Math.Cos(angle)),
-                cy + (float)(rad * Math.Sin(angle)));
-        }
-        var prev = g.SmoothingMode;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        using var brush = new SolidBrush(color);
-        g.FillPolygon(brush, pts);
-        g.SmoothingMode = prev;
     }
 }
