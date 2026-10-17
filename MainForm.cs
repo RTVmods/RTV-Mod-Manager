@@ -8421,6 +8421,7 @@ public class MainForm : Form
         if (string.Equals(target.Name, _activeProfile?.Name,
                 StringComparison.OrdinalIgnoreCase))
             return;
+        if (!OfferNewerLibraryVersions(target)) return;
         Cursor = Cursors.WaitCursor;
         Domain.ProfileSwitcher.SwitchResult result;
         try
@@ -8458,6 +8459,63 @@ public class MainForm : Form
             $"Switched to '{target.Name}'  ·  "
             + $"{result.CopiedFromLibrary} copied  ·  "
             + $"{result.KeptLocked} locked kept{missingNote}";
+    }
+
+    /// <summary>Before a switch, finds the target profile's mods that
+    /// are pinned to a version older than the newest one in the
+    /// Library (typically because another profile updated them) and
+    /// asks which of them this profile should move to the newest
+    /// version. Keeps profiles from drifting apart after an update
+    /// while still letting a profile run a mod at an older version
+    /// on purpose. Returns false when the user cancels the switch.
+    /// Locked mods are skipped: the switch leaves their live file
+    /// alone, so a version change would only be on paper.</summary>
+    private bool OfferNewerLibraryVersions(Domain.ModProfile target)
+    {
+        if (target.Mods.Count == 0) return true;
+        var newest = new Dictionary<string, Domain.ModLibrary.Entry>(
+            StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var le in Domain.ModLibrary.List(ModsDir))
+            {
+                if (string.IsNullOrEmpty(le.ModId) || string.IsNullOrEmpty(le.Version)) continue;
+                if (!newest.TryGetValue(le.ModId, out var cur)
+                    || Domain.ModRegistry.CompareVersions(le.Version, cur.Version) > 0)
+                    newest[le.ModId] = le;
+            }
+        }
+        catch { return true; /* no library to compare against */ }
+
+        var candidates = new List<Ui.ProfileVersionPromptDialog.Candidate>();
+        foreach (var pm in target.Mods)
+        {
+            if (string.IsNullOrEmpty(pm.ModId) || string.IsNullOrEmpty(pm.Version)) continue;
+            if (_settings.LockedMods.Contains(pm.ModId)) continue;
+            if (!newest.TryGetValue(pm.ModId, out var le)) continue;
+            if (VersionsAreAmbiguous(pm.Version, le.Version)) continue;
+            if (Domain.ModRegistry.CompareVersions(le.Version, pm.Version) <= 0) continue;
+            var dev = le.DisplayName.Contains("[DEV]", StringComparison.OrdinalIgnoreCase);
+            candidates.Add(new Ui.ProfileVersionPromptDialog.Candidate(pm, le.Version, le.DisplayName, dev));
+        }
+        if (candidates.Count == 0) return true;
+
+        using var dlg = new Ui.ProfileVersionPromptDialog(target.Name, candidates);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+        if (dlg.Accepted.Count == 0) return true;
+        foreach (var c in dlg.Accepted)
+        {
+            c.Mod.Version = c.NewestVersion;
+            if (!string.IsNullOrEmpty(c.NewestDisplayName)) c.Mod.DisplayName = c.NewestDisplayName;
+        }
+        target.UpdatedAt = DateTime.UtcNow;
+        try { target.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't save the profile", ex);
+            return false;
+        }
+        return true;
     }
 
     /// <summary>Runs ConflictDetector against either every entry

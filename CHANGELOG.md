@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.10 (2026-10-17)
+
+- Switching to a profile that pins a mod to a version older than the newest one in the Library (because another profile updated it) now asks which of those mods should move to the newest version before the switch. Unticked mods keep the profile's own version, so profiles no longer drift apart after an update but can still run a mod at an older version on purpose. DEV builds are listed but unticked by default; cancelling the dialog cancels the switch.
+
 ## 0.6.9 (2026-10-11)
 
 - The red stars are gone: the title ornament, the MOD CATALOG divider, the watermark and the dialog headers carry the Hannunvaakuna (⌘) emblem used across the mod catalogue's art. The page banner and thumbnail get the same corner emblem.
