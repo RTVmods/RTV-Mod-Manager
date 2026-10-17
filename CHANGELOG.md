@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.13 (2026-10-18)
+
+- Updating a mod shows its download as a progress band flowing along that mod's row in the mods list, with the percentage in the Update column and bytes received in the status line. While the file size is not yet known the band slides along the row instead.
+
 ## 0.6.12 (2026-10-18)
 
 - First run: adopting the profile model now also offers the mod loader's other profiles for import. Each ticked profile becomes a manager profile with the enabled state and load order recorded in `mod_config.cfg`; a mod the loader lists at several versions is kept once, at the version that is installed or in the Library, else the newest. Mods that are not on disk stay in the profile and show as missing until installed or downloaded. The cfg and the mods folder are not changed by the import.

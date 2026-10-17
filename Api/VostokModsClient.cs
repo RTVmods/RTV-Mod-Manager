@@ -421,8 +421,12 @@ public class VostokModsClient
     // ── downloads ─────────────────────────────────────────────────────
 
     /// <summary>Downloads a resolved file to <paramref name="savePath"/>,
-    /// streaming to disk. The redirect to the storage host is followed.</summary>
-    public async Task DownloadFileAsync(VmFile file, string savePath, CancellationToken ct = default)
+    /// streaming to disk. The redirect to the storage host is followed.
+    /// <paramref name="progress"/> gets (bytes so far, total bytes); the
+    /// total is the response's Content-Length, else the listing's file
+    /// size, else 0 when neither is known.</summary>
+    public async Task DownloadFileAsync(VmFile file, string savePath, CancellationToken ct = default,
+        IProgress<(long done, long total)>? progress = null)
     {
         if (string.IsNullOrEmpty(file.DownloadUrl))
             throw new VostokModsException(VostokModsError.NoFile, "That version has no download URL.");
@@ -446,9 +450,30 @@ public class VostokModsClient
             var dir = Path.GetDirectoryName(savePath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
+            var total = resp.Content.Headers.ContentLength ?? file.Size;
+            progress?.Report((0, total));
             await using (var stream = await resp.Content.ReadAsStreamAsync(ct))
             await using (var output = File.Create(savePath))
-                await stream.CopyToAsync(output, ct);
+            {
+                var buffer = new byte[81920];
+                long done = 0;
+                var lastReport = Environment.TickCount64;
+                int n;
+                while ((n = await stream.ReadAsync(buffer, ct)) > 0)
+                {
+                    await output.WriteAsync(buffer.AsMemory(0, n), ct);
+                    done += n;
+                    // Often enough to look live, not so often that the
+                    // UI thread repaints for every buffer.
+                    var now = Environment.TickCount64;
+                    if (progress != null && now - lastReport >= 80)
+                    {
+                        lastReport = now;
+                        progress.Report((done, total));
+                    }
+                }
+                progress?.Report((done, total > 0 ? total : done));
+            }
         }
 
         if (new FileInfo(savePath).Length == 0)
@@ -463,12 +488,13 @@ public class VostokModsClient
     /// the given version). Returns the file that was downloaded, so the
     /// caller knows its version and original file name.</summary>
     public async Task<VmFile> DownloadAsync(
-        string slug, string savePath, string? version = null, CancellationToken ct = default)
+        string slug, string savePath, string? version = null, CancellationToken ct = default,
+        IProgress<(long done, long total)>? progress = null)
     {
         // Resolve against fresh data: a cached detail may name a version
         // the author has since replaced.
         var file = await ResolveFileAsync(slug, version, forceFresh: true, ct);
-        await DownloadFileAsync(file, savePath, ct);
+        await DownloadFileAsync(file, savePath, ct, progress);
         return file;
     }
 

@@ -66,6 +66,14 @@ public class MainForm : Form
     /// (download / etc.). Disables the action buttons across the grid.</summary>
     private bool _busy;
 
+    /// <summary>The mod whose archive is being downloaded right now
+    /// (its live path), with bytes so far and the total (0 = unknown).
+    /// The mods grid paints a progress band across that mod's row.</summary>
+    private (string Path, long Done, long Total)? _download;
+    /// <summary>Drives the sliding band while the total is unknown.</summary>
+    private System.Windows.Forms.Timer? _downloadPulse;
+    private int _downloadPhase;
+
     /// <summary>True while we're rewriting the mods grid programmatically
     /// — guards the CellValueChanged handler so it doesn't react to
     /// our own Value assignments and try to "toggle" each row.</summary>
@@ -1627,6 +1635,11 @@ public class MainForm : Form
         // PopulateModsGrid already takes care of.
         foreach (DataGridViewColumn col in grid.Columns)
             col.SortMode = DataGridViewColumnSortMode.NotSortable;
+
+        // A download in flight paints as a band flowing along the
+        // row of the mod being updated: filled to the fraction
+        // received, or a sliding pulse when the size isn't known.
+        grid.RowPostPaint += (_, e) => PaintDownloadBand(grid, e);
 
         grid.CellContentClick += async (_, e) => await OnGridCellClickedAsync(e);
 
@@ -7982,7 +7995,17 @@ public class MainForm : Form
             catch { /* best-effort; revert still works via any
                        earlier backups for this mod */ }
 
-            await _vm.DownloadAsync(source.Id, tempPath);
+            var progress = new Progress<(long done, long total)>(p =>
+                SetDownloadProgress(finalPath, p.done, p.total, label));
+            SetDownloadProgress(finalPath, 0, 0, label);
+            try
+            {
+                await _vm.DownloadAsync(source.Id, tempPath, progress: progress);
+            }
+            finally
+            {
+                ClearDownloadProgress();
+            }
             DownloadedSources.Record(tempPath, source);
 
             // Swap the file. If the original is locked (game running
@@ -8098,6 +8121,104 @@ public class MainForm : Form
     {
         Ui.ThemedMessageBox.Show(this, ex.Message, title,
             MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    // --- download progress on the mods grid -----------------------
+
+    /// <summary>Records how far the download of the mod at `path`
+    /// has got, repaints its row and says so in the status line.
+    /// Runs on the UI thread (Progress&lt;T&gt; marshals there).</summary>
+    private void SetDownloadProgress(string path, long done, long total, string label)
+    {
+        _download = (path, done, total);
+        if (total > 0)
+        {
+            var pct = (int)Math.Clamp(done * 100.0 / total, 0, 100);
+            _updatesLabel.Text = $"Downloading {label} … {pct}%  ({FormatBytes(done)} / {FormatBytes(total)})";
+            StopDownloadPulse();
+        }
+        else
+        {
+            _updatesLabel.Text = done > 0
+                ? $"Downloading {label} … {FormatBytes(done)}"
+                : $"Downloading {label} …";
+            StartDownloadPulse();
+        }
+        var row = DownloadRow();
+        if (row != null)
+        {
+            var cell = row.Cells["Update"];
+            cell.Value = total > 0 ? $"{(int)Math.Clamp(done * 100.0 / total, 0, 100)}%" : "…";
+            cell.Style.ForeColor = Color.FromArgb(110, 190, 240);
+            cell.ToolTipText = "Downloading…";
+            _modsGrid.InvalidateRow(row.Index);
+        }
+    }
+
+    private void ClearDownloadProgress()
+    {
+        StopDownloadPulse();
+        var row = DownloadRow();
+        _download = null;
+        if (row != null) _modsGrid.InvalidateRow(row.Index);
+    }
+
+    /// <summary>The grid row of the mod being downloaded, if shown.</summary>
+    private DataGridViewRow? DownloadRow()
+    {
+        if (_download is not { } d || _modsGrid == null) return null;
+        foreach (DataGridViewRow row in _modsGrid.Rows)
+            if (row.Tag is ModEntry me
+                && string.Equals(me.Path, d.Path, StringComparison.OrdinalIgnoreCase))
+                return row;
+        return null;
+    }
+
+    private void StartDownloadPulse()
+    {
+        if (_downloadPulse != null) return;
+        _downloadPulse = new System.Windows.Forms.Timer { Interval = 40 };
+        _downloadPulse.Tick += (_, _) =>
+        {
+            _downloadPhase = (_downloadPhase + 2) % Ui.DownloadBand.Period;
+            var row = DownloadRow();
+            if (row != null) _modsGrid.InvalidateRow(row.Index);
+        };
+        _downloadPulse.Start();
+    }
+
+    private void StopDownloadPulse()
+    {
+        if (_downloadPulse == null) return;
+        _downloadPulse.Stop();
+        _downloadPulse.Dispose();
+        _downloadPulse = null;
+    }
+
+    /// <summary>Paints the progress band over the row of the mod
+    /// being downloaded: a translucent fill up to the fraction
+    /// received with a bright leading edge, or, while the total is
+    /// unknown, a short band sliding along the row.</summary>
+    private void PaintDownloadBand(DataGridView grid, DataGridViewRowPostPaintEventArgs e)
+    {
+        if (_download is not { } d) return;
+        if (e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
+        if (grid.Rows[e.RowIndex].Tag is not ModEntry me
+            || !string.Equals(me.Path, d.Path, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var b = e.RowBounds;
+        // Keep the band inside the visible width, not the scrolled-off part.
+        b.Width = Math.Min(b.Width, grid.ClientSize.Width - b.X);
+        Ui.DownloadBand.Paint(e.Graphics, b, d.Done, d.Total, _downloadPhase);
+    }
+
+    private static string FormatBytes(long n)
+    {
+        if (n >= 1L << 30) return $"{n / (double)(1L << 30):0.00} GB";
+        if (n >= 1L << 20) return $"{n / (double)(1L << 20):0.0} MB";
+        if (n >= 1L << 10) return $"{n / (double)(1L << 10):0} KB";
+        return $"{n} B";
     }
 
     // --- settings + setup banner ----------------------------------

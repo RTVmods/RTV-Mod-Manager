@@ -27,7 +27,7 @@ Both editions detect the same conflicts, share the same `settings.json`, and wor
 
 ### Mods grid
 - **Enable / disable** any mod — toggles move the `.vmz` between the live mods folder and `mods/Disabled/`, and rewrite `mod_config.cfg` in lockstep.
-- **Update column** — `⬆` when a newer release is on VostokMods, `✓` when current, `—` when the mod has no link. Click `⬆` to fetch and swap in the latest `.vmz` (replaced version is auto-backed-up first). Click `—` to link the mod to its VostokMods page.
+- **Update column** — `⬆` when a newer release is on VostokMods, `✓` when current, `—` when the mod has no link. Click `⬆` to fetch and swap in the latest `.vmz` (replaced version is auto-backed-up first); the download shows as a progress band along that mod's row. Click `—` to link the mod to its VostokMods page.
 - **Browse Mods…** — an embedded VostokMods browser. Downloading a mod there, or clicking **Install this mod** on its page, installs it straight into the active profile.
 - **Load-order priority** — edit in place; persisted to `mod_config.cfg` immediately.
 - **Drag-and-drop install** — drop `.vmz` files to install, or a `.json` mod-pack to open the importer.
