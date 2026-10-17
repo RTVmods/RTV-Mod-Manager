@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.11 (2026-10-17)
+
+- Library: a search box filters the list by name, id, version or VostokMods source, and **Clean up old versions** deletes every archived version that is not the newest of its mod, not live, and not pinned by a saved profile (confirmed with the list and the space freed first). Multi-select and delete were already there.
+- Two mods that share a mod id but are not the same mod (an abandoned mod and its successor, such as "Multi Save Slots" 1.4 and "Multi Save Slots Reborn" 1.1.0) are no longer treated as one lineage: the profile-switch prompt, the clean-up and the Library's live-state column tell them apart by VostokMods source, or by name when a source is missing, so an old mod's higher version number is not offered as an "update" to its successor.
+
 ## 0.6.10 (2026-10-17)
 
 - Switching to a profile that pins a mod to a version older than the newest one in the Library (because another profile updated it) now asks which of those mods should move to the newest version before the switch. Unticked mods keep the profile's own version, so profiles no longer drift apart after an update but can still run a mod at an older version on purpose. DEV builds are listed but unticked by default; cancelling the dialog cancels the switch.

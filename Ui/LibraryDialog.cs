@@ -11,6 +11,9 @@
 //   • Install a version into the active profile (reuses the standard
 //     install pipeline via the callback MainForm supplies).
 //   • Delete a version from the library (hard delete, confirmed).
+//   • Clean up: delete every version that is neither the newest of its
+//     mod, nor live, nor pinned by a saved profile.
+//   • Filter the list by name, id, version or source.
 //
 // Mirrors ProfileManagerDialog's grid theming + delete-confirm pattern.
 
@@ -29,13 +32,19 @@ public class LibraryDialog : Form
     private Button _installBtn = null!;
     private Button _deleteBtn = null!;
     private Button _refreshBtn = null!;
+    private Button _cleanBtn = null!;
     private Button _closeBtn = null!;
+    private TextBox _filter = null!;
     private bool _busy;
 
     private List<ModLibrary.Entry> _entries = new();
     /// <summary>mod_id → names of saved profiles that include it. Built
     /// once per dialog open from ModProfile.LoadAll().</summary>
     private Dictionary<string, List<string>> _profilesByMod = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>"mod_id@version" of every entry in any saved profile: the
+    /// versions a clean-up must keep so a later profile switch still
+    /// finds its file.</summary>
+    private HashSet<string> _pinnedVersions = new(StringComparer.OrdinalIgnoreCase);
 
     // Current sort state for the manually-populated grid.
     private string _sortCol = "Mod";
@@ -91,20 +100,76 @@ public class LibraryDialog : Form
 
         _grid = BuildGrid();
 
+        var filterRow = new Panel
+        {
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Padding(0, 0, 0, 8),
+            BackColor = Color.Transparent,
+        };
+        var filterLabel = new Label
+        {
+            Text      = "Search:",
+            AutoSize  = true,
+            ForeColor = Color.FromArgb(220, 225, 235),
+            Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
+            BackColor = Color.Transparent,
+            Location  = new Point(0, 6),
+        };
+        _filter = new TextBox
+        {
+            BackColor   = Color.FromArgb(30, 36, 48),
+            ForeColor   = Color.FromArgb(220, 225, 235),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font        = new Font("Segoe UI", 12f),
+            PlaceholderText = "filter by name, id, version or VostokMods source",
+            Anchor      = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+        };
+        var clearBtn = new Label
+        {
+            Text        = "×",
+            Font        = new Font("Segoe UI", 12f, FontStyle.Bold),
+            TextAlign   = ContentAlignment.MiddleCenter,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor   = Color.FromArgb(60, 72, 92),
+            ForeColor   = Color.FromArgb(120, 132, 156),
+            Cursor      = Cursors.Hand,
+            Size        = new Size(30, 30),
+            Anchor      = AnchorStyles.Right | AnchorStyles.Top,
+        };
+        clearBtn.Click += (_, _) => { _filter.Text = ""; _filter.Focus(); };
+        _filter.TextChanged += (_, _) =>
+        {
+            clearBtn.ForeColor = _filter.Text.Length > 0
+                ? Color.FromArgb(235, 240, 250) : Color.FromArgb(120, 132, 156);
+            PopulateGrid();
+        };
+        filterRow.Controls.Add(filterLabel);
+        filterRow.Controls.Add(_filter);
+        filterRow.Controls.Add(clearBtn);
+        filterRow.Resize += (_, _) =>
+        {
+            _filter.Location = new Point(filterLabel.Right + 8, 2);
+            _filter.Width    = filterRow.Width - filterLabel.Right - 8 - clearBtn.Width - 6;
+            clearBtn.Location = new Point(filterRow.Width - clearBtn.Width, 2);
+        };
+
         var content = new TableLayoutPanel
         {
             Dock        = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount    = 3,
+            RowCount    = 4,
             Padding     = new Padding(16, 12, 16, 12),
             BackColor   = Color.Transparent,
         };
         content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         content.Controls.Add(title,        0, 0);
         content.Controls.Add(_headerLabel, 0, 1);
-        content.Controls.Add(_grid,        0, 2);
+        content.Controls.Add(filterRow,    0, 2);
+        content.Controls.Add(_grid,        0, 3);
 
         Controls.Add(content);
         Controls.Add(BuildButtonRow());
@@ -213,17 +278,23 @@ public class LibraryDialog : Form
         _refreshBtn.Width = 120; _refreshBtn.Height = 40; _refreshBtn.AutoSize = false;
         _refreshBtn.Click += (_, _) => ReloadList();
 
+        _cleanBtn = MainForm.ThemedButton("🧹 Clean up old versions");
+        _cleanBtn.Width = 220; _cleanBtn.Height = 40; _cleanBtn.AutoSize = false;
+        _cleanBtn.ForeColor = Color.FromArgb(255, 200, 80);
+        _cleanBtn.Click += (_, _) => CleanUpOldVersions();
+
         _closeBtn = MainForm.ThemedButton("Close");
         _closeBtn.Width = 100; _closeBtn.Height = 40; _closeBtn.AutoSize = false;
         _closeBtn.Click += (_, _) => Close();
 
-        p.Controls.AddRange(new Control[] { _installBtn, _deleteBtn, _refreshBtn, _closeBtn });
+        p.Controls.AddRange(new Control[] { _installBtn, _deleteBtn, _cleanBtn, _refreshBtn, _closeBtn });
         p.Resize += (_, _) =>
         {
-            _installBtn.Top = _deleteBtn.Top = _refreshBtn.Top = _closeBtn.Top = 8;
+            _installBtn.Top = _deleteBtn.Top = _cleanBtn.Top = _refreshBtn.Top = _closeBtn.Top = 8;
             _installBtn.Left = 16;
             _deleteBtn.Left  = _installBtn.Right + 8;
-            _refreshBtn.Left = _deleteBtn.Right + 8;
+            _cleanBtn.Left   = _deleteBtn.Right + 8;
+            _refreshBtn.Left = _cleanBtn.Right + 8;
             _closeBtn.Left   = p.Width - _closeBtn.Width - 16;
         };
         AcceptButton = _closeBtn;
@@ -240,12 +311,35 @@ public class LibraryDialog : Form
         BuildProfilesMap();
 
         _entries = SortEntries(_entries);
+        PopulateGrid();
+    }
 
+    /// <summary>True when the entry matches the search box (empty box
+    /// matches everything). Every word typed must appear somewhere in
+    /// the name, id, version or source.</summary>
+    private bool MatchesFilter(ModLibrary.Entry e)
+    {
+        var q = _filter?.Text?.Trim() ?? "";
+        if (q.Length == 0) return true;
+        var hay = $"{e.DisplayName} {e.ModId} {e.Version} {e.Source.Id}";
+        foreach (var word in q.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            if (!hay.Contains(word, StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
+
+    /// <summary>Fills the grid from the sorted entry list, applying the
+    /// search filter. The header shows the filtered count next to the
+    /// total so a narrow filter is obvious.</summary>
+    private void PopulateGrid()
+    {
         _grid.Rows.Clear();
         long totalBytes = 0;
+        int shown = 0;
         foreach (var e in _entries)
         {
             totalBytes += e.SizeBytes;
+            if (!MatchesFilter(e)) continue;
+            shown++;
             var (state, color) = LiveState(e);
             int idx = _grid.Rows.Add(
                 string.IsNullOrEmpty(e.DisplayName) ? e.ModId : e.DisplayName,
@@ -262,8 +356,9 @@ public class LibraryDialog : Form
         _grid.ClearSelection();
         UpdateSortIndicators();
 
+        var shownNote = shown == _entries.Count ? "" : $"  ·  {shown} shown";
         _headerLabel.Text =
-            $"{_entries.Count} archived version(s)  ·  {FormatSize(totalBytes)} total  ·  "
+            $"{_entries.Count} archived version(s){shownNote}  ·  {FormatSize(totalBytes)} total  ·  "
             + $"in {ModLibrary.LibraryDir(_modsDir)}";
         UpdateButtons();
     }
@@ -274,6 +369,7 @@ public class LibraryDialog : Form
     private void BuildProfilesMap()
     {
         _profilesByMod = new(StringComparer.OrdinalIgnoreCase);
+        _pinnedVersions = new(StringComparer.OrdinalIgnoreCase);
         try
         {
             foreach (var p in ModProfile.LoadAll())
@@ -281,6 +377,8 @@ public class LibraryDialog : Form
                 foreach (var m in p.Mods)
                 {
                     if (string.IsNullOrEmpty(m.ModId)) continue;
+                    if (!string.IsNullOrEmpty(m.Version))
+                        _pinnedVersions.Add(m.ModId + "@" + m.Version);
                     if (!_profilesByMod.TryGetValue(m.ModId, out var list))
                         _profilesByMod[m.ModId] = list = new List<string>();
                     if (!list.Contains(p.Name)) list.Add(p.Name);
@@ -358,6 +456,8 @@ public class LibraryDialog : Form
         var live = _registry.FindById(e.ModId);
         if (live == null)
             return ("Not installed", Color.FromArgb(150, 160, 180));
+        if (!ModLineage.Same(live.Source, live.DisplayName, e.Source, e.DisplayName))
+            return ("Other mod, same id, live", Color.FromArgb(170, 185, 210));
         var sameVer = ModRegistry.CompareVersions(live.Version, e.Version) == 0;
         if (sameVer)
             return live.IsEnabled
@@ -371,6 +471,7 @@ public class LibraryDialog : Form
         var n = _grid.SelectedRows.Count;
         _installBtn.Enabled = !_busy && n > 0;
         _deleteBtn.Enabled  = !_busy && n > 0;
+        _cleanBtn.Enabled   = !_busy && _entries.Count > 0;
         _installBtn.Text = n > 1 ? $"⬇ Install {n} selected" : "⬇ Install selected";
         _deleteBtn.Text  = n > 1 ? $"🗑 Delete {n} selected"  : "🗑 Delete selected";
     }
@@ -450,6 +551,67 @@ public class LibraryDialog : Form
         }
         if (deleted > 0) Changed = true;
         ReloadList();
+    }
+
+    /// <summary>The library entries a clean-up would delete: every
+    /// version that is not the newest of its lineage, not the version
+    /// currently live, and not pinned by any saved profile. Lineage,
+    /// not just mod_id, so an abandoned mod that shares an id with its
+    /// successor keeps its own newest file.</summary>
+    private List<ModLibrary.Entry> OldVersions()
+    {
+        var old = new List<ModLibrary.Entry>();
+        foreach (var group in ModLineage.Group(_entries))
+        {
+            // group is newest-first; index 0 stays.
+            for (int i = 1; i < group.Count; i++)
+            {
+                var e = group[i];
+                if (_pinnedVersions.Contains(e.ModId + "@" + e.Version)) continue;
+                var live = _registry.FindById(e.ModId);
+                if (live != null && ModRegistry.CompareVersions(live.Version, e.Version) == 0) continue;
+                old.Add(e);
+            }
+        }
+        return old;
+    }
+
+    private void CleanUpOldVersions()
+    {
+        if (_busy) return;
+        var old = OldVersions();
+        if (old.Count == 0)
+        {
+            ThemedMessageBox.Show(this,
+                "Nothing to clean up: every archived version is either the newest "
+                + "of its mod, currently live, or pinned by a saved profile.",
+                "Clean up old versions", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        long bytes = old.Sum(e => e.SizeBytes);
+        var list = string.Join("\n", old.Take(14).Select(e =>
+            $"   •  {(string.IsNullOrEmpty(e.DisplayName) ? e.ModId : e.DisplayName)}  v{e.Version}"));
+        if (old.Count > 14) list += $"\n   …and {old.Count - 14} more";
+
+        var dr = ThemedMessageBox.Show(this,
+            $"Delete {old.Count} old archived version(s) ({FormatSize(bytes)}) from the library?\n\n"
+            + list
+            + "\n\nKept: the newest version of each mod, every version that is live, "
+            + "and every version a saved profile pins. Mods installed live are not affected.",
+            "Clean up old versions",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (dr != DialogResult.Yes) return;
+
+        int deleted = 0;
+        foreach (var e in old)
+        {
+            try { ModLibrary.Remove(_modsDir, e.ModId, e.Version); deleted++; }
+            catch { /* best-effort */ }
+        }
+        if (deleted > 0) Changed = true;
+        ReloadList();
+        _headerLabel.Text = $"Cleaned up {deleted} version(s), {FormatSize(bytes)} freed.  ·  " + _headerLabel.Text;
     }
 
     private static string FormatSize(long bytes)

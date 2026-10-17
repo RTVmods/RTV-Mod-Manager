@@ -8473,18 +8473,8 @@ public class MainForm : Form
     private bool OfferNewerLibraryVersions(Domain.ModProfile target)
     {
         if (target.Mods.Count == 0) return true;
-        var newest = new Dictionary<string, Domain.ModLibrary.Entry>(
-            StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (var le in Domain.ModLibrary.List(ModsDir))
-            {
-                if (string.IsNullOrEmpty(le.ModId) || string.IsNullOrEmpty(le.Version)) continue;
-                if (!newest.TryGetValue(le.ModId, out var cur)
-                    || Domain.ModRegistry.CompareVersions(le.Version, cur.Version) > 0)
-                    newest[le.ModId] = le;
-            }
-        }
+        List<Domain.ModLibrary.Entry> library;
+        try { library = Domain.ModLibrary.List(ModsDir); }
         catch { return true; /* no library to compare against */ }
 
         var candidates = new List<Ui.ProfileVersionPromptDialog.Candidate>();
@@ -8492,7 +8482,11 @@ public class MainForm : Form
         {
             if (string.IsNullOrEmpty(pm.ModId) || string.IsNullOrEmpty(pm.Version)) continue;
             if (_settings.LockedMods.Contains(pm.ModId)) continue;
-            if (!newest.TryGetValue(pm.ModId, out var le)) continue;
+            // Same mod_id is not enough: an abandoned mod and its
+            // successor can share an id (ModLineage has the example),
+            // so only a release of the same lineage counts as newer.
+            var le = Domain.ModLineage.NewestFor(library, pm.ModId, pm.SourceRef, pm.DisplayName);
+            if (le == null || string.IsNullOrEmpty(le.Version)) continue;
             if (VersionsAreAmbiguous(pm.Version, le.Version)) continue;
             if (Domain.ModRegistry.CompareVersions(le.Version, pm.Version) <= 0) continue;
             var dev = le.DisplayName.Contains("[DEV]", StringComparison.OrdinalIgnoreCase);
