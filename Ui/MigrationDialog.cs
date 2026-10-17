@@ -23,9 +23,20 @@ public class MigrationDialog : Form
     /// chose Skip / closed the dialog without confirming.</summary>
     public string? ChosenName { get; private set; }
 
-    private readonly TextBox _nameBox;
+    /// <summary>The loader profiles the user ticked for import, in
+    /// list order. Empty when there were none to offer or the user
+    /// unticked them all.</summary>
+    public IReadOnlyList<string> ImportProfiles { get; private set; } = Array.Empty<string>();
 
-    public MigrationDialog(int modCount, string defaultName)
+    private readonly TextBox _nameBox;
+    private readonly CheckedListBox? _loaderList;
+    private readonly List<string> _loaderNames = new();
+
+    /// <param name="loaderProfiles">The other profiles the mod loader
+    /// keeps in mod_config.cfg, with the number of mods each lists.
+    /// Offered for import, all ticked; pass none to hide the section.</param>
+    public MigrationDialog(int modCount, string defaultName,
+        IReadOnlyList<(string Name, int ModCount)>? loaderProfiles = null)
     {
         Text            = "Adopt the profile model?";
         StartPosition   = FormStartPosition.CenterParent;
@@ -108,6 +119,56 @@ public class MigrationDialog : Form
         _nameBox.SelectAll();
         nameRow.Controls.Add(_nameBox, 1, 0);
 
+        // The loader's other profiles: each becomes a manager profile
+        // too, so a set-up made in the loader's launcher carries over.
+        Panel? loaderPanel = null;
+        if (loaderProfiles != null && loaderProfiles.Count > 0)
+        {
+            loaderPanel = new Panel
+            {
+                Dock      = DockStyle.Top,
+                AutoSize  = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = Color.Transparent,
+                Margin    = new Padding(0, 0, 0, 10),
+            };
+            _loaderList = new CheckedListBox
+            {
+                Dock           = DockStyle.Top,
+                BackColor      = Color.FromArgb(18, 22, 30),
+                ForeColor      = Color.FromArgb(220, 225, 235),
+                BorderStyle    = BorderStyle.FixedSingle,
+                Font           = new Font("Consolas", 11f),
+                CheckOnClick   = true,
+                IntegralHeight = false,
+            };
+            foreach (var (lname, count) in loaderProfiles)
+            {
+                _loaderNames.Add(lname);
+                _loaderList.Items.Add(
+                    $"{lname}   ({count} mod{(count == 1 ? "" : "s")})", true);
+            }
+            // Just tall enough for the list, scrolling past eight.
+            _loaderList.Height = _loaderList.ItemHeight * Math.Min(8, loaderProfiles.Count) + 6;
+            var loaderLabel = new Label
+            {
+                Text =
+                    $"The mod loader also keeps {loaderProfiles.Count} other "
+                    + $"profile{(loaderProfiles.Count == 1 ? "" : "s")} in "
+                    + "mod_config.cfg. Ticked ones are imported as manager "
+                    + "profiles with their enabled state and load order; mods "
+                    + "they list that are not installed show as missing until "
+                    + "installed or downloaded.",
+                Dock        = DockStyle.Top,
+                AutoSize    = true,
+                MaximumSize = new Size(540, 0),
+                ForeColor   = Color.FromArgb(210, 220, 235),
+                Padding     = new Padding(0, 10, 0, 8),
+            };
+            loaderPanel.Controls.Add(_loaderList);
+            loaderPanel.Controls.Add(loaderLabel);
+        }
+
         // Button row.
         var btnRow = new FlowLayoutPanel
         {
@@ -138,6 +199,13 @@ public class MigrationDialog : Form
                 return;
             }
             ChosenName = name;
+            if (_loaderList != null)
+            {
+                var picked = new List<string>();
+                for (var i = 0; i < _loaderList.Items.Count; i++)
+                    if (_loaderList.GetItemChecked(i)) picked.Add(_loaderNames[i]);
+                ImportProfiles = picked;
+            }
         };
         btnRow.Controls.Add(migrate);
 
@@ -153,6 +221,7 @@ public class MigrationDialog : Form
 
         // Reverse-add so Dock=Top stacks correctly.
         Controls.Add(btnRow);
+        if (loaderPanel != null) Controls.Add(loaderPanel);
         Controls.Add(nameRow);
         Controls.Add(body);
         Controls.Add(title);

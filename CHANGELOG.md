@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.6.12 (2026-10-18)
+
+- First run: adopting the profile model now also offers the mod loader's other profiles for import. Each ticked profile becomes a manager profile with the enabled state and load order recorded in `mod_config.cfg`; a mod the loader lists at several versions is kept once, at the version that is installed or in the Library, else the newest. Mods that are not on disk stay in the profile and show as missing until installed or downloaded. The cfg and the mods folder are not changed by the import.
+
 ## 0.6.11 (2026-10-17)
 
 - Library: a search box filters the list by name, id, version or VostokMods source, and **Clean up old versions** deletes every archived version that is not the newest of its mod, not live, and not pinned by a saved profile (confirmed with the list and the space freed first). Multi-select and delete were already there.

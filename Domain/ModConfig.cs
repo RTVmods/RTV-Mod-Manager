@@ -237,6 +237,91 @@ public class ModConfig
             pr.Clear();
     }
 
+    // ── the loader's profile list ─────────────────────────────────────
+
+    /// <summary>The loader's "reset to vanilla" sentinel in
+    /// `[settings] active_profile`; it is not a profile.</summary>
+    public const string VanillaProfile = "__vanilla__";
+
+    /// <summary>Prefix of the profile slots the loader manages for
+    /// an installed modpack. They are not user profiles.</summary>
+    public const string ModpackProfilePrefix = "modpack__";
+
+    /// <summary>One mod's state inside a loader profile. `Enabled`
+    /// and `Priority` are null when that section has no entry for
+    /// the key. `ModId` is empty for a `zip:&lt;file&gt;` key (a mod
+    /// without a mod.txt id).</summary>
+    public record ProfileEntry(string Key, string ModId, string Version, bool? Enabled, int? Priority);
+
+    /// <summary>Every profile the loader would list from this cfg:
+    /// the names of the `[profile.&lt;name&gt;.enabled]` and
+    /// `[profile.&lt;name&gt;.priority]` sections, in the loader's
+    /// order (sorted), without the vanilla sentinel and, unless
+    /// asked for, without modpack-managed slots.</summary>
+    public List<string> ProfileNames(bool includeModpackSlots = false)
+    {
+        var names = new List<string>();
+        foreach (var suffix in new[] { ".enabled", ".priority" })
+        {
+            foreach (var sec in _sections)
+            {
+                if (!sec.Name.StartsWith("profile.", StringComparison.Ordinal)
+                    || !sec.Name.EndsWith(suffix, StringComparison.Ordinal))
+                    continue;
+                var name = sec.Name.Substring(8, sec.Name.Length - 8 - suffix.Length);
+                if (name.Length == 0 || name == VanillaProfile) continue;
+                if (!includeModpackSlots
+                    && name.StartsWith(ModpackProfilePrefix, StringComparison.Ordinal))
+                    continue;
+                if (!names.Contains(name, StringComparer.Ordinal)) names.Add(name);
+            }
+        }
+        names.Sort(StringComparer.Ordinal);
+        return names;
+    }
+
+    /// <summary>The mods recorded under a loader profile, from both
+    /// its sections. A key appears once even when it is in both.</summary>
+    public List<ProfileEntry> ProfileEntries(string profileName)
+    {
+        var result = new List<ProfileEntry>();
+        if (string.IsNullOrEmpty(profileName)) return result;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        _byName.TryGetValue($"profile.{profileName}.enabled", out var en);
+        _byName.TryGetValue($"profile.{profileName}.priority", out var pr);
+        foreach (var sec in new[] { en, pr })
+        {
+            if (sec == null) continue;
+            foreach (var e in sec.Entries)
+            {
+                if (!seen.Add(e.Key)) continue;
+                SplitKey(e.Key, out var id, out var ver);
+                bool? enabled = null;
+                var enRaw = en?.Find(e.Key)?.RawValue;
+                if (enRaw != null)
+                    enabled = string.Equals(enRaw.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                int? priority = null;
+                var prRaw = pr?.Find(e.Key)?.RawValue;
+                if (prRaw != null && int.TryParse(prRaw.Trim(), out var p)) priority = p;
+                result.Add(new ProfileEntry(e.Key, id, ver, enabled, priority));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Takes a loader profile key apart: `id@version`
+    /// (the version may be empty), a bare id, or `zip:&lt;file&gt;`
+    /// for a mod with no id (id and version both empty).</summary>
+    public static void SplitKey(string key, out string modId, out string version)
+    {
+        modId = ""; version = "";
+        if (string.IsNullOrEmpty(key) || key.StartsWith("zip:", StringComparison.Ordinal)) return;
+        var at = key.LastIndexOf('@');
+        if (at < 0) { modId = key; return; }
+        modId = key.Substring(0, at);
+        version = key.Substring(at + 1);
+    }
+
     // ── mod sources ───────────────────────────────────────────────────
 
     /// <summary>Where the loader (or the manager) recorded this mod as

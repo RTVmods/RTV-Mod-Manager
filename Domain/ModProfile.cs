@@ -523,6 +523,86 @@ public class ModProfile
     /// there's nothing to match against on import.
     /// NOTE: This builds the metadata only — callers must invoke
     /// `SaveWithBundles` afterwards to actually copy the .vmz files.</summary>
+    /// <summary>A mod the manager can lay hands on (live in the mods
+    /// folder or archived in the Library), as far as building a
+    /// profile from the loader's records needs to know it.</summary>
+    public record KnownMod(string ModId, string Version, string DisplayName, string Source, int DeclaredPriority);
+
+    /// <summary>What <see cref="FromLoaderProfile"/> made of a
+    /// loader profile.</summary>
+    public class LoaderImportResult
+    {
+        public ModProfile Profile { get; init; } = new();
+        /// <summary>Mods the profile names that are neither live nor
+        /// in the Library. They stay in the profile (the loader kept
+        /// them too) and show as missing until installed.</summary>
+        public List<string> NotOnDisk { get; } = new();
+        /// <summary>`zip:` keys: mods without a mod.txt id. The
+        /// manager cannot address them, so they are left out.</summary>
+        public int SkippedWithoutId { get; set; }
+    }
+
+    /// <summary>Builds a profile from the loader's own record of one:
+    /// the `[profile.&lt;name&gt;.enabled]` / `.priority` sections of
+    /// mod_config.cfg. The loader never prunes those sections, so a
+    /// mod can be listed at several versions; one entry per mod id is
+    /// kept, preferring a version that is on disk, else the newest.
+    /// A mod with no enabled entry counts as enabled, as in the
+    /// loader. Names, sources and declared priorities come from
+    /// `known`; a mod not in it keeps its id as its name and the cfg's
+    /// `[mod_sources]` record as its source.</summary>
+    public static LoaderImportResult FromLoaderProfile(
+        string name,
+        ModConfig cfg,
+        IEnumerable<KnownMod> known)
+    {
+        var knownByKey = new Dictionary<string, KnownMod>(StringComparer.OrdinalIgnoreCase);
+        foreach (var k in known)
+            knownByKey.TryAdd(k.ModId + "@" + k.Version, k);
+
+        var result = new LoaderImportResult
+        {
+            Profile = new ModProfile
+            {
+                Name        = name,
+                Description = $"Imported from the mod loader's profile list — {DateTime.Now:yyyy-MM-dd HH:mm}",
+                CreatedAt   = DateTime.UtcNow,
+            },
+        };
+
+        var entries = cfg.ProfileEntries(name);
+        result.SkippedWithoutId = entries.Count(e => string.IsNullOrEmpty(e.ModId));
+        var versionOrder = Comparer<string>.Create(ModRegistry.CompareVersions);
+        var groups = entries
+            .Where(e => !string.IsNullOrEmpty(e.ModId))
+            .GroupBy(e => e.ModId, StringComparer.OrdinalIgnoreCase);
+        foreach (var g in groups)
+        {
+            var pick = g
+                .OrderByDescending(e => knownByKey.ContainsKey(e.ModId + "@" + e.Version))
+                .ThenByDescending(e => e.Version, versionOrder)
+                .First();
+            knownByKey.TryGetValue(pick.ModId + "@" + pick.Version, out var k);
+            var source = k?.Source ?? "";
+            if (string.IsNullOrEmpty(source))
+                source = cfg.GetModSource(pick.ModId, pick.Version).Key;
+            result.Profile.Mods.Add(new ProfileMod
+            {
+                ModId       = pick.ModId,
+                DisplayName = string.IsNullOrEmpty(k?.DisplayName) ? pick.ModId : k!.DisplayName,
+                Version     = pick.Version,
+                IsEnabled   = pick.Enabled ?? true,
+                Priority    = pick.Priority ?? k?.DeclaredPriority ?? 0,
+                Source      = source,
+            });
+            if (k == null) result.NotOnDisk.Add(pick.ModId + "@" + pick.Version);
+        }
+        result.Profile.Mods = result.Profile.Mods
+            .OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return result;
+    }
+
     public static ModProfile FromRegistry(
         string name,
         string description,

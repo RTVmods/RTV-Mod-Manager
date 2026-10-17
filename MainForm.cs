@@ -8638,7 +8638,21 @@ public class MainForm : Form
             ? "Default"
             : _modConfig.ActiveProfile;
 
-        using var dlg = new Ui.MigrationDialog(modCount, defaultName);
+        // The loader's other profiles, offered for import. The one
+        // the cfg calls active is the mods folder's current state and
+        // becomes the profile named above, whatever name is chosen.
+        var loaderProfiles = _modConfig.ProfileNames()
+            .Where(n => !string.Equals(n, _modConfig.ActiveProfile, StringComparison.Ordinal))
+            .Select(n => (Name: n,
+                ModCount: _modConfig.ProfileEntries(n)
+                    .Where(e => !string.IsNullOrEmpty(e.ModId))
+                    .Select(e => e.ModId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count()))
+            .Where(p => p.ModCount > 0)
+            .ToList();
+
+        using var dlg = new Ui.MigrationDialog(modCount, defaultName, loaderProfiles);
         var result = dlg.ShowDialog(this);
         if (result != DialogResult.OK || string.IsNullOrEmpty(dlg.ChosenName))
         {
@@ -8656,6 +8670,7 @@ public class MainForm : Form
         Cursor = Cursors.WaitCursor;
         int libAdded = 0;
         int libSkipped = 0;
+        var importNote = "";
         try
         {
             // 1. Ingest every live archive mod into the Library.
@@ -8696,6 +8711,10 @@ public class MainForm : Form
             _settings.ActiveProfileName = name;
             _settings.MigrationDeclined = false;
             try { _settings.Save(); } catch { /* best-effort */ }
+
+            // 5. The loader's other profiles the user ticked.
+            if (dlg.ImportProfiles.Count > 0)
+                importNote = ImportLoaderProfiles(dlg.ImportProfiles, name);
         }
         finally
         {
@@ -8715,7 +8734,74 @@ public class MainForm : Form
             : "";
         _modsLabel.Text =
             $"Migrated to profile '{name}'  ·  "
-            + $"{libAdded} mod(s) added to Library{libNote}.";
+            + $"{libAdded} mod(s) added to Library{libNote}."
+            + importNote;
+    }
+
+    /// <summary>Creates a manager profile for each named loader
+    /// profile from its sections in mod_config.cfg (see
+    /// <see cref="Domain.ModProfile.FromLoaderProfile"/>). A name the
+    /// manager already has (`skipName`, or a saved profile) is left
+    /// alone. Nothing in the cfg or the mods folder changes. Returns
+    /// a status-line note.</summary>
+    private string ImportLoaderProfiles(IReadOnlyList<string> names, string skipName)
+    {
+        // What the manager can see: live mods and the Library, which
+        // step 1 of the adoption has just filled from the mods folder.
+        var known = new List<Domain.ModProfile.KnownMod>();
+        foreach (var e in _registry.Entries)
+        {
+            if (!e.IsArchive || string.IsNullOrEmpty(e.ModId)) continue;
+            known.Add(new Domain.ModProfile.KnownMod(
+                e.ModId, e.Version,
+                string.IsNullOrEmpty(e.DisplayName) ? e.ModId : e.DisplayName,
+                e.Source.Key, e.DeclaredPriority));
+        }
+        try
+        {
+            foreach (var lib in Domain.ModLibrary.List(ModsDir))
+                known.Add(new Domain.ModProfile.KnownMod(
+                    lib.ModId, lib.Version, lib.DisplayName, lib.Source.Key, 0));
+        }
+        catch { /* the live list still serves */ }
+
+        var existing = new HashSet<string>(
+            Domain.ModProfile.LoadAll().Select(p => p.Name),
+            StringComparer.OrdinalIgnoreCase)
+        {
+            skipName,
+        };
+
+        int imported = 0, skipped = 0, missing = 0;
+        var failed = new List<string>();
+        foreach (var n in names)
+        {
+            if (existing.Contains(n)) { skipped++; continue; }
+            try
+            {
+                var r = Domain.ModProfile.FromLoaderProfile(n, _modConfig, known);
+                r.Profile.SaveMetadataOnly();
+                existing.Add(n);
+                imported++;
+                missing += r.NotOnDisk.Count;
+            }
+            catch (Exception ex)
+            {
+                failed.Add($"{n}: {ex.Message}");
+            }
+        }
+
+        if (failed.Count > 0)
+            Ui.ThemedMessageBox.Show(this,
+                "These mod loader profiles could not be imported:\n\n"
+                + string.Join("\n", failed),
+                "Profile import",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+        var note = $"  ·  {imported} loader profile(s) imported";
+        if (missing > 0) note += $" ({missing} listed mod(s) not installed)";
+        if (skipped > 0) note += $", {skipped} already present";
+        return note;
     }
 
     private void RefreshSetupBanner()

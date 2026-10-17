@@ -64,6 +64,8 @@ Save / apply / clone / import / export complete mod loadouts as `.vmprofile` fil
 
 A profile's `profile.json` uses the mod loader's own modpack schema (`metroprofile` 1), so a profile exported as **Mod loader modpack (.zip)** and placed in the game's `mods` folder shows up on the loader's Modpacks tab.
 
+On first run the manager adopts the mods folder as one profile (named after the loader's active profile) and offers the other profiles the loader keeps in `mod_config.cfg` for import, each with its enabled state and load order, so a set-up made in the loader's launcher carries over.
+
 ### Mod packs
 Lightweight JSON files listing mods to merge into the active profile (distinct from full profiles). Import via drag-drop or the **Import list…** button; author via the Mod Packager's **Export JSON…**.
 
