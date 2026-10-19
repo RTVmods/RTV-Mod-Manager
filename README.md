@@ -81,6 +81,9 @@ Package a folder or existing `.vmz` into a fresh archive with edited manifest fi
 - Two-tier crash rollback (LastLaunch / LastKnownGood) captured on launch and promoted on clean exit.
 - **Launch Game** starts the game through Steam and, with Metro Mod Loader 3.4.2 or later, skips the loader's launcher window (the mods are already set up here); the active profile loads straight away. Off switch in Settings.
 
+### Saves
+With the [Save Slots](https://vostokmods.net/mod/save-slots) mod installed, **Saves** lists its five slots and ties each one to a profile, so a save always runs with the mods it was made with. **Launch this slot** switches to the slot's profile and starts the game straight into it; in the game, loading a slot tied to another profile restarts into that profile. The manager follows a profile switch made in the game on its next scan.
+
 ---
 
 ## File formats

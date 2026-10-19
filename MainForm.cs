@@ -290,6 +290,7 @@ public class MainForm : Form
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
         RecordDownloadedSources();
         var ok = _registry.Scan(ModsDir, _modConfig);
+        AdoptLoaderActiveProfile();
         AutoAdoptOrphansIntoActiveProfile();
         FollowLiveVersions();
         BackfillProfileSources();
@@ -1083,6 +1084,17 @@ public class MainForm : Form
         profilesBtn.Margin = new Padding(0, 0, 8, 0);
         profilesBtn.Click += async (_, _) => await OpenProfilesDialogAsync();
         btnFlow.Controls.Add(profilesBtn);
+
+        // Saves: the Save Slots mod's slots, each tied to a profile, and
+        // a launch straight into one of them.
+        var savesBtn = ThemedButton("💾 Saves…");
+        savesBtn.Width = 120;
+        savesBtn.Height = 40;
+        savesBtn.AutoSize = false;
+        savesBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        savesBtn.Margin = new Padding(0, 0, 8, 0);
+        savesBtn.Click += (_, _) => OpenSavesDialog();
+        btnFlow.Controls.Add(savesBtn);
 
         // Mod Packager — creator-side tool: takes a folder or
         // existing .vmz/.zip, lets the author edit manifest fields
@@ -8239,7 +8251,7 @@ public class MainForm : Form
     /// integration matters for achievements, playtime, and the
     /// in-game overlay — we don't try to launch the .exe directly.
     /// Falls back to a clear error message when detection fails.</summary>
-    private void LaunchVostok()
+    private bool LaunchVostok()
     {
         // Pre-launch checkpoint: snapshot mod_config.cfg + the
         // active profile's profile.json so any "I launched the
@@ -8274,7 +8286,7 @@ public class MainForm : Form
                 + "from your Steam library directly.",
                 "Can't launch via Steam",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
+            return false;
         }
         // The mods are already set up here, so ask the loader to go
         // straight into the game instead of showing its launcher.
@@ -8291,10 +8303,153 @@ public class MainForm : Form
                 + "Is Steam installed and running?",
                 "Launch failed",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            return false;
         }
         _modsLabel.Text = $"Launching Vostok via Steam (app id {appId})…"
             + (skipUi ? "  (mod loader launcher skipped)" : "");
+        return true;
+    }
+
+    // ── Saves (Save Slots mod) ────────────────────────────────────
+
+    private string SaveSlotsRoot => Domain.SaveSlots.RootDir(Domain.SaveSlots.DefaultUserDir);
+
+    /// <summary>Why launching into a slot would not work as expected
+    /// with the live mod set, or null when it would.</summary>
+    private string? SaveSlotsWarning()
+    {
+        var companion = _registry.FindById(Domain.SaveSlots.CompanionModId);
+        var others = Domain.SaveSlots.OtherSlotModIds
+            .Select(id => _registry.FindById(id))
+            .Where(e => e != null && e.IsEnabled)
+            .Select(e => string.IsNullOrEmpty(e!.DisplayName) ? e.ModId : e.DisplayName)
+            .ToList();
+        if (companion == null || !companion.IsEnabled)
+        {
+            var note = "The Save Slots mod isn't live in this profile, so the game won't pick a slot by itself. "
+                + "Install it from VostokMods (vostokmods.net/mod/save-slots) and enable it in every profile you tie a slot to.";
+            if (others.Count > 0)
+                note += $" {string.Join(", ", others)} manages the same slot folder and can stay until then.";
+            return note;
+        }
+        if (others.Count > 0)
+            return $"{string.Join(", ", others)} is live together with Save Slots. Both manage the same slot folder; "
+                + "Save Slots stands down while the other is loaded. Disable one of them.";
+        return null;
+    }
+
+    private void OpenSavesDialog()
+    {
+        var root = SaveSlotsRoot;
+        var names = _allProfiles.Select(p => p.Name)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        using var dlg = new Ui.SavesDialog(root, names, _activeProfile?.Name ?? "",
+            LaunchSlot, SaveSlotsWarning());
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>Starts the game straight into slot n: switches to the
+    /// slot's profile when it has one and another is live, tells the
+    /// Save Slots mod which slot to continue, and launches. Returns
+    /// true when the game was launched.</summary>
+    private bool LaunchSlot(int n)
+    {
+        var root = SaveSlotsRoot;
+        var slot = Domain.SaveSlots.Read(root, n);
+        if (!slot.Occupied) return false;
+
+        if (slot.Profile.Length > 0
+            && !string.Equals(slot.Profile, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            var target = _allProfiles.FirstOrDefault(p =>
+                string.Equals(p.Name, slot.Profile, StringComparison.OrdinalIgnoreCase));
+            if (target == null)
+            {
+                Ui.ThemedMessageBox.Show(this,
+                    $"{slot.Title} is tied to the profile '{slot.Profile}', which no longer exists.\n\n"
+                    + "Pick another profile for the slot, or '(any profile)' to run it with the live one.",
+                    "Profile missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            SwitchActiveProfile(target);
+            if (!string.Equals(_activeProfile?.Name, target.Name, StringComparison.OrdinalIgnoreCase))
+                return false;  // cancelled or failed; the switch said why
+        }
+
+        var warning = SaveSlotsWarning();
+        if (warning != null)
+        {
+            var go = Ui.ThemedMessageBox.Show(this,
+                warning + "\n\nLaunch anyway? The game will start at the main menu.",
+                "Save Slots", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (go != DialogResult.Yes) return false;
+        }
+
+        try { Domain.SaveSlots.WritePending(root, n, _activeProfile?.Name ?? ""); }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't prepare the slot", ex);
+            return false;
+        }
+        if (!LaunchVostok())
+        {
+            Domain.SaveSlots.ClearPending(root);
+            return false;
+        }
+        _modsLabel.Text += $"  ·  continuing {slot.Title}";
+        return true;
+    }
+
+    /// <summary>The game (the Save Slots mod) or the mod loader's own
+    /// launcher can make another profile active. When mod_config.cfg
+    /// names a saved profile other than the one the manager has as
+    /// active, the folder and cfg were already switched outside the
+    /// manager: follow it, so later scans record the live mods into the
+    /// right profile instead of the old one.</summary>
+    private void AdoptLoaderActiveProfile()
+    {
+        if (string.IsNullOrEmpty(_settings.ActiveProfileName)) return;  // not adopted yet
+        var cfgName = _modConfig.ActiveProfile;
+        if (string.IsNullOrEmpty(cfgName)
+            || string.Equals(cfgName, _settings.ActiveProfileName, StringComparison.OrdinalIgnoreCase))
+            return;
+        Domain.ModProfile? match;
+        try
+        {
+            match = Domain.ModProfile.LoadAll().FirstOrDefault(p =>
+                string.Equals(p.Name, cfgName, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return; }
+        if (match == null) return;  // a loader-only profile: leave the manager's as is
+
+        // Only when the folder really is that profile's: the loader's
+        // launcher can name another profile active without moving any
+        // archive, and adopting then would record the old profile's mods
+        // into this one. Locked mods and Save Slots itself may be extra.
+        var wanted = new HashSet<string>(
+            match.Mods.Select(m => m.ModId).Where(id => !string.IsNullOrEmpty(id)),
+            StringComparer.OrdinalIgnoreCase);
+        var locked = new HashSet<string>(_settings.LockedMods, StringComparer.OrdinalIgnoreCase);
+        var extras = _registry.Entries
+            .Where(e => e.IsArchive && !string.IsNullOrEmpty(e.ModId))
+            .Select(e => e.ModId)
+            .Where(id => !wanted.Contains(id) && !locked.Contains(id)
+                && !string.Equals(id, Domain.SaveSlots.CompanionModId, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (extras.Count > 0)
+        {
+            if (_conflictsLabel != null)
+                _conflictsLabel.Text = $"mod_config.cfg names '{match.Name}' as active, but the mods folder "
+                    + $"still holds mods it doesn't list ({extras.Count}); keeping '{_settings.ActiveProfileName}'.";
+            return;
+        }
+        var from = _settings.ActiveProfileName;
+        _settings.ActiveProfileName = match.Name;
+        try { _settings.Save(); } catch { /* best-effort */ }
+        ReloadProfiles();
+        if (_conflictsLabel != null)
+            _conflictsLabel.Text = $"Active profile is now '{match.Name}' (switched in the game; was '{from}').";
     }
 
     /// <summary>Five-pointed star polygon, used for the title-row
