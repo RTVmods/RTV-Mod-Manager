@@ -82,7 +82,7 @@ Package a folder or existing `.vmz` into a fresh archive with edited manifest fi
 - **Launch Game** starts the game through Steam and, with Metro Mod Loader 3.4.2 or later, skips the loader's launcher window (the mods are already set up here); the active profile loads straight away. Off switch in Settings.
 
 ### Saves
-With the [Save Slots](https://vostokmods.net/mod/save-slots) mod installed, **Saves** lists its five slots and ties each one to a profile, so a save always runs with the mods it was made with. **Launch this slot** switches to the slot's profile and starts the game straight into it; in the game, loading a slot tied to another profile restarts into that profile. The manager follows a profile switch made in the game on its next scan.
+Save slots are built in: the manager installs its own Save Slots mod (based on Razzer's Multi Save Slots 1.4), keeps it on in every profile and updates it with itself. The game's menu gets five slots, and each slot can be tied to a profile so a save always runs with the mods it was made with; loading a slot tied to another profile restarts the game into that profile. **Saves** in the title row lists the slots, sets the profile per slot, and **Launch this slot** switches profile and starts the game straight into it. Settings → Built-in save slots turns the feature off.
 
 ---
 

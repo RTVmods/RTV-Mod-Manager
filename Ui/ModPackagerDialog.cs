@@ -1022,7 +1022,9 @@ public class ModPackagerDialog : Form
         }
 
         _depRows = _registry.Entries
-            .Where(e => !string.IsNullOrEmpty(e.ModId))
+            // Built-in mods ship with the manager: never a pack member
+            // or a dependency to download.
+            .Where(e => !string.IsNullOrEmpty(e.ModId) && !BuiltInMods.IsBuiltIn(e.ModId))
             // Distinct by mod_id — duplicates would let the user
             // tick the same id twice, which serializes to an array
             // with duplicates.

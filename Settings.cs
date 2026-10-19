@@ -152,6 +152,15 @@ public class Settings
     /// the manager, so the launcher would only repeat the choice.</summary>
     public bool SkipLoaderUi { get; set; } = true;
 
+    /// <summary>Built-in save slots: the manager installs the Save Slots
+    /// mod it carries into the mods folder and keeps it on in every
+    /// profile. Off removes it.</summary>
+    public bool SaveSlotsBuiltIn { get; set; } = true;
+
+    /// <summary>The one-time offer to turn off other save-slot mods in
+    /// the saved profiles has been made.</summary>
+    public bool SaveSlotsOtherModsAsked { get; set; }
+
     /// <summary>Mod IDs the user has explicitly locked. Locked mods
     /// are skipped by Enable all / Disable all bulk toggles — useful
     /// when a single mod (e.g. Mod Configuration Menu) should always

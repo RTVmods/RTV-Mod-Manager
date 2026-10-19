@@ -1166,7 +1166,8 @@ public class ProfileManagerDialog : Form
             _lockedModIds, StringComparer.OrdinalIgnoreCase);
         var lockedEntries = _registry.Entries
             .Where(e => !string.IsNullOrEmpty(e.ModId)
-                     && lockedIds.Contains(e.ModId))
+                     && lockedIds.Contains(e.ModId)
+                     && !BuiltInMods.IsBuiltIn(e.ModId))  // the manager's, not the profile's
             .ToList();
 
         // Explain what the user is about to create. The prompt

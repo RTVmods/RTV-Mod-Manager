@@ -288,6 +288,7 @@ public class MainForm : Form
     private bool Rescan()
     {
         _modConfig = ModConfig.Load(ModConfig.DefaultPath);
+        EnsureBuiltIns();
         RecordDownloadedSources();
         var ok = _registry.Scan(ModsDir, _modConfig);
         AdoptLoaderActiveProfile();
@@ -442,6 +443,7 @@ public class MainForm : Form
         {
             if (string.IsNullOrEmpty(entry.ModId)) continue;
             if (profileIds.Contains(entry.ModId)) continue;
+            if (IsBuiltInActive(entry.ModId)) continue;  // the manager's, not the profile's
 
             // Add to profile with the registry's read of the mod's
             // current state. IsEnabled mirrors whatever the on-
@@ -2060,6 +2062,12 @@ public class MainForm : Form
                 + "checkbox still works for individual toggling.",
         };
         lockItem.Click += (_, _) => ToggleLock(entry);
+        if (IsBuiltInActive(entry.ModId))
+        {
+            lockItem.Text = "Built into the manager";
+            lockItem.Checked = false;
+            lockItem.Enabled = false;
+        }
         menu.Items.Add(lockItem);
 
         // 🧪 Testing flag — purely a visual marker so the user can
@@ -2495,6 +2503,12 @@ public class MainForm : Form
 
     private void DeleteMods(List<ModEntry> entries)
     {
+        if (entries.Any(e => IsBuiltInActive(e.ModId)))
+        {
+            entries = entries.Where(e => !IsBuiltInActive(e.ModId)).ToList();
+            _modsLabel.Text = "Save Slots is built into the manager and stays; "
+                + "turn it off in Settings → Built-in save slots.";
+        }
         if (entries.Count == 0) return;
         if (entries.Count == 1) { DeleteMod(entries[0]); return; }
 
@@ -2614,6 +2628,14 @@ public class MainForm : Form
     /// also cleared from settings since the mod no longer exists.</summary>
     private void DeleteMod(ModEntry e)
     {
+        if (IsBuiltInActive(e.ModId))
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "Save Slots is built into the manager. Turn it off in Settings → "
+                + "Built-in save slots to remove it.",
+                "Built in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         var fileName = Path.GetFileName(e.Path);
         var sizeNote = "";
         try
@@ -2794,13 +2816,28 @@ public class MainForm : Form
     /// individually via the checkbox.</summary>
     private bool IsLocked(ModEntry e)
         => !string.IsNullOrEmpty(e.ModId)
-            && _settings.LockedMods.Contains(e.ModId);
+            && (_settings.LockedMods.Contains(e.ModId) || IsBuiltInActive(e.ModId));
+
+    /// <summary>True for a mod the manager installs itself and keeps
+    /// on in every profile (Save Slots, while built-in save slots are on).</summary>
+    private bool IsBuiltInActive(string? modId)
+        => _settings.SaveSlotsBuiltIn && Domain.BuiltInMods.IsBuiltIn(modId);
+
+    /// <summary>Mod ids a profile switch or apply leaves in place: the
+    /// user's locked mods plus the built-in ones.</summary>
+    private List<string> ProtectedModIds()
+    {
+        var ids = new List<string>(_settings.LockedMods);
+        if (_settings.SaveSlotsBuiltIn) ids.Add(Domain.BuiltInMods.SaveSlotsId);
+        return ids;
+    }
 
     /// <summary>Adds or removes the mod from the lock list and
     /// persists. Triggers a grid repopulate so the 🔒 indicator on
     /// the Mod column updates.</summary>
     private void ToggleLock(ModEntry e)
     {
+        if (IsBuiltInActive(e.ModId)) return;  // always kept; nothing to toggle
         if (string.IsNullOrEmpty(e.ModId))
         {
             // No mod_id in mod.txt — we'd have nothing to key the
@@ -4047,7 +4084,7 @@ public class MainForm : Form
         try
         {
             using var dlg = new Ui.ProfileDependenciesDialog(
-                _activeProfile, _registry, _settings.LockedMods);
+                _activeProfile, _registry, ProtectedModIds());
             dlg.ShowDialog(this);
         }
         finally
@@ -4153,6 +4190,7 @@ public class MainForm : Form
         // short-circuited; this catch-up pass picks up any .vmz
         // the user dropped manually in Explorer between sessions.
         AutoAdoptOrphansIntoActiveProfile();
+        SetUpBuiltInSaveSlots();
         // Arm the live file-system watcher so future Explorer-side
         // drops + deletes auto-refresh the grid without the user
         // clicking Refresh. Wired here (after profile resolution)
@@ -5441,7 +5479,7 @@ public class MainForm : Form
                 StringComparer.OrdinalIgnoreCase)
             : null;
         var lockedIds = new HashSet<string>(
-            _settings.LockedMods,
+            ProtectedModIds(),
             StringComparer.OrdinalIgnoreCase);
         bool InActiveProfile(ModEntry e)
         {
@@ -5629,10 +5667,14 @@ public class MainForm : Form
                     && _settings.ModNotes.TryGetValue(e.ModId, out var noteRaw)
                     && !string.IsNullOrWhiteSpace(noteRaw);
                 var noteSigil = hasNote ? "  📝" : "";
-                var prefix = (testing ? "🧪 " : "") + (locked ? "🔒 " : "");
+                var builtIn = IsBuiltInActive(e.ModId);
+                var prefix = (testing ? "🧪 " : "") + (builtIn ? "⚙ " : locked ? "🔒 " : "");
                 row.Cells["Name"].Value = $"{prefix}{name}{noteSigil}";
                 var tip = $"id: {e.ModId}\npath: {e.Path}";
-                if (locked)
+                if (builtIn)
+                    tip += "\n⚙ Built into RTV Mod Manager: on in every profile, updated with the "
+                        + "manager. Settings → Built-in save slots turns it off.";
+                else if (locked)
                     tip += "\n🔒 Locked — Enable all / Disable all skip this mod.";
                 if (testing)
                     tip += "\n🧪 Flagged as Testing Mod (yellow highlight).";
@@ -5837,7 +5879,13 @@ public class MainForm : Form
         Color color;
         string tip;
 
-        if (!e.Source.IsValid)
+        if (IsBuiltInActive(e.ModId))
+        {
+            text = "⚙";
+            color = muted;
+            tip = "Built into RTV Mod Manager; updated with the manager.";
+        }
+        else if (!e.Source.IsValid)
         {
             text = "—";
             color = muted;
@@ -7081,6 +7129,7 @@ public class MainForm : Form
         switch (col)
         {
             case "Update":
+                if (IsBuiltInActive(entry.ModId)) break;  // updated with the manager
                 if (IsOutdated(entry))
                     await UpdateModAsync(entry);
                 // The muted "—" state means the mod isn't linked to
@@ -7122,6 +7171,16 @@ public class MainForm : Form
 
         if (col == "Enabled")
         {
+            if (IsBuiltInActive(entry.ModId))
+            {
+                BeginInvoke(() =>
+                {
+                    PopulateModsGrid();
+                    _modsLabel.Text = "Save Slots is built into the manager and stays on; "
+                        + "turn it off in Settings → Built-in save slots.";
+                });
+                return;
+            }
             var cellValue = _modsGrid.Rows[e.RowIndex].Cells["Enabled"].Value;
             var nowChecked = cellValue is bool b && b;
             if (nowChecked == entry.IsEnabled) return;
@@ -8324,6 +8383,17 @@ public class MainForm : Form
             .Where(e => e != null && e.IsEnabled)
             .Select(e => string.IsNullOrEmpty(e!.DisplayName) ? e.ModId : e.DisplayName)
             .ToList();
+        if (!_settings.SaveSlotsBuiltIn)
+            return "Built-in save slots are off (Settings → Built-in save slots), so the game won't pick a slot by itself.";
+        if (Domain.BuiltInMods.SaveSlotsArchive != null)
+        {
+            if (others.Count > 0)
+                return $"{string.Join(", ", others)} is on in this profile. It manages the same slot folder, "
+                    + "and the built-in save slots stand down while it is loaded. Launching a slot offers to turn it off.";
+            if (companion == null || !companion.IsEnabled)
+                return "The built-in Save Slots mod isn't in the mods folder yet. Reopen the manager to install it.";
+            return null;
+        }
         if (companion == null || !companion.IsEnabled)
         {
             var note = "The Save Slots mod isn't live in this profile, so the game won't pick a slot by itself. "
@@ -8417,97 +8487,143 @@ public class MainForm : Form
     /// profile.json is enough, the switch that follows applies it.</summary>
     private bool EnsureSaveSlotsIn(Domain.ModProfile profile, bool isActive)
     {
-        var companionId = Domain.SaveSlots.CompanionModId;
-        var others = Domain.SaveSlots.OtherSlotModIds;
-        var own = profile.Mods.FirstOrDefault(m =>
-            string.Equals(m.ModId, companionId, StringComparison.OrdinalIgnoreCase));
-        var clashing = profile.Mods.Where(m => m.IsEnabled && others.Any(o =>
-            string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase))).ToList();
-        if (own is { IsEnabled: true } && clashing.Count == 0) return true;
-
-        // The newest Save Slots in the Library, or the live one.
-        Domain.ModLibrary.Entry? lib = null;
-        try
-        {
-            lib = Domain.ModLibrary.List(ModsDir)
-                .Where(e => string.Equals(e.ModId, companionId, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(e => e.Version, Comparer<string>.Create(ModRegistry.CompareVersions))
-                .FirstOrDefault();
-        }
-        catch { /* handled below */ }
-        if (own == null && lib == null)
+        if (!_settings.SaveSlotsBuiltIn || Domain.BuiltInMods.SaveSlotsArchive == null)
         {
             Ui.ThemedMessageBox.Show(this,
-                "The Save Slots mod isn't installed, so the game can't open a slot by itself.\n\n"
-                + "Install it from VostokMods (vostokmods.net/mod/save-slots), then launch the slot again.",
-                "Save Slots", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "Built-in save slots are off, so the game can't open a slot by itself.\n\n"
+                + "Turn them on in Settings → Built-in save slots, then launch the slot again.",
+                "Save slots", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
         }
+        // Save Slots itself is the manager's and on everywhere; only another
+        // slot mod in the profile can stop the slot from opening.
+        var others = Domain.SaveSlots.OtherSlotModIds;
+        var clashing = profile.Mods.Where(m => m.IsEnabled && others.Any(o =>
+            string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (clashing.Count == 0) return true;
+        return TurnOffOtherSlotMods(new[] { profile }, ask: true, slotLaunch: true);
+    }
 
-        var lines = new List<string>();
-        if (own == null) lines.Add($"add Save Slots v{lib!.Version}");
-        else if (!own.IsEnabled) lines.Add("turn Save Slots on");
-        foreach (var c in clashing)
-            lines.Add($"turn off {(string.IsNullOrEmpty(c.DisplayName) ? c.ModId : c.DisplayName)} (it uses the same slot folder)");
-        var ask = Ui.ThemedMessageBox.Show(this,
-            $"The game needs Save Slots in '{profile.Name}' to open the slot by itself. "
-            + $"Change '{profile.Name}' to:\n\n  • " + string.Join("\n  • ", lines)
-            + "\n\nThe other mods in the profile stay as they are.",
-            "Save Slots", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-        if (ask != DialogResult.Yes) return false;
-
-        if (own == null)
+    /// <summary>Keeps the built-in mods in the mods folder and on in the
+    /// active profile's cfg section (Rescan calls it before every scan).
+    /// Writes only what differs, so the folder watcher doesn't loop.</summary>
+    private void EnsureBuiltIns()
+    {
+        if (!_settings.SaveSlotsBuiltIn || Domain.BuiltInMods.SaveSlotsArchive == null) return;
+        try
         {
-            own = new Domain.ProfileMod
+            Domain.BuiltInMods.InstallSaveSlots(ModsDir);
+            var id = Domain.BuiltInMods.SaveSlotsId;
+            var ver = Domain.BuiltInMods.SaveSlotsVersion;
+            if (_modConfig.LoadFailed || ver.Length == 0) return;
+            var had = _modConfig.HasEntry(id, ver);
+            if (!had || !_modConfig.IsEnabled(id, ver, fallback: false))
             {
-                ModId = companionId,
-                DisplayName = string.IsNullOrEmpty(lib!.DisplayName) ? "Save Slots" : lib.DisplayName,
-                Version = lib.Version,
-                IsEnabled = true,
-                Priority = 0,
-                Source = lib.Source.IsValid ? lib.Source.Key : "vostokmods:" + companionId,
-            };
-            profile.Mods.Add(own);
+                _modConfig.SetEnabled(id, ver, true);
+                if (!had) _modConfig.SetPriority(id, ver, 0);
+                SaveModConfigSafely();
+            }
         }
-        own.IsEnabled = true;
-        foreach (var c in clashing) c.IsEnabled = false;
-        profile.UpdatedAt = DateTime.UtcNow;
-        try { profile.SaveMetadataOnly(); }
         catch (Exception ex)
         {
-            ShowError($"Couldn't update '{profile.Name}'", ex);
-            return false;
+            if (_modsLabel != null)
+                _modsLabel.Text = "Couldn't install the built-in Save Slots: " + ex.Message;
         }
+    }
 
-        if (isActive)
+    /// <summary>Built-in save slots were turned off: remove the archive
+    /// and its row in the active profile's cfg section.</summary>
+    private void RemoveBuiltInSaveSlotsFromCfg()
+    {
+        try
         {
-            // Apply to the live set the way a switch would.
-            var livePath = Path.Combine(ModsDir, Path.GetFileName(
-                Domain.ModLibrary.PathFor(ModsDir, own.ModId, own.Version)));
-            var libPath = Domain.ModLibrary.Find(ModsDir, own.ModId, own.Version);
-            try
+            Domain.BuiltInMods.RemoveSaveSlots(ModsDir);
+            var ver = Domain.BuiltInMods.SaveSlotsVersion;
+            if (ver.Length > 0 && !_modConfig.LoadFailed)
             {
-                if (_registry.FindById(own.ModId) == null && libPath.Length > 0 && !File.Exists(livePath))
-                    File.Copy(libPath, livePath);
+                _modConfig.RemoveEntry(Domain.BuiltInMods.SaveSlotsId, ver);
+                SaveModConfigSafely();
             }
-            catch (Exception ex)
+        }
+        catch (Exception ex) { ShowError("Couldn't remove Save Slots", ex); }
+    }
+
+    /// <summary>Startup (and turning the feature on): built-in mods are
+    /// taken out of every saved profile's list, where an earlier install
+    /// may have put them, and once, other save-slot mods that are on in
+    /// saved profiles are offered to be turned off.</summary>
+    private void SetUpBuiltInSaveSlots()
+    {
+        if (!_settings.SaveSlotsBuiltIn || Domain.BuiltInMods.SaveSlotsArchive == null) return;
+        List<Domain.ModProfile> profiles;
+        try { profiles = Domain.ModProfile.LoadAll(); }
+        catch { return; }
+        var changed = false;
+        foreach (var p in profiles)
+        {
+            if (string.IsNullOrEmpty(p.FolderPath)) continue;
+            if (p.Mods.RemoveAll(m => Domain.BuiltInMods.IsBuiltIn(m.ModId)) == 0) continue;
+            try { p.SaveMetadataOnly(); changed = true; } catch { /* left as is */ }
+        }
+        if (changed) ReloadProfiles();
+        if (_settings.SaveSlotsOtherModsAsked) return;
+
+        var others = Domain.SaveSlots.OtherSlotModIds;
+        var hits = profiles.Where(p => !string.IsNullOrEmpty(p.FolderPath)
+            && p.Mods.Any(m => m.IsEnabled && others.Any(o =>
+                string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase)))).ToList();
+        _settings.SaveSlotsOtherModsAsked = true;
+        try { _settings.Save(); } catch { /* asked again next start */ }
+        if (hits.Count > 0) TurnOffOtherSlotMods(hits, ask: true, slotLaunch: false);
+    }
+
+    /// <summary>Turns other save-slot mods off in `profiles` (after
+    /// asking when `ask`): in each profile.json, and for the active
+    /// profile in mod_config.cfg too. Their archives stay where they are.
+    /// Returns false when the user declined.</summary>
+    private bool TurnOffOtherSlotMods(IReadOnlyList<Domain.ModProfile> profiles, bool ask, bool slotLaunch)
+    {
+        var others = Domain.SaveSlots.OtherSlotModIds;
+        bool IsOther(Domain.ProfileMod m) => m.IsEnabled && others.Any(o =>
+            string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase));
+        if (ask)
+        {
+            var lines = profiles.Select(p =>
+                $"  • {p.Name}: {string.Join(", ", p.Mods.Where(IsOther).Select(m => string.IsNullOrEmpty(m.DisplayName) ? m.ModId : m.DisplayName).Distinct())}");
+            var intro = slotLaunch
+                ? "This profile has another save-slot mod on. It manages the same slot folder, and the "
+                    + "built-in save slots stand down while it is loaded, so the slot wouldn't open.\n\n"
+                : "Save slots are now built into the manager. These profiles have another save-slot "
+                    + "mod on, which manages the same slot folder; the built-in one stands down while "
+                    + "it is loaded.\n\n";
+            var go = Ui.ThemedMessageBox.Show(this,
+                intro + "Turn it off in:\n\n" + string.Join("\n", lines)
+                + "\n\nIts archive stays in the mods folder, and your slots stay as they are.",
+                "Save slots", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (go != DialogResult.Yes) return false;
+        }
+        var activeTouched = false;
+        foreach (var p in profiles)
+        {
+            var hit = p.Mods.Where(IsOther).ToList();
+            if (hit.Count == 0) continue;
+            foreach (var m in hit) m.IsEnabled = false;
+            p.UpdatedAt = DateTime.UtcNow;
+            try { p.SaveMetadataOnly(); }
+            catch (Exception ex) { ShowError($"Couldn't update '{p.Name}'", ex); return false; }
+            if (string.Equals(p.Name, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase))
             {
-                ShowError("Couldn't copy Save Slots into the mods folder", ex);
-                return false;
+                foreach (var m in hit) _modConfig.SetEnabled(m.ModId, m.Version, false);
+                activeTouched = true;
             }
-            _modConfig.SetEnabled(own.ModId, own.Version, true);
-            if (!_modConfig.HasEntry(own.ModId, own.Version))
-                _modConfig.SetPriority(own.ModId, own.Version, own.Priority);
-            foreach (var c in clashing) _modConfig.SetEnabled(c.ModId, c.Version, false);
-            SaveModConfigSafely();
-            ReloadProfiles();
+        }
+        if (activeTouched) SaveModConfigSafely();
+        ReloadProfiles();
+        if (activeTouched)
+        {
             Rescan();
             UpdateModsStatus();
             PopulateModsGrid();
-        }
-        else
-        {
-            ReloadProfiles();
         }
         return true;
     }
@@ -8625,9 +8741,19 @@ public class MainForm : Form
         var oldMods = _settings.ModsDir;
         var oldClaude = _settings.ClaudePath;
         var oldDecomp = _settings.GameSourcePath;
+        var oldSaveSlots = _settings.SaveSlotsBuiltIn;
 
         using var dlg = new SettingsDialog(_settings);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (_settings.SaveSlotsBuiltIn != oldSaveSlots)
+        {
+            try { _settings.Save(); } catch { /* saved again below */ }
+            if (!_settings.SaveSlotsBuiltIn) RemoveBuiltInSaveSlotsFromCfg();
+            Rescan();
+            if (_settings.SaveSlotsBuiltIn) SetUpBuiltInSaveSlots();
+            UpdateModsStatus();
+            PopulateModsGrid();
+        }
 
         // Validate mods folder before persisting; if it's invalid,
         // revert that one field so we don't try to scan a missing
@@ -8698,7 +8824,7 @@ public class MainForm : Form
     private async Task OpenProfilesDialogAsync()
     {
         using var dlg = new Ui.ProfileManagerDialog(
-            _registry, _vm, _modConfig, ModsDir, _settings.LockedMods);
+            _registry, _vm, _modConfig, ModsDir, ProtectedModIds());
         dlg.ShowDialog(this);
 
         // The dialog can change which profile is active in two ways:
@@ -8815,7 +8941,7 @@ public class MainForm : Form
         try
         {
             result = Domain.ProfileSwitcher.SetActive(
-                ModsDir, target, _modConfig, _settings.LockedMods);
+                ModsDir, target, _modConfig, ProtectedModIds());
         }
         finally
         {
@@ -8869,7 +8995,7 @@ public class MainForm : Form
         foreach (var pm in target.Mods)
         {
             if (string.IsNullOrEmpty(pm.ModId) || string.IsNullOrEmpty(pm.Version)) continue;
-            if (_settings.LockedMods.Contains(pm.ModId)) continue;
+            if (ProtectedModIds().Contains(pm.ModId, StringComparer.OrdinalIgnoreCase)) continue;
             // Same mod_id is not enough: an abandoned mod and its
             // successor can share an id (ModLineage has the example),
             // so only a release of the same lineage counts as newer.
@@ -8998,7 +9124,7 @@ public class MainForm : Form
         var allowed = new HashSet<string>(
             _activeProfile.Mods.Select(m => m.ModId),
             StringComparer.OrdinalIgnoreCase);
-        foreach (var lockId in _settings.LockedMods)
+        foreach (var lockId in ProtectedModIds())
             allowed.Add(lockId);
         var scoped = _registry.Entries
             .Where(e => !string.IsNullOrEmpty(e.ModId)

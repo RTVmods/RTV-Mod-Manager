@@ -16,6 +16,7 @@ public class SettingsDialog : Form
     private readonly Settings _settings;
     private readonly TextBox _modsBox;
     private readonly CheckBox _skipLoaderUi;
+    private readonly CheckBox _builtInSaveSlots;
     private readonly TextBox _claudeBox;
     private readonly TextBox _decompBox;
 
@@ -42,7 +43,7 @@ public class SettingsDialog : Form
         // clipping.
         MinimumSize = new Size(840, 660);
         Width = 920;
-        Height = 800;
+        Height = 880;
         ShowInTaskbar = false;
         Padding = new Padding(18, 16, 18, 16);
 
@@ -117,6 +118,37 @@ public class SettingsDialog : Form
         skipPanel.Controls.Add(skipExplain);
         skipPanel.Controls.Add(_skipLoaderUi);
 
+        var slotsPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            BackColor = Color.Transparent,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 0, 14),
+        };
+        _builtInSaveSlots = new CheckBox
+        {
+            Text = "Built-in save slots (five slots in the game's menu, each tied to a profile)",
+            Checked = current.SaveSlotsBuiltIn,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            ForeColor = Color.FromArgb(220, 225, 235),
+        };
+        var slotsExplain = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            MaximumSize = new Size(740, 0),
+            ForeColor = Color.FromArgb(140, 150, 170),
+            Font = new Font("Segoe UI", 11f),
+            Padding = new Padding(26, 2, 0, 0),
+            Text = "The manager installs the Save Slots mod it carries and keeps it on in every "
+                + "profile: New Game and Load in the game's menu pick a slot, and a slot tied to "
+                + "another profile restarts the game into it. Off removes it from the mods folder.",
+        };
+        slotsPanel.Controls.Add(slotsExplain);
+        slotsPanel.Controls.Add(_builtInSaveSlots);
+
         // The OS title-bar font is system-controlled and looks tiny
         // next to our 13pt body text. Add a big in-form title label
         // so users get a properly-sized visual heading without us
@@ -140,6 +172,7 @@ public class SettingsDialog : Form
         Controls.Add(decompPanel);
         Controls.Add(claudePanel);
 #endif
+        Controls.Add(slotsPanel);
         Controls.Add(skipPanel);
         Controls.Add(modsPanel);
         Controls.Add(titleLabel);
@@ -303,6 +336,7 @@ public class SettingsDialog : Form
         _settings.ClaudePath = _claudeBox.Text.Trim();
         _settings.GameSourcePath = _decompBox.Text.Trim();
         _settings.SkipLoaderUi = _skipLoaderUi.Checked;
+        _settings.SaveSlotsBuiltIn = _builtInSaveSlots.Checked;
         Close();
     }
 }

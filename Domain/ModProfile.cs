@@ -613,8 +613,9 @@ public class ModProfile
             Name        = name,
             Description = description,
             CreatedAt   = DateTime.UtcNow,
+            // Built-in mods belong to the manager, not to a profile.
             Mods        = entries
-                .Where(e => !string.IsNullOrEmpty(e.ModId))
+                .Where(e => !string.IsNullOrEmpty(e.ModId) && !BuiltInMods.IsBuiltIn(e.ModId))
                 .Select(e => new ProfileMod
                 {
                     ModId         = e.ModId,

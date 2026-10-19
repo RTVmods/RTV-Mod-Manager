@@ -25,6 +25,12 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
   </ItemGroup>
 
+  <!-- Built-in mods the manager installs itself (Domain/BuiltInMods.cs).
+       Resources/save-slots.vmz is written by SaveSlots/_pack.py. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\save-slots.vmz" LogicalName="VostokModManager.BuiltIn.save-slots.vmz" />
+  </ItemGroup>
+
   <!--
     Two editions, one source tree.
 
