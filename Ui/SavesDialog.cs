@@ -20,12 +20,16 @@ public class SavesDialog : Form
     private readonly IReadOnlyList<string> _profiles;
     private readonly Func<string> _activeProfile;
     private readonly Func<int, bool> _launchCallback;
+    private readonly Func<int, string, bool> _newGameCallback;
+    private readonly string _userDir;
     private readonly string? _warning;
 
     private DataGridView _grid = null!;
     private Label _headerLabel = null!;
     private Button _launchBtn = null!;
     private Button _renameBtn = null!;
+    private Button _newBtn = null!;
+    private Button _deleteBtn = null!;
     private Button _backupBtn = null!;
     private Button _closeBtn = null!;
     private List<SaveSlots.Slot> _slots = new();
@@ -38,10 +42,16 @@ public class SavesDialog : Form
     /// true when the launch went ahead, and the dialog then closes.</param>
     /// <param name="warning">Shown above the list when set, such as the
     /// companion mod not being live.</param>
+    /// <param name="newGameCallback">Starts the game into a new run in
+    /// slot n named as given; true when the game was launched.</param>
+    /// <param name="userDir">The game's save folder, for deleting the slot in play.</param>
     public SavesDialog(string root, IReadOnlyList<string> profiles, Func<string> activeProfile,
-        Func<int, bool> launchCallback, string? warning)
+        Func<int, bool> launchCallback, string? warning,
+        Func<int, string, bool> newGameCallback, string userDir)
     {
         _root = root;
+        _newGameCallback = newGameCallback;
+        _userDir = userDir;
         _profiles = profiles;
         _activeProfile = activeProfile;
         _launchCallback = launchCallback;
@@ -214,6 +224,15 @@ public class SavesDialog : Form
         _launchBtn.FlatAppearance.BorderColor = Color.FromArgb(90, 160, 100);
         _launchBtn.Click += (_, _) => Launch();
 
+        _newBtn = MainForm.ThemedButton("＋ New game…");
+        _newBtn.Width = 160; _newBtn.Height = 40; _newBtn.AutoSize = false;
+        _newBtn.Click += (_, _) => NewGame();
+
+        _deleteBtn = MainForm.ThemedButton("🗑 Delete…");
+        _deleteBtn.Width = 130; _deleteBtn.Height = 40; _deleteBtn.AutoSize = false;
+        _deleteBtn.ForeColor = Color.FromArgb(245, 130, 120);
+        _deleteBtn.Click += (_, _) => Delete();
+
         _renameBtn = MainForm.ThemedButton("✎ Rename…");
         _renameBtn.Width = 130; _renameBtn.Height = 40; _renameBtn.AutoSize = false;
         _renameBtn.Click += (_, _) => Rename();
@@ -226,13 +245,15 @@ public class SavesDialog : Form
         _closeBtn.Width = 100; _closeBtn.Height = 40; _closeBtn.AutoSize = false;
         _closeBtn.Click += (_, _) => Close();
 
-        p.Controls.AddRange(new Control[] { _launchBtn, _renameBtn, _backupBtn, _closeBtn });
+        p.Controls.AddRange(new Control[] { _launchBtn, _newBtn, _renameBtn, _deleteBtn, _backupBtn, _closeBtn });
         p.Resize += (_, _) =>
         {
-            _launchBtn.Top = _renameBtn.Top = _backupBtn.Top = _closeBtn.Top = 8;
+            _launchBtn.Top = _newBtn.Top = _renameBtn.Top = _deleteBtn.Top = _backupBtn.Top = _closeBtn.Top = 8;
             _launchBtn.Left = 16;
-            _renameBtn.Left = _launchBtn.Right + 8;
-            _backupBtn.Left = _renameBtn.Right + 8;
+            _newBtn.Left = _launchBtn.Right + 8;
+            _renameBtn.Left = _newBtn.Right + 8;
+            _deleteBtn.Left = _renameBtn.Right + 8;
+            _backupBtn.Left = _deleteBtn.Right + 8;
             _closeBtn.Left = p.Width - _closeBtn.Width - 16;
         };
         return p;
@@ -304,6 +325,8 @@ public class SavesDialog : Form
         var s = Selected();
         _launchBtn.Enabled = s is { Occupied: true, Dead: false };
         _renameBtn.Enabled = s is { Occupied: true };
+        _newBtn.Enabled = s != null;
+        _deleteBtn.Enabled = s != null && (s.Occupied || s.DisplayName.Length > 0 || s.Profile.Length > 0);
     }
 
     private void Launch()
@@ -318,6 +341,110 @@ public class SavesDialog : Form
         }
         if (_launchCallback(s.Number)) Close();
         else Reload();
+    }
+
+    private void NewGame()
+    {
+        var s = Selected();
+        if (s == null) return;
+        if (SaveSlots.GameRunning())
+        {
+            ThemedMessageBox.Show(this, "Road to Vostok is running. Quit the game first.",
+                "New game", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (s.Occupied)
+        {
+            var ok = ThemedMessageBox.Show(this,
+                $"Slot {s.Number} holds \"{s.Title}\". Starting a new game there replaces it once the "
+                + "run begins (a backup zip is written now).\n\nContinue?",
+                "Replace this save?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (ok != DialogResult.Yes) return;
+            try { SaveSlots.Backup(_root, BackupPath($"before-new-slot{s.Number}")); }
+            catch (Exception ex)
+            {
+                ThemedMessageBox.Show(this, "The backup failed, so nothing was changed:\n\n" + ex.Message,
+                    "New game", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+        }
+        var name = AskName($"New game in slot {s.Number}", s.Occupied ? "" : s.DisplayName,
+            "Name for the new save (optional). The game opens on the mode screen; pick the "
+            + "difficulty and season and press Enter to start the run in this slot.", "Start");
+        if (name == null) return;
+        if (_newGameCallback(s.Number, name)) Close();
+        else Reload();
+    }
+
+    private void Delete()
+    {
+        var s = Selected();
+        if (s == null) return;
+        if (SaveSlots.GameRunning())
+        {
+            ThemedMessageBox.Show(this, "Road to Vostok is running. Quit the game first.",
+                "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var inPlay = s.Number == SaveSlots.ActiveSlot(_root) && s.Occupied;
+        var ok = ThemedMessageBox.Show(this,
+            $"Delete \"{s.Title}\" (slot {s.Number})?\n\n"
+            + "Its files are zipped to your Documents\\Road to Vostok Mod Manager Backups folder first."
+            + (inPlay ? "\n\nThis is the save the game would continue now; it is removed from the game's save folder too." : ""),
+            "Delete save", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (ok != DialogResult.Yes) return;
+        try
+        {
+            var zip = BackupPath($"deleted-slot{s.Number}");
+            var n = SaveSlots.DeleteSlot(_root, _userDir, s.Number, zip);
+            ThemedMessageBox.Show(this, $"Slot {s.Number} deleted ({n} file(s)).\n\nBackup:\n{zip}",
+                "Deleted", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            ThemedMessageBox.Show(this, ex.Message, "Delete failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        Reload();
+    }
+
+    private static string BackupPath(string what)
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Road to Vostok Mod Manager Backups", $"saves-{what}-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+
+    /// <summary>A small name prompt; null when cancelled.</summary>
+    private string? AskName(string title, string initial, string hint, string okText)
+    {
+        using var dlg = new Form
+        {
+            Text = title,
+            StartPosition = FormStartPosition.CenterParent,
+            BackColor = BackColor, ForeColor = ForeColor, Font = Font,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false,
+            ClientSize = new Size(480, 190),
+        };
+        var label = new Label
+        {
+            Text = hint, Location = new Point(16, 12), Size = new Size(448, 70),
+            ForeColor = Color.FromArgb(170, 185, 210),
+        };
+        var box = new TextBox
+        {
+            Text = initial, MaxLength = 40, PlaceholderText = "My save",
+            Location = new Point(16, 88), Width = 448,
+            BackColor = Color.FromArgb(30, 36, 48), ForeColor = ForeColor,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+        var ok = MainForm.ThemedButton(okText);
+        ok.AutoSize = false; ok.Size = new Size(110, 36); ok.Location = new Point(246, 138);
+        ok.DialogResult = DialogResult.OK;
+        var cancel = MainForm.ThemedButton("Cancel");
+        cancel.AutoSize = false; cancel.Size = new Size(100, 36); cancel.Location = new Point(364, 138);
+        cancel.DialogResult = DialogResult.Cancel;
+        dlg.Controls.AddRange(new Control[] { label, box, ok, cancel });
+        dlg.AcceptButton = ok;
+        dlg.CancelButton = cancel;
+        return dlg.ShowDialog(this) == DialogResult.OK ? box.Text.Trim() : null;
     }
 
     private void Rename()

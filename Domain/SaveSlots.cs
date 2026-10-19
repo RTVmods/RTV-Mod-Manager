@@ -124,10 +124,11 @@ public static class SaveSlots
     public static void SetDisplayName(string root, int n, string name)
         => SetMetaValue(root, n, "display_name", name.Trim());
 
-    /// <summary>Asks the mod to continue slot n on the game's next start.
-    /// `profile` is what the slot expects to run under; the mod only uses
-    /// it to log a mismatch.</summary>
-    public static void WritePending(string root, int n, string profile, string kind = "load")
+    /// <summary>Tells the mod what to do on the game's next start:
+    /// kind "load" continues slot n; kind "new" opens the mode screen and
+    /// starts the new run in slot n, named `name`. `profile` is what the
+    /// slot expects to run under; the mod only uses it to log a mismatch.</summary>
+    public static void WritePending(string root, int n, string profile, string kind = "load", string name = "")
     {
         Directory.CreateDirectory(root);
         var text = new StringBuilder()
@@ -135,8 +136,122 @@ public static class SaveSlots
             .Append("kind=").Append(Quote(kind)).Append('\n')
             .Append("slot=").Append(n.ToString(CultureInfo.InvariantCulture)).Append('\n')
             .Append("profile=").Append(Quote(profile)).Append('\n')
+            .Append("name=").Append(Quote(name)).Append('\n')
             .ToString();
         File.WriteAllText(Path.Combine(root, PendingFile), text, new UTF8Encoding(false));
+    }
+
+    /// <summary>True while Road to Vostok is running. Slot files must not
+    /// change under it: it writes the save on quit.</summary>
+    public static bool GameRunning()
+    {
+        try { return System.Diagnostics.Process.GetProcessesByName("RTV").Length > 0; }
+        catch { return false; }
+    }
+
+    // ── which files in the game folder belong to a save ───────────────
+
+    /// <summary>The mod's file rules (MultiSaveSlots\file_rules.cfg, with
+    /// the mod's defaults for anything missing): which files in the
+    /// game's save folder are part of a slot. Same evaluation order as
+    /// the mod.</summary>
+    public class FileRules
+    {
+        public List<string> TrackedExtensions { get; init; } = new() { "tres", "json", "save", "jpg" };
+        public List<string> NeverTouchFiles { get; init; } = new()
+        {
+            "modloader.gd", "mod_config.cfg", "mod_profiles.cfg", "modloader_conflicts.txt",
+            "override.cfg", "Validator.tres", "Preferences.tres", "simplehud_preferences.json",
+        };
+        public List<string> NeverTouchExtensions { get; init; } = new() { "gd", "txt", "cfg", "ini" };
+        public List<string> ForceTrackedFiles { get; init; } = new() { "XPData.cfg", "XPPrestige.cfg", "XPSkillsBookCache.cfg" };
+        public List<string> ForceTrackedPrefixes { get; init; } = new() { "XPData_" };
+        public List<string> NeverTouchSuffixes { get; init; } = new() { "_preferences.json", "_settings.json", "_config.json", "_prefs.json" };
+
+        public static FileRules Load(string root)
+        {
+            var d = new FileRules();
+            var s = ReadSection(Path.Combine(root, "file_rules.cfg"), "file_rules");
+            List<string> Get(string key, List<string> fallback)
+                => s.TryGetValue(key, out var raw) && TryParseList(raw, out var list) ? list : fallback;
+            return new FileRules
+            {
+                TrackedExtensions = Get("tracked_file_extensions", d.TrackedExtensions),
+                NeverTouchFiles = Get("never_touch_files", d.NeverTouchFiles),
+                NeverTouchExtensions = Get("never_touch_extensions", d.NeverTouchExtensions),
+                ForceTrackedFiles = Get("force_tracked_files", d.ForceTrackedFiles),
+                ForceTrackedPrefixes = Get("force_tracked_prefixes", d.ForceTrackedPrefixes),
+                NeverTouchSuffixes = Get("never_touch_suffixes", d.NeverTouchSuffixes),
+            };
+        }
+
+        private static string Ext(string name)
+        {
+            var dot = name.LastIndexOf('.');
+            return dot < 0 ? "" : name[(dot + 1)..].ToLowerInvariant();
+        }
+
+        private bool ForceTracked(string name)
+            => ForceTrackedFiles.Contains(name) || ForceTrackedPrefixes.Any(p => name.StartsWith(p, StringComparison.Ordinal));
+
+        private bool Blacklisted(string name)
+            => NeverTouchFiles.Contains(name)
+                || NeverTouchExtensions.Contains(Ext(name))
+                || NeverTouchSuffixes.Any(sfx => name.ToLowerInvariant().EndsWith(sfx, StringComparison.Ordinal));
+
+        /// <summary>The mod's _is_trackable_file and _is_safe_to_touch
+        /// together: a file the mod moves in and out of slots.</summary>
+        public bool IsSaveFile(string name)
+        {
+            if (NeverTouchFiles.Contains(name)) return false;
+            if (ForceTracked(name)) return true;
+            if (Blacklisted(name)) return false;
+            return TrackedExtensions.Contains(Ext(name));
+        }
+    }
+
+    /// <summary>Parses a Godot array of strings: ["a", "b"].</summary>
+    internal static bool TryParseList(string raw, out List<string> list)
+    {
+        list = new List<string>();
+        raw = raw.Trim();
+        if (raw.Length < 2 || raw[0] != '[' || raw[^1] != ']') return false;
+        foreach (Match m in Regex.Matches(raw, "\"((?:[^\"\\\\]|\\\\.)*)\""))
+            list.Add(Unquote("\"" + m.Groups[1].Value + "\""));
+        return true;
+    }
+
+    /// <summary>The save files of the slot in play, in the game's save folder.</summary>
+    public static List<string> LiveSaveFiles(string userDir, FileRules rules)
+        => Directory.Exists(userDir)
+            ? Directory.GetFiles(userDir).Where(f => rules.IsSaveFile(Path.GetFileName(f))).ToList()
+            : new List<string>();
+
+    /// <summary>Deletes slot n: zips its files to `backupZip` first (and,
+    /// for the slot in play, its files in the game's save folder too),
+    /// then removes them. The slot in play has to go from the game folder
+    /// as well, or the mod's crash recovery copies it straight back into
+    /// the slot on the next start. Returns the number of files removed.</summary>
+    public static int DeleteSlot(string root, string userDir, int n, string backupZip)
+    {
+        var dir = SlotDir(root, n);
+        var slotFiles = Directory.Exists(dir) ? Directory.GetFiles(dir).ToList() : new List<string>();
+        var live = n == ActiveSlot(root) ? LiveSaveFiles(userDir, FileRules.Load(root)) : new List<string>();
+        if (slotFiles.Count == 0 && live.Count == 0) return 0;
+
+        var bdir = Path.GetDirectoryName(backupZip);
+        if (!string.IsNullOrEmpty(bdir)) Directory.CreateDirectory(bdir);
+        if (File.Exists(backupZip)) File.Delete(backupZip);
+        using (var zip = ZipFile.Open(backupZip, ZipArchiveMode.Create))
+        {
+            foreach (var f in slotFiles)
+                zip.CreateEntryFromFile(f, $"{FolderName}/slot{n}/{Path.GetFileName(f)}", CompressionLevel.Optimal);
+            foreach (var f in live)
+                zip.CreateEntryFromFile(f, $"game-folder/{Path.GetFileName(f)}", CompressionLevel.Optimal);
+        }
+        var removed = 0;
+        foreach (var f in slotFiles.Concat(live)) { File.Delete(f); removed++; }
+        return removed;
     }
 
     /// <summary>Takes back a pending launch that did not happen.</summary>

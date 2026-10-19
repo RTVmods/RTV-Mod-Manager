@@ -8414,7 +8414,8 @@ public class MainForm : Form
         var names = _allProfiles.Select(p => p.Name)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         using var dlg = new Ui.SavesDialog(root, names, () => _activeProfile?.Name ?? "",
-            LaunchSlot, SaveSlotsWarning());
+            LaunchSlot, SaveSlotsWarning(),
+            (n, name) => LaunchIntoSlot(n, "new", name), Domain.SaveSlots.DefaultUserDir);
         dlg.ShowDialog(this);
     }
 
@@ -8422,11 +8423,21 @@ public class MainForm : Form
     /// slot's profile when it has one and another is live, tells the
     /// Save Slots mod which slot to continue, and launches. Returns
     /// true when the game was launched.</summary>
-    private bool LaunchSlot(int n)
+    private bool LaunchSlot(int n) => LaunchIntoSlot(n, "load", "");
+
+    /// <summary>`kind` "load" continues slot n; "new" starts a new run in
+    /// it named `name` (the game opens on the mode screen).</summary>
+    private bool LaunchIntoSlot(int n, string kind, string name)
     {
         var root = SaveSlotsRoot;
         var slot = Domain.SaveSlots.Read(root, n);
-        if (!slot.Occupied) return false;
+        if (kind == "load" && !slot.Occupied) return false;
+        if (Domain.SaveSlots.GameRunning())
+        {
+            Ui.ThemedMessageBox.Show(this, "Road to Vostok is already running. Quit the game first.",
+                "Save slots", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
 
         var switching = slot.Profile.Length > 0
             && !string.Equals(slot.Profile, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase);
@@ -8465,7 +8476,7 @@ public class MainForm : Form
             if (go != DialogResult.Yes) return false;
         }
 
-        try { Domain.SaveSlots.WritePending(root, n, _activeProfile?.Name ?? ""); }
+        try { Domain.SaveSlots.WritePending(root, n, _activeProfile?.Name ?? "", kind, name); }
         catch (Exception ex)
         {
             ShowError("Couldn't prepare the slot", ex);
@@ -8476,7 +8487,9 @@ public class MainForm : Form
             Domain.SaveSlots.ClearPending(root);
             return false;
         }
-        _modsLabel.Text += $"  ·  continuing {slot.Title}";
+        _modsLabel.Text += kind == "new"
+            ? $"  ·  new game in slot {n}: pick the mode and press Enter"
+            : $"  ·  continuing {slot.Title}";
         return true;
     }
 
