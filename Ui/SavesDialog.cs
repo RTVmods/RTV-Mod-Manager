@@ -18,7 +18,7 @@ public class SavesDialog : Form
 
     private readonly string _root;
     private readonly IReadOnlyList<string> _profiles;
-    private readonly string _activeProfile;
+    private readonly Func<string> _activeProfile;
     private readonly Func<int, bool> _launchCallback;
     private readonly string? _warning;
 
@@ -38,7 +38,7 @@ public class SavesDialog : Form
     /// true when the launch went ahead, and the dialog then closes.</param>
     /// <param name="warning">Shown above the list when set, such as the
     /// companion mod not being live.</param>
-    public SavesDialog(string root, IReadOnlyList<string> profiles, string activeProfile,
+    public SavesDialog(string root, IReadOnlyList<string> profiles, Func<string> activeProfile,
         Func<int, bool> launchCallback, string? warning)
     {
         _root = root;
@@ -81,10 +81,6 @@ public class SavesDialog : Form
             MaximumSize = new Size(1060, 0),
             ForeColor   = Color.FromArgb(170, 185, 210),
             Margin      = new Padding(0, 0, 0, 10),
-            Text        = "The Save Slots mod's slots. Tie a slot to a profile and it always runs "
-                        + "with that profile's mods: launching it from here switches profile first, "
-                        + "and loading it in-game restarts into the profile when another one is live. "
-                        + $"Live profile: {(_activeProfile.Length > 0 ? _activeProfile : "(none)")}.",
         };
 
         var warn = new Label
@@ -244,6 +240,11 @@ public class SavesDialog : Form
 
     private void Reload()
     {
+        var live = _activeProfile();
+        _headerLabel.Text = "The Save Slots mod's slots. Tie a slot to a profile and it always runs "
+            + "with that profile's mods: launching it from here switches profile first, "
+            + "and loading it in-game restarts into the profile when another one is live. "
+            + $"Live profile: {(live.Length > 0 ? live : "(none)")}.";
         var keep = SelectedSlot();
         _loading = true;
         try

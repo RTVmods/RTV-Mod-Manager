@@ -8343,7 +8343,7 @@ public class MainForm : Form
         var root = SaveSlotsRoot;
         var names = _allProfiles.Select(p => p.Name)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-        using var dlg = new Ui.SavesDialog(root, names, _activeProfile?.Name ?? "",
+        using var dlg = new Ui.SavesDialog(root, names, () => _activeProfile?.Name ?? "",
             LaunchSlot, SaveSlotsWarning());
         dlg.ShowDialog(this);
     }
@@ -8358,21 +8358,31 @@ public class MainForm : Form
         var slot = Domain.SaveSlots.Read(root, n);
         if (!slot.Occupied) return false;
 
-        if (slot.Profile.Length > 0
-            && !string.Equals(slot.Profile, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase))
+        var switching = slot.Profile.Length > 0
+            && !string.Equals(slot.Profile, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase);
+        var target = switching
+            ? _allProfiles.FirstOrDefault(p =>
+                string.Equals(p.Name, slot.Profile, StringComparison.OrdinalIgnoreCase))
+            : _activeProfile;
+        if (switching && target == null)
         {
-            var target = _allProfiles.FirstOrDefault(p =>
-                string.Equals(p.Name, slot.Profile, StringComparison.OrdinalIgnoreCase));
-            if (target == null)
-            {
-                Ui.ThemedMessageBox.Show(this,
-                    $"{slot.Title} is tied to the profile '{slot.Profile}', which no longer exists.\n\n"
-                    + "Pick another profile for the slot, or '(any profile)' to run it with the live one.",
-                    "Profile missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-            SwitchActiveProfile(target);
-            if (!string.Equals(_activeProfile?.Name, target.Name, StringComparison.OrdinalIgnoreCase))
+            Ui.ThemedMessageBox.Show(this,
+                $"{slot.Title} is tied to the profile '{slot.Profile}', which no longer exists.\n\n"
+                + "Pick another profile for the slot, or '(any profile)' to run it with the live one.",
+                "Profile missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        // The game can only open the slot by itself when the profile it
+        // starts under runs Save Slots, and no other slot mod. Settle that
+        // before switching, so a "no" leaves everything as it was.
+        if (target != null && !EnsureSaveSlotsIn(target, isActive: !switching))
+            return false;
+
+        if (switching)
+        {
+            SwitchActiveProfile(target!);
+            if (!string.Equals(_activeProfile?.Name, target!.Name, StringComparison.OrdinalIgnoreCase))
                 return false;  // cancelled or failed; the switch said why
         }
 
@@ -8397,6 +8407,108 @@ public class MainForm : Form
             return false;
         }
         _modsLabel.Text += $"  ·  continuing {slot.Title}";
+        return true;
+    }
+
+    /// <summary>Makes sure `profile` runs Save Slots and no other slot
+    /// mod, asking first. False when the user declines or Save Slots is
+    /// not in the Library. For the active profile the live folder and
+    /// mod_config.cfg are updated too; for another profile its
+    /// profile.json is enough, the switch that follows applies it.</summary>
+    private bool EnsureSaveSlotsIn(Domain.ModProfile profile, bool isActive)
+    {
+        var companionId = Domain.SaveSlots.CompanionModId;
+        var others = Domain.SaveSlots.OtherSlotModIds;
+        var own = profile.Mods.FirstOrDefault(m =>
+            string.Equals(m.ModId, companionId, StringComparison.OrdinalIgnoreCase));
+        var clashing = profile.Mods.Where(m => m.IsEnabled && others.Any(o =>
+            string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (own is { IsEnabled: true } && clashing.Count == 0) return true;
+
+        // The newest Save Slots in the Library, or the live one.
+        Domain.ModLibrary.Entry? lib = null;
+        try
+        {
+            lib = Domain.ModLibrary.List(ModsDir)
+                .Where(e => string.Equals(e.ModId, companionId, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.Version, Comparer<string>.Create(ModRegistry.CompareVersions))
+                .FirstOrDefault();
+        }
+        catch { /* handled below */ }
+        if (own == null && lib == null)
+        {
+            Ui.ThemedMessageBox.Show(this,
+                "The Save Slots mod isn't installed, so the game can't open a slot by itself.\n\n"
+                + "Install it from VostokMods (vostokmods.net/mod/save-slots), then launch the slot again.",
+                "Save Slots", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+
+        var lines = new List<string>();
+        if (own == null) lines.Add($"add Save Slots v{lib!.Version}");
+        else if (!own.IsEnabled) lines.Add("turn Save Slots on");
+        foreach (var c in clashing)
+            lines.Add($"turn off {(string.IsNullOrEmpty(c.DisplayName) ? c.ModId : c.DisplayName)} (it uses the same slot folder)");
+        var ask = Ui.ThemedMessageBox.Show(this,
+            $"The game needs Save Slots in '{profile.Name}' to open the slot by itself. "
+            + $"Change '{profile.Name}' to:\n\n  • " + string.Join("\n  • ", lines)
+            + "\n\nThe other mods in the profile stay as they are.",
+            "Save Slots", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (ask != DialogResult.Yes) return false;
+
+        if (own == null)
+        {
+            own = new Domain.ProfileMod
+            {
+                ModId = companionId,
+                DisplayName = string.IsNullOrEmpty(lib!.DisplayName) ? "Save Slots" : lib.DisplayName,
+                Version = lib.Version,
+                IsEnabled = true,
+                Priority = 0,
+                Source = lib.Source.IsValid ? lib.Source.Key : "vostokmods:" + companionId,
+            };
+            profile.Mods.Add(own);
+        }
+        own.IsEnabled = true;
+        foreach (var c in clashing) c.IsEnabled = false;
+        profile.UpdatedAt = DateTime.UtcNow;
+        try { profile.SaveMetadataOnly(); }
+        catch (Exception ex)
+        {
+            ShowError($"Couldn't update '{profile.Name}'", ex);
+            return false;
+        }
+
+        if (isActive)
+        {
+            // Apply to the live set the way a switch would.
+            var livePath = Path.Combine(ModsDir, Path.GetFileName(
+                Domain.ModLibrary.PathFor(ModsDir, own.ModId, own.Version)));
+            var libPath = Domain.ModLibrary.Find(ModsDir, own.ModId, own.Version);
+            try
+            {
+                if (_registry.FindById(own.ModId) == null && libPath.Length > 0 && !File.Exists(livePath))
+                    File.Copy(libPath, livePath);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't copy Save Slots into the mods folder", ex);
+                return false;
+            }
+            _modConfig.SetEnabled(own.ModId, own.Version, true);
+            if (!_modConfig.HasEntry(own.ModId, own.Version))
+                _modConfig.SetPriority(own.ModId, own.Version, own.Priority);
+            foreach (var c in clashing) _modConfig.SetEnabled(c.ModId, c.Version, false);
+            SaveModConfigSafely();
+            ReloadProfiles();
+            Rescan();
+            UpdateModsStatus();
+            PopulateModsGrid();
+        }
+        else
+        {
+            ReloadProfiles();
+        }
         return true;
     }
 

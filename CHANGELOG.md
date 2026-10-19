@@ -4,7 +4,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 
 ## 0.6.14 (2026-10-19)
 
-- **Saves** (title row): the slots of the new Save Slots mod, with name, last map, last played time and state. Each slot can be tied to a profile; **Launch this slot** switches to that profile when another one is live and starts the game straight into the slot. **Rename** and **Back up slots** (a zip of the whole slot folder) are there too. The links are the same ones the mod's in-game slot panel edits.
+- **Saves** (title row): the slots of the new Save Slots mod, with name, last map, last played time and state. Each slot can be tied to a profile; **Launch this slot** switches to that profile when another one is live and starts the game straight into the slot. **Rename** and **Back up slots** (a zip of the whole slot folder) are there too. The links are the same ones the mod's in-game slot panel edits. Before switching, the launch checks that the slot's profile runs Save Slots and no other slot mod, and offers to add it (and turn off Multi Save Slots there) so the game can open the slot by itself; declining leaves the profiles as they were.
 - When the game (Save Slots) switches profile, the manager follows on its next scan instead of recording the new profile's mods into the old one. It only follows when the mods folder really holds that profile's mods, so a profile picked in the mod loader's own launcher, which moves no files, is left alone.
 
 ## 0.6.13 (2026-10-18)
