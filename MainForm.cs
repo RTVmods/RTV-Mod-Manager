@@ -8438,6 +8438,21 @@ public class MainForm : Form
                 "Save slots", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
         }
+        // A new run belongs to the profile it starts under, unless the
+        // slot was already tied to one.
+        if (kind == "new" && slot.Profile.Length == 0 && _activeProfile != null)
+        {
+            try
+            {
+                Domain.SaveSlots.SetProfile(root, n, _activeProfile.Name);
+                slot = Domain.SaveSlots.Read(root, n);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't link the slot to the profile", ex);
+                return false;
+            }
+        }
 
         var switching = slot.Profile.Length > 0
             && !string.Equals(slot.Profile, _activeProfile?.Name, StringComparison.OrdinalIgnoreCase);
