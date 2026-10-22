@@ -1,0 +1,88 @@
+<Window x:Class="VostokModManager.Wpf.Views.RevertWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svc="clr-namespace:VostokModManager.Services;assembly=VostokModManager.Core"
+        Title="Revert"
+        Width="760" Height="560" MinWidth="600" MinHeight="380"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="REVERT TO AN EARLIER VERSION" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Name}" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Style="{StaticResource T.Muted}" Margin="0,0,0,16" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Close" MinWidth="96" Margin="0,0,8,0" Click="OnClose" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="Revert to selected" Command="{Binding RevertCommand}" />
+                </StackPanel>
+                <Button Style="{StaticResource Btn.Quiet}" Content="Delete backup" Command="{Binding DeleteCommand}" HorizontalAlignment="Left"
+                        ToolTip="Remove the selected snapshot file from disk." />
+            </DockPanel>
+
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Message}" Margin="0,10,0,0"
+                       Visibility="{Binding Message, Converter={StaticResource VisibleWhen}}">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource T.Muted}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding MessageIsError}" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource B.SalmonText}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <Grid>
+                <!-- nothing to revert to -->
+                <Border Style="{StaticResource Panel.Notice}" VerticalAlignment="Top"
+                        Visibility="{Binding IsEmpty, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Text="{Binding EmptyText}" Style="{StaticResource T.Body}" FontSize="14" LineHeight="21"
+                               Foreground="{StaticResource B.Text2}" />
+                </Border>
+
+                <DockPanel Visibility="{Binding HasBackups, Converter={StaticResource VisibleWhen}}">
+                    <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="30">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="120" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="VERSION" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="14,0,0,0" />
+                            <TextBlock Grid.Column="1" Text="BACKED UP" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="SIZE" Style="{StaticResource T.Label}" VerticalAlignment="Center"
+                                       HorizontalAlignment="Right" Margin="0,0,14,0" />
+                        </Grid>
+                    </Border>
+                    <ListBox x:Name="List" ItemsSource="{Binding Backups}" SelectedItem="{Binding Selected}"
+                             AutomationProperties.Name="Backups" MouseDoubleClick="OnRowDoubleClick">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type svc:ModBackupView}">
+                                <Grid MinHeight="44" ToolTip="{Binding Path}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding VersionLabel}" FontFamily="{StaticResource Font.Mono}" FontSize="13.5"
+                                               FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding WhenLabel}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="2" Text="{Binding SizeLabel}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                               Foreground="{StaticResource B.Text2}" VerticalAlignment="Center"
+                                               HorizontalAlignment="Right" Margin="0,0,14,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Grid>
+        </DockPanel>
+    </Border>
+</Window>

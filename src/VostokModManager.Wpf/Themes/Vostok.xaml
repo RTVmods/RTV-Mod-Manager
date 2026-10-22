@@ -70,6 +70,7 @@
     <SolidColorBrush x:Key="B.SalmonEdge" Color="#66E88A6C" />
     <SolidColorBrush x:Key="B.Blue" Color="{StaticResource C.Blue}" />
     <SolidColorBrush x:Key="B.BlueFill" Color="#179FC0E6" />
+    <SolidColorBrush x:Key="B.BlueEdge" Color="#669FC0E6" />
     <SolidColorBrush x:Key="B.Green" Color="{StaticResource C.Green}" />
     <SolidColorBrush x:Key="B.Steel" Color="{StaticResource C.Steel}" />
     <SolidColorBrush x:Key="B.Edge" Color="#47FFFFFF" />
@@ -380,6 +381,81 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource B.EdgeStrong}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Code: read-only monospace source (merged files, raw tool output). -->
+    <Style TargetType="TextBox" x:Key="TextBox.Code" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{StaticResource B.Text2}" />
+        <Setter Property="Background" Value="{StaticResource B.Card}" />
+        <Setter Property="BorderBrush" Value="{StaticResource B.Hairline}" />
+        <Setter Property="IsReadOnly" Value="True" />
+        <Setter Property="AcceptsReturn" Value="True" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="10,8" />
+    </Style>
+
+    <!-- ── expander: a chevron and a quiet header; the body below ───── -->
+    <Style TargetType="Expander">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Lora}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{StaticResource B.Text2}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <DockPanel>
+                        <ToggleButton DockPanel.Dock="Top" Cursor="Hand" FocusVisualStyle="{x:Null}"
+                                      Foreground="{TemplateBinding Foreground}"
+                                      Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                      IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border Background="Transparent" Padding="0,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path x:Name="chev" Data="M0,0 L4,4 L0,8" Width="8" Height="8" Margin="2,0,10,0"
+                                                  Stroke="{StaticResource B.Text3}" StrokeThickness="1.4" VerticalAlignment="Center"
+                                                  RenderTransformOrigin="0.5,0.5">
+                                                <Path.RenderTransform>
+                                                    <RotateTransform Angle="0" />
+                                                </Path.RenderTransform>
+                                            </Path>
+                                            <ContentPresenter x:Name="hd" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter TargetName="chev" Property="RenderTransform">
+                                                <Setter.Value>
+                                                    <RotateTransform Angle="90" />
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="chev" Property="Stroke" Value="{StaticResource B.Text}" />
+                                            <Setter TargetName="hd" Property="TextElement.Foreground" Value="{StaticResource B.Text}" />
+                                        </Trigger>
+                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                            <Setter TargetName="hd" Property="TextElement.Foreground" Value="{StaticResource B.Text}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <ContentPresenter x:Name="body" Visibility="Collapsed" Margin="0,6,0,0" />
+                    </DockPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="body" Property="Visibility" Value="Visible" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

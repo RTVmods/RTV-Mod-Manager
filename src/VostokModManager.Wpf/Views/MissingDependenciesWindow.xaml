@@ -1,0 +1,119 @@
+<Window x:Class="VostokModManager.Wpf.Views.MissingDependenciesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Title="Missing dependencies"
+        Width="1100" Height="680" MinWidth="860" MinHeight="440"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <GridLength x:Key="Col.Kind">96</GridLength>
+        <GridLength x:Key="Col.Dep">240</GridLength>
+        <GridLength x:Key="Col.Status">160</GridLength>
+        <GridLength x:Key="Col.Actions">190</GridLength>
+    </Window.Resources>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="MISSING DEPENDENCIES" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Intro}" Style="{StaticResource T.Muted}" Margin="0,0,0,16" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Close" MinWidth="96" Margin="0,0,8,0" Click="OnClose" IsEnabled="{Binding IsIdle}" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="Download all filled rows" Command="{Binding DownloadAllCommand}"
+                            IsEnabled="{Binding IsIdle}" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center"
+                           Text="Downloads go into the mods folder and your library." />
+            </DockPanel>
+
+            <Border DockPanel.Dock="Bottom" Style="{StaticResource Panel.Notice}" Margin="0,12,0,0" MaxHeight="150"
+                    Visibility="{Binding HasLog, Converter={StaticResource VisibleWhen}}">
+                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Log}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Style="{StaticResource T.Mono}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- column header -->
+            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="30">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{StaticResource Col.Kind}" />
+                        <ColumnDefinition Width="{StaticResource Col.Dep}" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="{StaticResource Col.Status}" />
+                        <ColumnDefinition Width="{StaticResource Col.Actions}" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="KIND" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                    <TextBlock Grid.Column="1" Text="DEPENDENCY" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="VOSTOKMODS URL OR SLUG" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="STATUS" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="14,0,0,0" />
+                </Grid>
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding Rows}" Focusable="False" AutomationProperties.Name="Missing dependencies">
+                <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                            <ItemsPresenter />
+                        </ScrollViewer>
+                    </ControlTemplate>
+                </ItemsControl.Template>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:MissingDependencyItem}">
+                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,8">
+                            <Grid MinHeight="44">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{StaticResource Col.Kind}" />
+                                    <ColumnDefinition Width="{StaticResource Col.Dep}" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="{StaticResource Col.Status}" />
+                                    <ColumnDefinition Width="{StaticResource Col.Actions}" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Kind}" FontSize="13" VerticalAlignment="Center" Margin="12,0,0,0"
+                                           Foreground="{Binding KindBrushKey, Converter={StaticResource ResourceKey}}" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                                    <TextBlock Text="{Binding ModId}" Style="{StaticResource T.Mono}" FontSize="13"
+                                               Foreground="{StaticResource B.Text}" TextTrimming="CharacterEllipsis" ToolTip="{Binding ModId}" />
+                                    <TextBlock Text="{Binding NeededBy}" FontSize="12" Foreground="{StaticResource B.Text3}"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding NeededBy}" />
+                                </StackPanel>
+                                <Grid Grid.Column="2" VerticalAlignment="Center">
+                                    <TextBox x:Name="Url" Text="{Binding SourceInput, UpdateSourceTrigger=PropertyChanged}" FontSize="13" Padding="5,4"
+                                             IsEnabled="{Binding IsInstalled, Converter={StaticResource EqualsParam}, ConverterParameter=False}"
+                                             AutomationProperties.Name="{Binding ModId, StringFormat='VostokMods URL or slug for {0}'}" />
+                                    <TextBlock Text="https://vostokmods.net/mod/… or the slug" FontSize="13" Margin="13,0,0,0"
+                                               Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" IsHitTestVisible="False"
+                                               Visibility="{Binding Text, ElementName=Url, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                </Grid>
+                                <TextBlock Grid.Column="3" Text="{Binding StatusText}" FontSize="13" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" Margin="14,0,8,0"
+                                           Foreground="{Binding StatusBrushKey, Converter={StaticResource ResourceKey}}" />
+                                <StackPanel Grid.Column="4" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource Btn.Quiet}" Content="Find" Margin="0,0,6,0"
+                                            ToolTip="Search VostokMods for this id in your browser."
+                                            Command="{Binding DataContext.FindCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Content="Download" MinHeight="34"
+                                            Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DockPanel>
+    </Border>
+</Window>

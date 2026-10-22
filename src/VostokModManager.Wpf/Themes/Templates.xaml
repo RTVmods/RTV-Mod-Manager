@@ -16,6 +16,9 @@
     <c:HasTextConverter x:Key="HasText" />
     <c:TabVisibleConverter x:Key="TabVisible" />
     <c:IssueBrushConverter x:Key="IssueToBrush" />
+    <!-- Any resource by key: a view-model names a brush ("B.SalmonText")
+         and the view looks it up. Same converter as ResourceKeyToGeometry. -->
+    <c:ResourceKeyConverter x:Key="ResourceKey" />
 
     <Geometry x:Key="Icon.Mods">M3,3 H10 V10 H3 Z M14,3 H21 V10 H14 Z M3,14 H10 V21 H3 Z M14,14 H21 V21 H14 Z</Geometry>
     <Geometry x:Key="Icon.Profiles">M12,3 L21,8 L12,13 L3,8 Z M3,13 L12,18 L21,13</Geometry>
