@@ -134,13 +134,29 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _nextLaunchText = "";
-    /// <summary>The slot the big button continues (the one the game had
-    /// last), 0 when there is none: the button then launches to the menu.</summary>
+    /// <summary>The slot the big button continues: a save that belongs to
+    /// the active profile (tied to it, or to no profile), the last-played
+    /// one first, else the most recent. 0 when there is none: the button
+    /// then launches to the menu.</summary>
     [ObservableProperty] private int _continueSlot;
+    /// <summary>The first empty slot, for "New game in slot N"; 0 = none.</summary>
+    [ObservableProperty] private int _emptySlot;
     [ObservableProperty] private string _primaryLaunchText = "LAUNCH";
     [ObservableProperty] private string _primaryLaunchName = "Launch the game";
+    [ObservableProperty] private string _newGameMenuText = "";
     public bool HasContinue => ContinueSlot > 0;
-    partial void OnContinueSlotChanged(int value) => OnPropertyChanged(nameof(HasContinue));
+    public bool HasEmptySlot => EmptySlot > 0;
+    public bool HasLaunchMenu => HasContinue || HasEmptySlot;
+    partial void OnContinueSlotChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasContinue));
+        OnPropertyChanged(nameof(HasLaunchMenu));
+    }
+    partial void OnEmptySlotChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasEmptySlot));
+        OnPropertyChanged(nameof(HasLaunchMenu));
+    }
     public ObservableCollection<LaunchCheck> Checks { get; } = new();
 
     [ObservableProperty] private string _managerVersion;
@@ -164,13 +180,21 @@ public sealed partial class ShellViewModel : ObservableObject
         // The watch reports a crash through the session's own prompt.
     }
 
-    /// <summary>The big button: continue the last save when there is one
-    /// (switching to its profile first), else a plain launch.</summary>
+    /// <summary>The big button: continue the save that belongs to the
+    /// active profile when there is one, else a plain launch.</summary>
     [RelayCommand]
     private void PrimaryLaunch()
     {
         if (ContinueSlot > 0) Session.LaunchSlot(ContinueSlot);
         else Session.LaunchGame();
+    }
+
+    /// <summary>A new game in the first empty slot, tied to the active
+    /// profile (the session asks for a name, then launches).</summary>
+    [RelayCommand]
+    private void NewGameInEmptySlot()
+    {
+        if (EmptySlot > 0) Session.StartNewGameInSlot(EmptySlot);
     }
 
     [RelayCommand]
@@ -289,18 +313,28 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             var saves = Session.GetSavesView();
             Nav[2].Count = saves.Slots.Count(s => s.Occupied) is var n and > 0 ? n.ToString() : "";
-            var next = saves.Slots.FirstOrDefault(s => s.IsActiveSlot && s.CanLaunch);
-            NextLaunchText = next == null ? ""
-                : next.DisplayName.Length > 0 ? $"Slot {next.Number} · {next.DisplayName}" : $"Slot {next.Number}";
+            // Only a save made with this profile's mods is continued: one
+            // tied to another profile would load against the wrong mods.
+            var active = Session.ActiveProfile?.Name ?? "";
+            bool Mine(SaveSlotView s) => s.CanLaunch
+                && (s.Profile.Length == 0 || string.Equals(s.Profile, active, StringComparison.OrdinalIgnoreCase));
+            var next = saves.Slots.FirstOrDefault(s => s.IsActiveSlot && Mine(s))
+                ?? saves.Slots.Where(Mine).OrderByDescending(s => s.LastPlayed ?? DateTime.MinValue).FirstOrDefault();
             ContinueSlot = next?.Number ?? 0;
+            EmptySlot = saves.Slots.FirstOrDefault(s => !s.Occupied)?.Number ?? 0;
+            NextLaunchText = next != null
+                ? (next.DisplayName.Length > 0 ? $"Slot {next.Number} · {next.DisplayName}" : $"Slot {next.Number}")
+                : saves.Slots.Any(s => s.Occupied) ? "No save for this profile" : "";
         }
         catch
         {
             NextLaunchText = "";
             ContinueSlot = 0;
+            EmptySlot = 0;
         }
         PrimaryLaunchText = ContinueSlot > 0 ? "CONTINUE" : "LAUNCH";
         PrimaryLaunchName = ContinueSlot > 0 ? $"Continue slot {ContinueSlot}" : "Launch the game";
+        NewGameMenuText = EmptySlot > 0 ? $"New game in slot {EmptySlot}" : "";
 
         Checks.Clear();
         var r = Session.GetLaunchReadiness();

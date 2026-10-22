@@ -20,7 +20,13 @@ public partial class App : Application
 
         // A DEBUG screenshot render is not a second manager; let it run alongside.
         var rendering = Array.IndexOf(e.Args, "--screenshot") >= 0;
-        _single = new Mutex(true, @"Local\VostokModManager.SingleInstance", out var first);
+        // One manager per set of files: a sandboxed run (VMM_APPDATA_ROOT) works on
+        // its own copy, so it gets its own guard and can run beside the real one.
+        var guard = @"Local\VostokModManager.SingleInstance";
+        if (AppPaths.IsSandboxed)
+            guard += "." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(AppPaths.RoamingAppData.ToLowerInvariant())))[..16];
+        _single = new Mutex(true, guard, out var first);
         if (!first && !rendering)
         {
             MessageBox.Show("Vostok Mod Manager is already running.", "Vostok Mod Manager",

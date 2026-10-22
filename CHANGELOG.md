@@ -2,6 +2,12 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.1 (2026-10-22)
+
+- **CONTINUE only continues a save made with the active profile's mods.** The launch panel picks the last-played save when it belongs to the active profile (tied to it, or to no profile), else that profile's most recent save. When none does, the button reads **LAUNCH** and the panel says "No save for this profile"; a save tied to another profile is no longer loaded against the wrong mods.
+- The launch arrow offers **New game in slot N**: a new run in the first empty slot, tied to the active profile. **Launch game** stays there while the button reads CONTINUE.
+- A manager running against a sandbox folder (`VMM_APPDATA_ROOT`) no longer counts as a second copy of the real one.
+
 ## 0.7.0 (2026-10-22)
 
 - **A new interface, drawn the way Road to Vostok draws its own.** The manager is rebuilt in WPF: Lora (the game's typeface), flat grey panels, hairlines and a white selection, with colour only where it means something (amber for updates, salmon for conflicts, blue for testing builds, green for OK). The faux-Cyrillic title, the backdrop and the eight-button title row are gone.

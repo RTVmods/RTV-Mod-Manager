@@ -173,8 +173,8 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </Border>
-                            <!-- CONTINUE the last save; the arrow opens a plain launch to the menu.
-                                 Without a save to continue it is LAUNCH and the arrow hides. -->
+                            <!-- CONTINUE a save that belongs to the active profile; without one it is
+                                 LAUNCH. The arrow has a plain launch and a new game in an empty slot. -->
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -191,14 +191,18 @@
                                 </Button>
                                 <Button x:Name="LaunchMenuButton" Grid.Column="1" Style="{StaticResource Btn.Primary}"
                                         Width="30" MinHeight="52" Padding="0" Margin="1,0,0,0" Click="OnLaunchMenu"
-                                        Visibility="{Binding HasContinue, Converter={StaticResource VisibleWhen}}"
+                                        Visibility="{Binding HasLaunchMenu, Converter={StaticResource VisibleWhen}}"
                                         ToolTip="Other ways to launch" AutomationProperties.Name="Other ways to launch">
                                     <Path Data="M 0,0 L 5,5 L 10,0" Stroke="{StaticResource B.OnPrimary}" StrokeThickness="1.8"
                                           Width="10" Height="6" Stretch="Uniform" />
                                     <Button.ContextMenu>
                                         <ContextMenu>
                                             <MenuItem Header="Launch game" Command="{Binding LaunchCommand}"
+                                                      Visibility="{Binding HasContinue, Converter={StaticResource VisibleWhen}}"
                                                       ToolTip="Start the game on its main menu without continuing a save" />
+                                            <MenuItem Header="{Binding NewGameMenuText}" Command="{Binding NewGameInEmptySlotCommand}"
+                                                      Visibility="{Binding HasEmptySlot, Converter={StaticResource VisibleWhen}}"
+                                                      ToolTip="Start a new run in this empty save slot, tied to the active profile" />
                                         </ContextMenu>
                                     </Button.ContextMenu>
                                 </Button>
