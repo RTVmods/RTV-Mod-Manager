@@ -1,0 +1,103 @@
+<UserControl x:Class="VostokModManager.Wpf.Views.LibraryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="clr-namespace:VostokModManager.Services;assembly=VostokModManager.Core">
+    <UserControl.Resources>
+        <GridLength x:Key="L.Ver">110</GridLength>
+        <GridLength x:Key="L.State">200</GridLength>
+        <GridLength x:Key="L.Prof">200</GridLength>
+        <GridLength x:Key="L.Size">90</GridLength>
+        <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource Btn.Quiet}">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel Margin="32,26,32,22">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom">
+                <Border Width="280" Height="44" Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeSoft}" BorderThickness="1">
+                    <DockPanel Margin="14,0">
+                        <Path DockPanel.Dock="Left" Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}"
+                              Width="15" Height="15" Stroke="{StaticResource B.Text2}" />
+                        <Grid Margin="10,0,0,0">
+                            <TextBlock Text="Search the library" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center"
+                                       IsHitTestVisible="False"
+                                       Visibility="{Binding Query, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                            <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" Background="Transparent"
+                                     BorderThickness="0" Padding="0" VerticalAlignment="Center" AutomationProperties.Name="Search the library" />
+                        </Grid>
+                    </DockPanel>
+                </Border>
+                <Button Content="Open folder" Margin="10,0,0,0" MinHeight="44" Command="{Binding OpenFolderCommand}" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="EVERY VERSION THE MANAGER KEEPS" Style="{StaticResource T.Label}" />
+                <TextBlock Text="Library" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+            </StackPanel>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Header}" Style="{StaticResource T.Muted}" Margin="0,0,0,16"
+                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+
+        <!-- actions -->
+        <Border DockPanel.Dock="Bottom" Style="{StaticResource Panel.Notice}" Margin="0,14,0,0">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Clean up old versions" MinHeight="34" FontSize="13" Margin="0,0,8,0" Command="{Binding CleanUpCommand}" />
+                    <Button Content="Delete selected" MinHeight="34" FontSize="13" Margin="0,0,8,0" Command="{Binding DeleteSelectedCommand}" />
+                    <Button Content="Install selected" Style="{StaticResource Btn.Primary}" MinHeight="34" FontSize="13"
+                            Command="{Binding InstallSelectedCommand}" />
+                </StackPanel>
+                <TextBlock Text="{Binding CleanupNote}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- column header: click to sort -->
+        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="34">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="{StaticResource L.Ver}" />
+                    <ColumnDefinition Width="{StaticResource L.State}" />
+                    <ColumnDefinition Width="{StaticResource L.Prof}" />
+                    <ColumnDefinition Width="{StaticResource L.Size}" />
+                </Grid.ColumnDefinitions>
+                <Button Style="{StaticResource HeaderButton}" Content="MOD" Margin="14,0,0,0" Command="{Binding SortCommand}" CommandParameter="Mod" />
+                <Button Grid.Column="1" Style="{StaticResource HeaderButton}" Content="VERSION" Command="{Binding SortCommand}" CommandParameter="Version" />
+                <Button Grid.Column="2" Style="{StaticResource HeaderButton}" Content="STATE" Command="{Binding SortCommand}" CommandParameter="State" />
+                <Button Grid.Column="3" Style="{StaticResource HeaderButton}" Content="IN PROFILES" Command="{Binding SortCommand}" CommandParameter="Profiles" />
+                <Button Grid.Column="4" Style="{StaticResource HeaderButton}" Content="SIZE" Command="{Binding SortCommand}" CommandParameter="Size" />
+            </Grid>
+        </Border>
+
+        <ListBox x:Name="List" ItemsSource="{Binding Rows}" SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
+                 AutomationProperties.Name="Library">
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type svc:LibraryRow}">
+                    <Grid MinHeight="44">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="{StaticResource L.Ver}" />
+                            <ColumnDefinition Width="{StaticResource L.State}" />
+                            <ColumnDefinition Width="{StaticResource L.Prof}" />
+                            <ColumnDefinition Width="{StaticResource L.Size}" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Margin="14,0,8,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding SourceText}" FontSize="12" Foreground="{StaticResource B.Text4}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding Version}" FontSize="14" Foreground="{StaticResource B.Text2}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding StateText}" FontSize="13" Foreground="{StaticResource B.Text2}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="3" Text="{Binding ProfilesText}" FontSize="13" Foreground="{StaticResource B.Text3}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="4" Text="{Binding SizeText}" FontSize="13" Foreground="{StaticResource B.Text3}" VerticalAlignment="Center" />
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</UserControl>
