@@ -249,31 +249,6 @@ public sealed partial class ManagerSession
         RaiseChanged();
     }
 
-    /// <summary>The mod ids the list narrows to while the dependency
-    /// rollup is shown: every mod (in the active profile, when there is
-    /// one) that declares dependencies, plus every id it names. Pass it
-    /// as ModListQuery.DependencyFilter.</summary>
-    public HashSet<string> BuildDependencyFilterSet()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var profileIds = ActiveProfile != null
-            ? new HashSet<string>(ActiveProfile.Mods.Select(m => m.ModId), StringComparer.OrdinalIgnoreCase)
-            : null;
-        foreach (var entry in Registry.Entries)
-        {
-            if (string.IsNullOrEmpty(entry.ModId)) continue;
-            if (profileIds != null && !profileIds.Contains(entry.ModId)) continue;
-            var required = entry.RequiredDependencies;
-            var optional = entry.OptionalDependencies;
-            if (required.Count == 0 && optional.Count == 0) continue;
-            // Deps that aren't installed simply don't appear in the list.
-            set.Add(entry.ModId);
-            foreach (var d in required) set.Add(d);
-            foreach (var d in optional) set.Add(d);
-        }
-        return set;
-    }
-
     // ── enable / disable ──────────────────────────────────────────────
 
     /// <summary>The Enabled checkbox: turns a mod on or off. A built-in
