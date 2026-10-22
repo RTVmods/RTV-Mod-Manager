@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
 using VostokModManager.Domain;
 using VostokModManager.Services;
 
@@ -9,21 +12,62 @@ namespace VostokModManager.Wpf.ViewModels;
 /// <summary>What a row's status column says, which also picks its colour.</summary>
 public enum RowStatusKind { UpToDate, Update, Conflict, Testing, Locked, Disabled, Unlinked, BuiltIn, Ambiguous, Newer, Unknown }
 
-/// <summary>One mod in the Mods list.</summary>
-public sealed partial class ModRow : ObservableObject
+/// <summary>One line of the Mods list: a mod, or a pack's header.</summary>
+public sealed partial class ModItem : ObservableObject
 {
-    public ModRow(ModEntry entry) => Entry = entry;
+    private readonly ModsViewModel _owner;
 
-    public ModEntry Entry { get; }
-    public string Name => string.IsNullOrEmpty(Entry.DisplayName) ? System.IO.Path.GetFileName(Entry.Path) : Entry.DisplayName;
-    public string Version => Entry.Version;
-    public int Priority => Entry.Priority;
+    public ModItem(ModsViewModel owner, ModRow row)
+    {
+        _owner = owner;
+        Row = row;
+        _isEnabled = row.Enabled;
+        (StatusKind, Status) = StatusOf(row);
+    }
 
+    public ModRow Row { get; }
+    public ModEntry? Entry => Row.Entry;
+    public bool IsPackHeader => Row.IsPackHeader;
+    public string Name => IsPackHeader ? Row.PackName : Row.DisplayName;
+    public string Version => Row.Version;
+    public int Priority => Row.Priority;
+    public bool IsLocked => Row.Locked;
+    public bool IsTesting => Row.Testing;
+    public bool InConflict => Row.InConflict;
+    public bool HasNote => Row.Note.Length > 0;
+    public string PackSummary => Row.PackCollapsed ? $"{Row.PackCount} mods · collapsed" : $"{Row.PackCount} mods";
+    public string Status { get; }
+    public RowStatusKind StatusKind { get; }
+    public string Tooltip => Row.Update?.Tooltip ?? "";
+
+    /// <summary>Two-way with the row's checkbox: ticking it enables the mod.</summary>
     [ObservableProperty] private bool _isEnabled;
-    [ObservableProperty] private string _status = "";
-    [ObservableProperty] private RowStatusKind _statusKind;
-    [ObservableProperty] private bool _isLocked;
-    [ObservableProperty] private bool _isTesting;
+
+    partial void OnIsEnabledChanged(bool value)
+    {
+        if (Entry == null || value == Row.Enabled) return;
+        _owner.SetEnabled(this, value);
+    }
+
+    private static (RowStatusKind, string) StatusOf(ModRow r)
+    {
+        if (r.IsPackHeader) return (RowStatusKind.Unknown, "");
+        if (r.BuiltIn) return (RowStatusKind.BuiltIn, "Built in");
+        var u = r.Update;
+        if (u?.State == ModUpdateState.Outdated) return (RowStatusKind.Update, $"Update → {u.Latest}");
+        if (r.InConflict) return (RowStatusKind.Conflict, "Conflict");
+        if (r.Testing) return (RowStatusKind.Testing, "Testing build");
+        if (r.Locked) return (RowStatusKind.Locked, "Locked");
+        if (!r.Enabled) return (RowStatusKind.Disabled, "Disabled");
+        return u?.State switch
+        {
+            ModUpdateState.Unlinked => (RowStatusKind.Unlinked, "Not linked"),
+            ModUpdateState.Unknown => (RowStatusKind.Unknown, "Not checked yet"),
+            ModUpdateState.Ambiguous => (RowStatusKind.Ambiguous, "Same release"),
+            ModUpdateState.NewerLocal => (RowStatusKind.Newer, "Newer than site"),
+            _ => (RowStatusKind.UpToDate, "Up to date"),
+        };
+    }
 }
 
 /// <summary>A filter tab above the list, with its count.</summary>
@@ -49,18 +93,26 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     public ObservableCollection<FilterTab> Tabs { get; }
-    public ObservableCollection<ModRow> Rows { get; } = new();
+    public ObservableCollection<ModItem> Rows { get; } = new();
+
+    /// <summary>The mods in display order without pack headers: what a
+    /// drag reorder counts positions in.</summary>
+    public IReadOnlyList<ModEntry> Displayed { get; private set; } = Array.Empty<ModEntry>();
 
     [ObservableProperty] private string _query = "";
     [ObservableProperty] private string _filter = "all";
-    [ObservableProperty] private ModRow? _selectedRow;
+    [ObservableProperty] private ModItem? _selected;
     [ObservableProperty] private string _profileName = "";
 
-    // Status chips
+    // Status chips and footer
     [ObservableProperty] private int _updateCount;
     [ObservableProperty] private int _conflictCount;
     [ObservableProperty] private int _unlinkedCount;
     [ObservableProperty] private string _footer = "";
+    [ObservableProperty] private string _installProgress = "";
+
+    /// <summary>Rows the list has selected (several with Ctrl/Shift).</summary>
+    public List<ModItem> MultiSelection { get; } = new();
 
     partial void OnQueryChanged(string value) => Rebuild();
     partial void OnFilterChanged(string value)
@@ -74,63 +126,65 @@ public sealed partial class ModsViewModel : PageViewModel
 
     public override void Reload() => Rebuild();
 
-    /// <summary>The mods this page shows: the active profile's plus
-    /// locked ones (all of them before the profile model is adopted).</summary>
-    private IEnumerable<ModEntry> InScope()
-    {
-        var profile = Session.ActiveProfile;
-        if (profile == null) return Session.Registry.Entries;
-        var ids = new HashSet<string>(profile.Mods.Select(m => m.ModId), StringComparer.OrdinalIgnoreCase);
-        foreach (var id in Session.ProtectedModIds()) ids.Add(id);
-        return Session.Registry.Entries.Where(e => string.IsNullOrEmpty(e.ModId) || ids.Contains(e.ModId));
-    }
+    private bool _rebuilding;
 
     private void Rebuild()
     {
-        ProfileName = Session.ActiveProfile?.Name ?? "All installed mods";
-        var conflicted = new HashSet<string>(
-            Session.LastConflicts.SelectMany(c => c.ModIds), StringComparer.OrdinalIgnoreCase);
-
-        var all = InScope()
-            .OrderBy(e => e.Priority)
-            .ThenBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .Select(e => MakeRow(e, conflicted))
-            .ToList();
-
-        Count("all", all.Count);
-        Count("enabled", all.Count(r => r.IsEnabled));
-        Count("disabled", all.Count(r => !r.IsEnabled));
-        Count("updates", all.Count(r => r.StatusKind == RowStatusKind.Update));
-        Count("conflicts", all.Count(r => conflicted.Contains(r.Entry.ModId)));
-        Count("testing", all.Count(r => r.IsTesting));
-        UpdateCount = all.Count(r => r.StatusKind == RowStatusKind.Update);
-        ConflictCount = Session.LastConflicts.Count;
-        UnlinkedCount = Session.UnlinkedMods().Count;
-        Footer = $"{all.Count(r => r.IsEnabled)} of {all.Count} enabled";
-
-        var q = Query.Trim();
-        var keep = SelectedRow?.Entry.ModId;
-        Rows.Clear();
-        foreach (var r in all)
+        if (_rebuilding) return;
+        _rebuilding = true;
+        try
         {
-            if (q.Length > 0
-                && r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0
-                && r.Entry.ModId.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0
-                && System.IO.Path.GetFileName(r.Entry.Path).IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)
-                continue;
-            var pass = Filter switch
+            ProfileName = Session.ActiveProfile?.Name ?? "All installed mods";
+
+            // Counts come from the unfiltered list, so the tabs show totals.
+            var all = Session.BuildModRows(new ModListQuery()).Rows.Where(r => !r.IsPackHeader).ToList();
+            Count("all", all.Count);
+            Count("enabled", all.Count(r => r.Enabled));
+            Count("disabled", all.Count(r => !r.Enabled));
+            Count("updates", all.Count(IsUpdate));
+            Count("conflicts", all.Count(r => r.InConflict));
+            Count("testing", all.Count(r => r.Testing));
+            UpdateCount = all.Count(IsUpdate);
+            ConflictCount = Session.LastConflicts.Count;
+            UnlinkedCount = Session.UnlinkedMods().Count;
+            Footer = $"{all.Count(r => r.Enabled)} of {all.Count} enabled";
+
+            var view = Session.BuildModRows(new ModListQuery(Query.Trim()));
+            Displayed = view.Displayed;
+            var keep = Selected?.Entry?.Path;
+            Rows.Clear();
+            foreach (var r in view.Rows)
             {
-                "enabled" => r.IsEnabled,
-                "disabled" => !r.IsEnabled,
-                "updates" => r.StatusKind == RowStatusKind.Update,
-                "conflicts" => conflicted.Contains(r.Entry.ModId),
-                "testing" => r.IsTesting,
-                _ => true,
-            };
-            if (pass) Rows.Add(r);
+                if (!r.IsPackHeader && !Passes(r)) continue;
+                Rows.Add(new ModItem(this, r));
+            }
+            // A pack header whose mods were all filtered out goes too.
+            for (var i = Rows.Count - 1; i >= 0; i--)
+            {
+                if (!Rows[i].IsPackHeader || Filter == "all") continue;
+                var next = i + 1 < Rows.Count ? Rows[i + 1] : null;
+                if (next == null || next.IsPackHeader) Rows.RemoveAt(i);
+            }
+            Selected = Rows.FirstOrDefault(r => r.Entry != null && r.Entry.Path == keep)
+                       ?? Rows.FirstOrDefault(r => !r.IsPackHeader);
         }
-        SelectedRow = Rows.FirstOrDefault(r => r.Entry.ModId == keep) ?? Rows.FirstOrDefault();
+        finally
+        {
+            _rebuilding = false;
+        }
     }
+
+    private static bool IsUpdate(ModRow r) => r.Update?.State == ModUpdateState.Outdated;
+
+    private bool Passes(ModRow r) => Filter switch
+    {
+        "enabled" => r.Enabled,
+        "disabled" => !r.Enabled,
+        "updates" => IsUpdate(r),
+        "conflicts" => r.InConflict,
+        "testing" => r.Testing,
+        _ => true,
+    };
 
     private void Count(string key, int n)
     {
@@ -138,58 +192,178 @@ public sealed partial class ModsViewModel : PageViewModel
         if (t != null) t.Count = n;
     }
 
-    private ModRow MakeRow(ModEntry e, HashSet<string> conflicted)
+    // ── row actions ───────────────────────────────────────────────────
+
+    internal void SetEnabled(ModItem item, bool on)
     {
-        var row = new ModRow(e)
-        {
-            IsEnabled = e.IsEnabled,
-            IsLocked = Session.IsLocked(e),
-            IsTesting = Session.IsTesting(e),
-        };
-        (row.StatusKind, row.Status) = StatusOf(e, conflicted);
-        return row;
+        if (item.Entry == null) return;
+        var targets = MultiSelection.Count > 1 && MultiSelection.Contains(item)
+            ? MultiSelection.Where(m => m.Entry != null).Select(m => m.Entry!).ToList()
+            : null;
+        if (targets != null) Session.BulkToggleSelected(targets, on);
+        else Session.SetModEnabled(item.Entry, on);
     }
 
-    private (RowStatusKind, string) StatusOf(ModEntry e, HashSet<string> conflicted)
+    private IReadOnlyList<ModEntry> Targets(ModItem? item)
     {
-        if (Session.IsBuiltInActive(e.ModId)) return (RowStatusKind.BuiltIn, "Built in");
-        if (Session.TryGetLatest(e, out var latest))
+        if (item?.Entry == null) return Array.Empty<ModEntry>();
+        if (MultiSelection.Count > 1 && MultiSelection.Contains(item))
+            return MultiSelection.Where(m => m.Entry != null).Select(m => m.Entry!).ToList();
+        return new[] { item.Entry };
+    }
+
+    [RelayCommand]
+    private void TogglePack(ModItem? item)
+    {
+        if (item is { IsPackHeader: true }) Session.TogglePackCollapse(item.Row.PackName);
+        Rebuild();
+    }
+
+    [RelayCommand]
+    private void SetLoadOrder(ModItem? item)
+    {
+        var t = Targets(item ?? Selected);
+        if (t.Count == 1) Session.PromptModPriority(t[0]);
+        else if (t.Count > 1) Session.PromptBulkSetPriority(t);
+    }
+
+    [RelayCommand]
+    private void ToggleLock(ModItem? item)
+    {
+        var t = Targets(item ?? Selected);
+        if (t.Count == 1) Session.ToggleLock(t[0]);
+        else if (t.Count > 1) Session.BulkSetLocked(t, !t.All(Session.IsLocked));
+        Rebuild();
+    }
+
+    [RelayCommand]
+    private void ToggleTesting(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is { } e) Session.ToggleTesting(e);
+        Rebuild();
+    }
+
+    [RelayCommand]
+    private void EditNote(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is { } e && Session.EditModNote(e)) Rebuild();
+    }
+
+    [RelayCommand]
+    private void Delete(ModItem? item)
+    {
+        var t = Targets(item ?? Selected);
+        if (t.Count == 1) Session.DeleteMod(t[0]);
+        else if (t.Count > 1) Session.DeleteMods(t);
+    }
+
+    [RelayCommand]
+    private void ShowInFolder(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is not { } e) return;
+        try { Process.Start("explorer.exe", $"/select,\"{e.Path}\""); } catch { /* nothing to show */ }
+    }
+
+    [RelayCommand]
+    private void OpenPage(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is not { } e || !e.Source.IsValid) return;
+        try { Process.Start(new ProcessStartInfo(e.Source.PageUrl) { UseShellExecute = true }); } catch { }
+    }
+
+    [RelayCommand]
+    private void EnableAll() => Session.BulkToggle(true);
+
+    [RelayCommand]
+    private void DisableAll() => Session.BulkToggle(false);
+
+    // ── install ───────────────────────────────────────────────────────
+
+    [RelayCommand]
+    private async Task InstallFiles()
+    {
+        var dlg = new OpenFileDialog
         {
-            if (Session.IsOutdated(e)) return (RowStatusKind.Update, $"Update → {latest}");
-        }
-        if (!string.IsNullOrEmpty(e.ModId) && conflicted.Contains(e.ModId)) return (RowStatusKind.Conflict, "Conflict");
-        if (Session.IsTesting(e)) return (RowStatusKind.Testing, "Testing build");
-        if (Session.IsLocked(e)) return (RowStatusKind.Locked, "Locked");
-        if (!e.IsEnabled) return (RowStatusKind.Disabled, "Disabled");
-        if (!e.Source.IsValid) return (RowStatusKind.Unlinked, "Not linked");
-        if (string.IsNullOrEmpty(latest)) return (RowStatusKind.Unknown, "Not checked yet");
-        if (ManagerSession.VersionsAreAmbiguous(e.Version, latest)) return (RowStatusKind.Ambiguous, "Same release");
-        if (ModRegistry.CompareVersions(e.Version, latest) > 0) return (RowStatusKind.Newer, "Newer than site");
-        return (RowStatusKind.UpToDate, "Up to date");
+            Title = "Install mods",
+            Filter = "Mods, modpacks and mod lists (*.vmz;*.zip;*.json)|*.vmz;*.zip;*.json|All files (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog() != true) return;
+        await DropAsync(dlg.FileNames);
+    }
+
+    /// <summary>Files dropped on the list or picked in Install mod….
+    /// Mods install here; modpacks and mod lists go to the import.</summary>
+    public async Task DropAsync(IEnumerable<string> paths)
+    {
+        var list = paths.Where(ManagerSession.IsAcceptedDropPath).ToList();
+        if (list.Count == 0) return;
+        var progress = new Progress<InstallProgress>(p =>
+            InstallProgress = p.Done < p.Total ? $"Installing {p.FileName} ({p.Done + 1} of {p.Total})" : "");
+        var result = await Session.HandleFileDropAsync(list, progress);
+        InstallProgress = "";
+        if (result.ModpackFiles.Count > 0 || result.ModListFiles.Count > 0)
+            ImportRequested?.Invoke(result.ModpackFiles.Concat(result.ModListFiles).ToList());
+    }
+
+    /// <summary>Modpack zips and mod-list files the user dropped; the
+    /// shell hands them to the import.</summary>
+    public event Action<IReadOnlyList<string>>? ImportRequested;
+
+    /// <summary>Moves `moved` to the drop position in the display order.</summary>
+    public void Reorder(IReadOnlyList<ModItem> moved, ModItem target)
+    {
+        if (target.Entry == null) return;
+        var entries = moved.Where(m => m.Entry != null).Select(m => m.Entry!).ToList();
+        var index = Displayed.ToList().IndexOf(target.Entry);
+        if (entries.Count == 0 || index < 0) return;
+        Session.DragReorder(Displayed, entries, index);
     }
 
     // ── the selected mod (details panel) ──────────────────────────────
 
-    public string SelectedName => SelectedRow?.Name ?? "";
-    public string SelectedMeta => SelectedRow == null ? "" :
-        $"v{SelectedRow.Version} · load order {SelectedRow.Priority}" +
-        (SelectedRow.Entry.Source.IsValid ? $" · {SelectedRow.Entry.Source.Id}" : " · not linked to VostokMods");
-    public string SelectedDescription => SelectedRow == null ? "" :
-        string.IsNullOrWhiteSpace(SelectedRow.Entry.Description)
-            ? "This mod's mod.txt has no description. Linked mods show the description from their VostokMods page."
-            : SelectedRow.Entry.Description;
-    public IReadOnlyList<string> SelectedRequires => SelectedRow?.Entry.RequiredDependencies ?? new List<string>();
-    public IReadOnlyList<ConflictDetector.Conflict> SelectedConflicts =>
-        SelectedRow == null || string.IsNullOrEmpty(SelectedRow.Entry.ModId)
-            ? Array.Empty<ConflictDetector.Conflict>()
-            : Session.LastConflicts.Where(c => c.ModIds.Contains(SelectedRow.Entry.ModId, StringComparer.OrdinalIgnoreCase)).ToList();
-
-    partial void OnSelectedRowChanged(ModRow? value)
+    public string SelectedName => Selected?.Name ?? "";
+    public string SelectedMeta
     {
-        OnPropertyChanged(nameof(SelectedName));
-        OnPropertyChanged(nameof(SelectedMeta));
-        OnPropertyChanged(nameof(SelectedDescription));
-        OnPropertyChanged(nameof(SelectedRequires));
-        OnPropertyChanged(nameof(SelectedConflicts));
+        get
+        {
+            if (Selected?.Entry is not { } e) return "";
+            var parts = new List<string> { $"v{e.Version}", $"load order {e.Priority}" };
+            parts.Add(e.Source.IsValid ? e.Source.Id : "not linked to VostokMods");
+            return string.Join(" · ", parts);
+        }
+    }
+    public string SelectedDescription => Selected?.Entry is not { } e ? "" :
+        string.IsNullOrWhiteSpace(e.Description)
+            ? "This mod's mod.txt has no description. Linked mods show the description from their VostokMods page."
+            : e.Description;
+    public string SelectedNote => Selected?.Entry is { } e ? Session.GetModNote(e) : "";
+    public bool SelectedIsLinked => Selected?.Entry?.Source.IsValid == true;
+    public bool SelectedIsTesting => Selected?.IsTesting == true;
+    public bool SelectedIsLocked => Selected?.IsLocked == true;
+    public IReadOnlyList<string> SelectedRequires => Selected?.Entry?.RequiredDependencies ?? new List<string>();
+    public IReadOnlyList<ConflictDetector.Conflict> SelectedConflicts =>
+        Selected?.Entry is not { } e || string.IsNullOrEmpty(e.ModId)
+            ? Array.Empty<ConflictDetector.Conflict>()
+            : Session.LastConflicts.Where(c => c.ModIds.Contains(e.ModId, StringComparer.OrdinalIgnoreCase)).ToList();
+
+    partial void OnSelectedChanged(ModItem? value)
+    {
+        foreach (var name in new[]
+                 {
+                     nameof(SelectedName), nameof(SelectedMeta), nameof(SelectedDescription), nameof(SelectedNote),
+                     nameof(SelectedIsLinked), nameof(SelectedIsTesting), nameof(SelectedIsLocked),
+                     nameof(SelectedRequires), nameof(SelectedConflicts),
+                 })
+            OnPropertyChanged(name);
+    }
+
+    /// <summary>The note box in the details panel lost focus.</summary>
+    public void SaveNote(string text)
+    {
+        if (Selected?.Entry is not { } e) return;
+        if (text == Session.GetModNote(e)) return;
+        Session.SetModNote(e, text);
+        Rebuild();
     }
 }
