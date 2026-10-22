@@ -2,6 +2,18 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.0 (2026-10-22)
+
+- **A new interface, drawn the way Road to Vostok draws its own.** The manager is rebuilt in WPF: Lora (the game's typeface), flat grey panels, hairlines and a white selection, with colour only where it means something (amber for updates, salmon for conflicts, blue for testing builds, green for OK). The faux-Cyrillic title, the backdrop and the eight-button title row are gone.
+- **A side menu** with Mods, Profiles, Saves, Browse VostokMods, Library, Tools and Settings, and a **launch panel** under it: the profile about to run, the save slot it will continue, a pre-flight check (load order, missing dependencies, updates waiting, conflicts, save slots) and the LAUNCH button. The eight status lines are now one row of chips you can click.
+- **Mods**: filter tabs with counts, drag rows to reorder, Ctrl/Shift multi-select, and a details panel that replaces the right-click menu: update (and update all), revert to an earlier version, link to VostokMods, the mod's VostokMods description and changelog, its dependencies, the conflicts it is in with who wins and why, testing / lock flags and a note. The separate Conflicts grid is gone; conflicts show on the mods they involve.
+- **Profiles**: every profile as a card, and a table of where they differ across all profiles with a fix per row; apply, clone, import, export, rename and describe from the card.
+- **Saves**: each slot as a card with where and when it was played, the profile it is tied to, and whether every mod that profile needs is here.
+- **Browse VostokMods**: the site's catalogue inside the manager, with each card showing its state against your setup, **Install into** ticks for every profile, modpacks with **Install the missing mods**, and the real site in a Website tab.
+- **Setup**: on first run a setup window walks through five checks (game folder, Mod Loader, mods and profiles, save slots, VostokMods links); Settings → Run setup again reopens it.
+- **Tools**: log analysis, the Mod Packager and the support package in one place. In the AI edition, **Analyze with Claude** reads the game's log and proposes a load order.
+- Only one manager runs at a time, the window remembers its size and position, and an unexpected error is written to `crash.log` instead of closing the manager.
+
 ## 0.6.14 (2026-10-19)
 
 - **Built-in save slots.** The manager now carries its own Save Slots mod (based on Razzer's Multi Save Slots 1.4) and installs it into the mods folder itself: five slots in the game's menu, so New Game no longer wipes your run and Load picks the slot to continue. It is on in every profile, kept through profile switches, updated with the manager, shown as ⚙ built in, and left out of profiles, exports and modpacks. Settings → Built-in save slots turns it off and removes it. Existing slots from Multi Save Slots or Multi Save Slots Reborn carry over; on first start the manager offers to turn those mods off in the profiles that use them, since both would manage the same slot folder.

@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Everything below the UI: mod registry, config, profiles, saves,
-       VostokMods API, update checks, services. No UI types allowed here,
-       so both the WinForms and WPF front ends can share it. -->
+       VostokMods API, update checks, services. No UI types allowed here:
+       the front end (VostokModManager.Wpf) drives ManagerSession and
+       answers its questions through IUserPrompt, and the tests do the
+       same with canned answers. -->
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <RootNamespace>VostokModManager</RootNamespace>

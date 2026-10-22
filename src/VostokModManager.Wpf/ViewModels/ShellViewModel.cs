@@ -24,13 +24,6 @@ public abstract partial class PageViewModel : ObservableObject
     public virtual void OnShown() { }
 }
 
-/// <summary>A page that isn't built yet.</summary>
-public sealed class PlaceholderViewModel : PageViewModel
-{
-    public PlaceholderViewModel(ManagerSession session, string title) : base(session) => Title = title;
-    public string Title { get; }
-}
-
 /// <summary>One entry in the side menu.</summary>
 public sealed partial class NavItem : ObservableObject
 {

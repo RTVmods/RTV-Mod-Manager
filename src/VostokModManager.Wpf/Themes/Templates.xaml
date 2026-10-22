@@ -65,8 +65,5 @@
     <DataTemplate DataType="{x:Type vm:LibraryViewModel}">
         <v:LibraryView />
     </DataTemplate>
-    <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
-        <v:PlaceholderView />
-    </DataTemplate>
 
 </ResourceDictionary>

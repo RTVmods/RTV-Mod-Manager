@@ -100,7 +100,7 @@
                         <StackPanel>
                             <TextBlock Text="{Binding VersionLine}" Style="{StaticResource SectionTitle}" />
                             <TextBlock Style="{StaticResource T.Muted}" Margin="0,0,0,10"
-                                       Text="Made by Joni for the Road to Vostok modding community. MIT licensed. The interface is set in Lora (SIL Open Font License), the typeface the game itself uses." />
+                                       Text="Made by Joni for the Road to Vostok modding community. Licensed under GPL-3.0. The interface is set in Lora (SIL Open Font License), the typeface the game itself uses." />
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource Btn.Link}" Content="VostokMods" Margin="0,0,14,0"
                                         Command="{Binding OpenUrlCommand}" CommandParameter="https://vostokmods.net" />

@@ -1,14 +1,14 @@
 <Project>
 
-  <!-- Shared by every project in the solution (Core, WinForms, Wpf, Tests). -->
+  <!-- Shared by every project in the solution (Core, Wpf, Tests). -->
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Single version source — reflected at runtime by the About
-         dialog, the update checks and the support package via
+    <!-- Single version source — reflected at runtime by Settings → About,
+         the update checks and the support package via
          Assembly.GetName().Version. -->
-    <Version>0.6.14</Version>
+    <Version>0.7.0</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
     <Authors>Joni</Authors>
     <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>

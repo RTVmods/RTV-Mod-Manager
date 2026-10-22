@@ -1,23 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The new WPF front end, drawn in Road to Vostok's own UI language
-       (Lora, translucent grey panels, hairlines, white selection).
-       Builds as VostokModManagerWpf until it reaches parity with the
-       WinForms front end; at cutover it takes over the shipped names
-       (VostokModManagerAI / VostokModManagerIntegrated), which the
-       self-update matches against. -->
+  <!-- The manager's front end, drawn in Road to Vostok's own UI language
+       (Lora, flat grey panels, hairlines, white selection). Shared
+       settings (version, editions, single-file release publish) come
+       from Directory.Build.props/.targets.
+
+       The .exe names are what the self-update matches a GitHub release
+       asset against (ManagerRelease.AssetFor), so they must not change:
+         EnableAI=true   →  VostokModManagerAI.exe          publish/ai/
+         EnableAI=false  →  VostokModManagerIntegrated.exe  publish/integrated/ -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
     <RootNamespace>VostokModManager.Wpf</RootNamespace>
-    <AssemblyName>VostokModManagerWpf</AssemblyName>
-    <Product>Vostok Mod Manager</Product>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(EnableAI)' == 'true'">
+    <AssemblyName>VostokModManagerAI</AssemblyName>
+    <Product>Vostok Mod Manager AI</Product>
     <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition="'$(EnableAI)' != 'true'">
+    <AssemblyName>VostokModManagerIntegrated</AssemblyName>
+    <Product>Vostok Mod Manager Integrated</Product>
     <ApplicationIcon>icon-integrated.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -39,7 +44,7 @@
   </ItemGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <PublishDir>$(MSBuildThisFileDirectory)..\..\publish\wpf-$(VmmEdition)\</PublishDir>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\publish\$(VmmEdition)\</PublishDir>
   </PropertyGroup>
 
 </Project>
