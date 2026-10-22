@@ -92,7 +92,7 @@ public class LogAnalysisTests
         var prompt = new ScriptedPrompt();
         var session = RefreshTests.OpenWithProfile(sb, prompt);
         session.Refresh();
-        var order = new[] { new PriorityChange("alpha", 10), new PriorityChange("beta", 3), new PriorityChange("ghost", 1) };
+        var order = new[] { new ProposedPriorityChange("alpha", 10), new ProposedPriorityChange("beta", 3), new ProposedPriorityChange("ghost", 1) };
 
         prompt.ConfirmAnswer = false;
         Assert.Equal(0, session.ApplyProposedOrder(order));
@@ -108,7 +108,7 @@ public class LogAnalysisTests
 
         // Nothing installed: told, nothing asked.
         prompt.Asked.Clear();
-        Assert.Equal(0, session.ApplyProposedOrder(new[] { new PriorityChange("ghost", 1) }));
+        Assert.Equal(0, session.ApplyProposedOrder(new[] { new ProposedPriorityChange("ghost", 1) }));
         Assert.Equal(new[] { "inform:Nothing to apply" }, prompt.Asked);
     }
 }

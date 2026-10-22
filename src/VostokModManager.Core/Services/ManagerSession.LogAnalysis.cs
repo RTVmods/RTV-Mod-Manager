@@ -45,7 +45,7 @@ public sealed record LogAnalysisReport(
     string IssueNote);
 
 /// <summary>A mod's proposed priority (lower loads earlier).</summary>
-public sealed record PriorityChange(string ModId, int Priority);
+public sealed record ProposedPriorityChange(string ModId, int Priority);
 
 public sealed partial class ManagerSession
 {
@@ -138,7 +138,7 @@ public sealed partial class ManagerSession
     /// the user is told. Refreshes the session after a successful save.
     /// Returns the number of priorities written (0 when nothing was
     /// applied).</summary>
-    public int ApplyProposedOrder(IReadOnlyList<PriorityChange> order)
+    public int ApplyProposedOrder(IReadOnlyList<ProposedPriorityChange> order)
     {
         if (order.Count == 0) return 0;
 
