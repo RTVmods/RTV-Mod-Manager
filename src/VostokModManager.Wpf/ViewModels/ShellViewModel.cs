@@ -104,6 +104,16 @@ public sealed partial class ShellViewModel : ObservableObject
         if (item != null) Selected = item;
     }
 
+    [RelayCommand]
+    private void Go(string key) => Open(key);
+
+    [RelayCommand]
+    private void Undo()
+    {
+        // Wired to the checkpoint restore once the launch area lands.
+        Session.Prompt.Inform("Undo", "Restoring the last checkpoint is not wired up yet.");
+    }
+
     // ── launch panel ──────────────────────────────────────────────────
 
     [ObservableProperty] private string _profileName = "";

@@ -13,6 +13,7 @@
     <c:StatusBrushConverter x:Key="StatusToBrush" />
     <c:EnabledOpacityConverter x:Key="EnabledToOpacity" />
     <c:EqualsConverter x:Key="EqualsParam" />
+    <c:HasTextConverter x:Key="HasText" />
 
     <Geometry x:Key="Icon.Mods">M3,3 H10 V10 H3 Z M14,3 H21 V10 H14 Z M3,14 H10 V21 H3 Z M14,14 H21 V21 H14 Z</Geometry>
     <Geometry x:Key="Icon.Profiles">M12,3 L21,8 L12,13 L3,8 Z M3,13 L12,18 L21,13</Geometry>

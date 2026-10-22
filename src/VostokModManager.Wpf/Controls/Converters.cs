@@ -41,6 +41,16 @@ public sealed class VisibleWhenConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>True for a non-empty string (e.g. to enable a tooltip only when there is one).</summary>
+public sealed class HasTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is string s && s.Length > 0;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 /// <summary>Launch-panel check level → its dot colour.</summary>
 public sealed class CheckLevelBrushConverter : IValueConverter
 {
