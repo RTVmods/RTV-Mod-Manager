@@ -134,6 +134,13 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [ObservableProperty] private string _profileName = "";
     [ObservableProperty] private string _nextLaunchText = "";
+    /// <summary>The slot the big button continues (the one the game had
+    /// last), 0 when there is none: the button then launches to the menu.</summary>
+    [ObservableProperty] private int _continueSlot;
+    [ObservableProperty] private string _primaryLaunchText = "LAUNCH";
+    [ObservableProperty] private string _primaryLaunchName = "Launch the game";
+    public bool HasContinue => ContinueSlot > 0;
+    partial void OnContinueSlotChanged(int value) => OnPropertyChanged(nameof(HasContinue));
     public ObservableCollection<LaunchCheck> Checks { get; } = new();
 
     [ObservableProperty] private string _managerVersion;
@@ -149,11 +156,21 @@ public sealed partial class ShellViewModel : ObservableObject
         StatusText = text;
     }
 
+    /// <summary>Plain launch: the game opens on its main menu.</summary>
     [RelayCommand]
     private void Launch()
     {
         if (!Session.LaunchGame()) return;
         // The watch reports a crash through the session's own prompt.
+    }
+
+    /// <summary>The big button: continue the last save when there is one
+    /// (switching to its profile first), else a plain launch.</summary>
+    [RelayCommand]
+    private void PrimaryLaunch()
+    {
+        if (ContinueSlot > 0) Session.LaunchSlot(ContinueSlot);
+        else Session.LaunchGame();
     }
 
     [RelayCommand]
@@ -272,13 +289,18 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             var saves = Session.GetSavesView();
             Nav[2].Count = saves.Slots.Count(s => s.Occupied) is var n and > 0 ? n.ToString() : "";
-            var next = saves.Slots.FirstOrDefault(s => s.IsActiveSlot && s.Occupied);
-            NextLaunchText = next == null ? "" : $"Slot {next.Number} · {next.Title}";
+            var next = saves.Slots.FirstOrDefault(s => s.IsActiveSlot && s.CanLaunch);
+            NextLaunchText = next == null ? ""
+                : next.DisplayName.Length > 0 ? $"Slot {next.Number} · {next.DisplayName}" : $"Slot {next.Number}";
+            ContinueSlot = next?.Number ?? 0;
         }
         catch
         {
             NextLaunchText = "";
+            ContinueSlot = 0;
         }
+        PrimaryLaunchText = ContinueSlot > 0 ? "CONTINUE" : "LAUNCH";
+        PrimaryLaunchName = ContinueSlot > 0 ? $"Continue slot {ContinueSlot}" : "Launch the game";
 
         Checks.Clear();
         var r = Session.GetLaunchReadiness();

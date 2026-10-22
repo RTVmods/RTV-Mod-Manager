@@ -173,14 +173,36 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </Border>
-                            <Button Style="{StaticResource Btn.Primary}" Command="{Binding LaunchCommand}"
-                                    MinHeight="52" FontSize="18" AutomationProperties.Name="Launch the game">
-                                <StackPanel Orientation="Horizontal">
-                                    <Path Data="{StaticResource Icon.Play}" Fill="{StaticResource B.OnPrimary}"
-                                          Stretch="Uniform" Width="13" Height="13" Margin="0,0,10,0" />
-                                    <TextBlock Text="LAUNCH" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </Button>
+                            <!-- CONTINUE the last save; the arrow opens a plain launch to the menu.
+                                 Without a save to continue it is LAUNCH and the arrow hides. -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button Style="{StaticResource Btn.Primary}" Command="{Binding PrimaryLaunchCommand}"
+                                        MinHeight="52" FontSize="18" Padding="6,0"
+                                        AutomationProperties.Name="{Binding PrimaryLaunchName}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Data="{StaticResource Icon.Play}" Fill="{StaticResource B.OnPrimary}"
+                                              Stretch="Uniform" Width="13" Height="13" Margin="0,0,8,0" />
+                                        <TextBlock Text="{Binding PrimaryLaunchText}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="LaunchMenuButton" Grid.Column="1" Style="{StaticResource Btn.Primary}"
+                                        Width="30" MinHeight="52" Padding="0" Margin="1,0,0,0" Click="OnLaunchMenu"
+                                        Visibility="{Binding HasContinue, Converter={StaticResource VisibleWhen}}"
+                                        ToolTip="Other ways to launch" AutomationProperties.Name="Other ways to launch">
+                                    <Path Data="M 0,0 L 5,5 L 10,0" Stroke="{StaticResource B.OnPrimary}" StrokeThickness="1.8"
+                                          Width="10" Height="6" Stretch="Uniform" />
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Launch game" Command="{Binding LaunchCommand}"
+                                                      ToolTip="Start the game on its main menu without continuing a save" />
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
+                            </Grid>
                         </StackPanel>
                     </Border>
                 </DockPanel>

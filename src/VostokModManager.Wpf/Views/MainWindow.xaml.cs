@@ -53,6 +53,16 @@ public partial class MainWindow : Window
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
+    // The launch panel's arrow: a menu with the plain launch.
+    private void OnLaunchMenu(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { ContextMenu: { } menu } button) return;
+        menu.DataContext = DataContext;
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        menu.IsOpen = true;
+    }
+
     /// <summary>A maximized chromeless window overhangs the screen by the
     /// resize border; pad it back in, and swap the maximize glyph.</summary>
     private void SyncMaximized()
