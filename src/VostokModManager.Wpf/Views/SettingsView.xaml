@@ -1,0 +1,116 @@
+<UserControl x:Class="VostokModManager.Wpf.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VostokModManager.Wpf.Controls">
+    <UserControl.Resources>
+        <Style x:Key="Section" TargetType="Border" BasedOn="{StaticResource Panel.Card}">
+            <Setter Property="Padding" Value="22,20" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource T.H2}">
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel Margin="32,26,32,22">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,18">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom"
+                        Visibility="{Binding Dirty, Converter={StaticResource VisibleWhen}}">
+                <Button Content="Discard" Margin="0,0,8,0" Command="{Binding RevertCommand}" />
+                <Button Style="{StaticResource Btn.Primary}" Content="Save changes" Command="{Binding SaveCommand}" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="MANAGER" Style="{StaticResource T.Label}" />
+                <TextBlock Text="Settings" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+            </StackPanel>
+        </DockPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="860" HorizontalAlignment="Left">
+
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Game" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="The mods folder inside your Road to Vostok install. Every scan, install and profile switch works here."
+                                   Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+                        <DockPanel Margin="0,0,0,14">
+                            <Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseModsCommand}" />
+                            <TextBox Text="{Binding ModsDir, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                     AutomationProperties.Name="Mods folder" />
+                        </DockPanel>
+                        <CheckBox Content="Skip the Mod Loader's own window when I launch from the manager" IsChecked="{Binding SkipLoaderUi}" Margin="0,0,0,10" />
+                        <CheckBox Content="Built-in save slots (the manager keeps the Save Slots mod on in every profile)" IsChecked="{Binding SaveSlotsBuiltIn}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Section}" Visibility="{Binding IsAiEdition, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel>
+                        <TextBlock Text="Claude" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="{Binding ClaudeStatus}" Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+                        <TextBlock Text="CLAUDE CODE (EMPTY = FIND IT AUTOMATICALLY)" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                        <DockPanel Margin="0,0,0,12">
+                            <Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseClaudeCommand}" />
+                            <TextBox Text="{Binding ClaudePath, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                     AutomationProperties.Name="Claude path" />
+                        </DockPanel>
+                        <TextBlock Text="DECOMPILED GAME (OPTIONAL CONTEXT FOR CONFLICT RESOLVES)" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseGameSourceCommand}" />
+                            <TextBox Text="{Binding GameSourcePath, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                     AutomationProperties.Name="Decompiled game folder" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Updates" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="The manager and the Mod Loader check GitHub for new releases at startup."
+                                   Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+                        <DockPanel Margin="0,0,0,8">
+                            <Button DockPanel.Dock="Right" Content="Check now" Command="{Binding CheckManagerCommand}" />
+                            <TextBlock Text="{Binding ManagerStatus, TargetNullValue=Manager}" VerticalAlignment="Center" FontSize="14" />
+                        </DockPanel>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Check now" Command="{Binding CheckLoaderCommand}" />
+                            <TextBlock Text="{Binding LoaderStatus}" VerticalAlignment="Center" FontSize="14" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Setup" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Walk through the five setup checks again: game folder, Mod Loader, profiles, save slots and update checks."
+                                   Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Run setup again" Margin="0,0,8,0" Command="{Binding RunSetupCommand}" />
+                            <Button Style="{StaticResource Btn.Quiet}" Content="Open the settings folder" Command="{Binding OpenSettingsFolderCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Section}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Left" Width="64" Height="64" BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Margin="0,0,18,0"
+                                VerticalAlignment="Top">
+                            <c:Emblem Margin="10" />
+                        </Border>
+                        <StackPanel>
+                            <TextBlock Text="{Binding VersionLine}" Style="{StaticResource SectionTitle}" />
+                            <TextBlock Style="{StaticResource T.Muted}" Margin="0,0,0,10"
+                                       Text="Made by Joni for the Road to Vostok modding community. MIT licensed. The interface is set in Lora (SIL Open Font License), the typeface the game itself uses." />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Link}" Content="VostokMods" Margin="0,0,14,0"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://vostokmods.net" />
+                                <Button Style="{StaticResource Btn.Link}" Content="Releases on GitHub"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/RTVmods/RTV-Mod-Manager/releases" />
+                            </StackPanel>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

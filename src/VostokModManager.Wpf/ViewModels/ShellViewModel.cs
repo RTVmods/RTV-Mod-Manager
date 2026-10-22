@@ -74,8 +74,8 @@ public sealed partial class ShellViewModel : ObservableObject
             new("browse", "Browse VostokMods", "Icon.Browse", new PlaceholderViewModel(session, "Browse VostokMods")),
             new("library", "Library", "Icon.Library", new LibraryViewModel(session)),
             new("tools", "Tools", "Icon.Tools", new ToolsViewModel(session)),
-            new("settings", "Settings", "Icon.Settings", new PlaceholderViewModel(session, "Settings")),
         };
+        Nav.Add(new("settings", "Settings", "Icon.Settings", new SettingsViewModel(session, this)));
         _selected = Nav[0];
         _selected.IsSelected = true;
         ManagerVersion = "Manager " + ManagerSession.ManagerInstalledVersion();
