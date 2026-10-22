@@ -51,6 +51,31 @@ public sealed class HasTextConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>Visible when the bound value equals ConverterParameter (one tab's content).</summary>
+public sealed class TabVisibleConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => Equals(value?.ToString(), parameter?.ToString()) ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>Log issue level → its colour.</summary>
+public sealed class IssueBrushConverter : IValueConverter
+{
+    public object? Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => Application.Current.TryFindResource(value switch
+        {
+            VostokModManager.Services.LogIssueLevel.Error => "B.SalmonText",
+            VostokModManager.Services.LogIssueLevel.Warning => "B.AmberText",
+            _ => "B.Text3",
+        });
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 /// <summary>Launch-panel check level → its dot colour.</summary>
 public sealed class CheckLevelBrushConverter : IValueConverter
 {

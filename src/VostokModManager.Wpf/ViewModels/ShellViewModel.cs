@@ -68,7 +68,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new("saves", "Saves", "Icon.Saves", new PlaceholderViewModel(session, "Saves")),
             new("browse", "Browse VostokMods", "Icon.Browse", new PlaceholderViewModel(session, "Browse VostokMods")),
             new("library", "Library", "Icon.Library", new LibraryViewModel(session)),
-            new("tools", "Tools", "Icon.Tools", new PlaceholderViewModel(session, "Tools")),
+            new("tools", "Tools", "Icon.Tools", new ToolsViewModel(session)),
             new("settings", "Settings", "Icon.Settings", new PlaceholderViewModel(session, "Settings")),
         };
         _selected = Nav[0];
