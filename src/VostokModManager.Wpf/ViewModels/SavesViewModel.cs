@@ -7,35 +7,69 @@ using VostokModManager.Services;
 
 namespace VostokModManager.Wpf.ViewModels;
 
-/// <summary>One save slot's card.</summary>
+/// <summary>One save slot's row, laid out like the Save Slots mod's own
+/// in-game panel: "Name (#n)", "Map: … | date", the profile it runs
+/// under, then Continue (or Switch &amp; Load) / New / Rename / Delete.</summary>
 public sealed partial class SlotCard : ObservableObject
 {
     private readonly SavesViewModel _owner;
     private bool _loading;
 
-    public SlotCard(SavesViewModel owner, SaveSlotView slot, IReadOnlyList<string> profileChoices)
+    public SlotCard(SavesViewModel owner, SaveSlotView slot, IReadOnlyList<string> profileChoices, string liveProfile)
     {
         _owner = owner;
         Slot = slot;
-        ProfileChoices = profileChoices;
+        var choices = profileChoices.ToList();
+        // Tied to a profile the manager no longer has: show it, keep it (as the panel does).
+        if (slot.ProfileMissing && slot.Profile.Length > 0) choices.Add(slot.Profile + MissingSuffix);
+        ProfileChoices = choices;
+        LiveProfile = liveProfile;
         _loading = true;
-        TiedProfile = slot.Profile.Length == 0 ? AnyProfile : slot.Profile;
+        TiedProfile = slot.Profile.Length == 0 ? AnyProfile
+            : slot.ProfileMissing ? slot.Profile + MissingSuffix : slot.Profile;
         _loading = false;
     }
 
     public const string AnyProfile = "(any profile)";
+    private const string MissingSuffix = " (missing)";
 
     public SaveSlotView Slot { get; }
     public IReadOnlyList<string> ProfileChoices { get; }
+    public string LiveProfile { get; }
 
     public string SlotLabel => $"SLOT {Slot.Number}";
     public string Title => Slot.Occupied ? Slot.Title : $"Slot {Slot.Number}";
+
+    /// <summary>"Name  (#n)" when the slot has a name, else "Slot n".</summary>
+    public string NameLabel => Slot.DisplayName.Length > 0 ? $"{Slot.DisplayName}  (#{Slot.Number})" : $"Slot {Slot.Number}";
+
+    /// <summary>"Map: X   |   2026-10-22 18:04", or "Empty".</summary>
+    public string Info
+    {
+        get
+        {
+            if (!Slot.Occupied) return "Empty";
+            var text = "Map: " + (Slot.LastMap.Length > 0 ? Slot.LastMap : "?");
+            if (Slot.LastPlayed is { } t) text += $"   |   {t.ToLocalTime():yyyy-MM-dd HH:mm}";
+            return text;
+        }
+    }
+
     public string Where => string.Join(" · ", new[]
     {
         Slot.LastMap,
-        Slot.LastPlayed is { } t ? Ago(t) : "",
+        Slot.LastPlayed is { } t ? Ago(t.ToLocalTime()) : "",
     }.Where(s => s.Length > 0));
     public string RunsUnder => Slot.RunsUnder.Length == 0 ? "Runs with the live profile" : $"{Slot.RunsUnder} profile";
+
+    /// <summary>The slot is tied to a profile other than the live one: its
+    /// launch switches profile first ("Switch &amp; Load" in the panel).</summary>
+    public bool SwitchNeeded => Slot.Occupied && Slot.Profile.Length > 0 && !Slot.ProfileMissing
+        && !string.Equals(Slot.Profile, LiveProfile, StringComparison.OrdinalIgnoreCase);
+    public string ActionLabel => SwitchNeeded ? "Switch & Load" : "Continue";
+    public string ActionTip => SwitchNeeded
+        ? $"Switches to the profile '{Slot.Profile}', then starts the game straight into this slot."
+        : "Starts the game straight into this slot.";
 
     /// <summary>The line about the mods this save needs, and its tone.</summary>
     public string ModCheck => !Slot.Occupied ? ""
@@ -57,7 +91,10 @@ public sealed partial class SlotCard : ObservableObject
     partial void OnTiedProfileChanged(string value)
     {
         if (_loading) return;
+        if (value.EndsWith(MissingSuffix, StringComparison.Ordinal)) return;  // unchanged
         _owner.Session.SetSlotProfile(Slot.Number, value == AnyProfile ? null : value);
+        // Continue ↔ Switch & Load follows the link; rebuild after the picker settles.
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(_owner.Reload));
     }
 
     private static string Ago(DateTime t)
@@ -99,8 +136,12 @@ public sealed partial class SavesViewModel : PageViewModel
         var choices = new List<string> { SlotCard.AnyProfile };
         choices.AddRange(view.ProfileNames);
         Slots.Clear();
-        foreach (var s in view.Slots) Slots.Add(new SlotCard(this, s, choices));
+        foreach (var s in view.Slots) Slots.Add(new SlotCard(this, s, choices, view.LiveProfile));
     }
+
+    /// <summary>The panel's subtitle: "mod profile: X".</summary>
+    public string Subtitle => LiveProfile.Length > 0 ? $"Mod profile: {LiveProfile}" : "No mod profile is active";
+    partial void OnLiveProfileChanged(string value) => OnPropertyChanged(nameof(Subtitle));
 
     [RelayCommand]
     private void Launch(SlotCard card)
