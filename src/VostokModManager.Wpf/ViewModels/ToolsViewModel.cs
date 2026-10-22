@@ -53,6 +53,64 @@ public sealed partial class ToolsViewModel : PageViewModel
         SelectedLog = i >= 0 ? Logs[i] : null;
     }
 
+    // ── Claude's reading of the log (AI edition) ──────────────────────
+
+#if AI_RESOLVER
+    public bool IsAiEdition => true;
+#else
+    public bool IsAiEdition => false;
+#endif
+
+    [ObservableProperty] private bool _diagnosing;
+    [ObservableProperty] private string _diagnosis = "";
+    public ObservableCollection<string> DiagnosisIssues { get; } = new();
+    public ObservableCollection<string> ProposedOrder { get; } = new();
+    private List<ProposedPriorityChange> _proposed = new();
+    [ObservableProperty] private bool _hasProposedOrder;
+
+    [RelayCommand]
+    private async Task AnalyzeWithClaude()
+    {
+#if AI_RESOLVER
+        if (Report == null || Diagnosing) return;
+        Diagnosing = true;
+        Diagnosis = "Claude is reading the log…";
+        DiagnosisIssues.Clear();
+        ProposedOrder.Clear();
+        try
+        {
+            var verdict = await Session.DiagnoseLogAsync(Report.Analysis);
+            if (!verdict.Ok)
+            {
+                Diagnosis = string.IsNullOrEmpty(verdict.Error) ? "Claude couldn't finish." : verdict.Error;
+                return;
+            }
+            Diagnosis = verdict.Summary;
+            foreach (var i in verdict.Issues)
+                DiagnosisIssues.Add($"{i.Title}\n{i.Cause}\nFix: {i.Fix}" + (i.Mods.Count > 0 ? $"\nMods: {string.Join(", ", i.Mods)}" : ""));
+            var rows = Session.ProposedOrderRows(verdict);
+            foreach (var r in rows.Where(r => r.Changes))
+                ProposedOrder.Add($"{r.Name}:  {(r.CurrentPriority?.ToString() ?? "not installed")}  →  {r.ProposedPriority}");
+            _proposed = rows.Where(r => r.Changes).Select(r => new ProposedPriorityChange(r.ModId, r.ProposedPriority)).ToList();
+            HasProposedOrder = _proposed.Count > 0;
+        }
+        finally { Diagnosing = false; }
+#else
+        await Task.CompletedTask;
+#endif
+    }
+
+    [RelayCommand]
+    private void ApplyProposedOrder()
+    {
+        if (_proposed.Count == 0) return;
+        if (Session.ApplyProposedOrder(_proposed) > 0)
+        {
+            HasProposedOrder = false;
+            ProposedOrder.Clear();
+        }
+    }
+
     // ── support package ───────────────────────────────────────────────
 
     [ObservableProperty] private string _supportSummary = "";
