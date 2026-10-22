@@ -146,6 +146,6 @@ No .NET install required for the released `.exe`; it's self-contained.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+GNU GPL v3.0. See [LICENSE](LICENSE).
 
 Built for the Road to Vostok modding community.
