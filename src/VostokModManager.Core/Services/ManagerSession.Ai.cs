@@ -37,14 +37,8 @@ public sealed partial class ManagerSession
             + "`npm install -g @anthropic-ai/claude-code`.";
     }
 
-    /// <summary>The conflict row shows a Resolve button: any file overlap,
-    /// whatever Claude's state (the click explains when it's missing).</summary>
-    public static bool HasResolveButton(ConflictDetector.Conflict c)
-        => c.Type == ConflictDetector.TYPE_FILE_OVERLAP;
-
-    /// <summary>Resolve would run now: a file overlap and Claude available.</summary>
-    public bool IsResolvable(ConflictDetector.Conflict c)
-        => c.Type == ConflictDetector.TYPE_FILE_OVERLAP && Claude.IsAvailable;
+    // HasResolveButton / IsResolvable live with the other conflict helpers
+    // in ManagerSession.Conflicts.cs.
 
     /// <summary>Asks Claude to resolve a file-overlap conflict. Returns the
     /// verdict for the resolution view (which may then ApplyMergeToMod),
