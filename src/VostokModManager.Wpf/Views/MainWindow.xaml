@@ -1,0 +1,178 @@
+<Window x:Class="VostokModManager.Wpf.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Title="Vostok Mod Manager"
+        Width="1440" Height="920" MinWidth="980" MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource B.Ground}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}"
+        Foreground="{StaticResource B.Text}"
+        TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True">
+
+    <!-- Our own dark title bar: the caption area is the strip at the top. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="CaptionButton" TargetType="Button">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text2}" />
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource B.Hover}" />
+                                <Setter Property="Foreground" Value="{StaticResource B.Text}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FFB3392E" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Frame" BorderThickness="0" Background="{StaticResource B.Ground}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="248" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ── title bar ────────────────────────────────────────── -->
+            <Border Grid.ColumnSpan="2" Background="{StaticResource B.Rail}"
+                    BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" />
+            <TextBlock Grid.Column="1" Text="{Binding StatusText}" Style="{StaticResource T.Muted}"
+                       VerticalAlignment="Center" Margin="32,0,160,0" TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource CaptionButton}" Click="OnMinimize" AutomationProperties.Name="Minimize">
+                    <Path Data="{StaticResource Icon.Min}" Style="{StaticResource IconPath}" Width="11" Height="11"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </Button>
+                <Button Style="{StaticResource CaptionButton}" Click="OnMaximize" AutomationProperties.Name="Maximize">
+                    <Path x:Name="MaxIcon" Data="{StaticResource Icon.Max}" Style="{StaticResource IconPath}" Width="11" Height="11"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </Button>
+                <Button Style="{StaticResource CloseButton}" Click="OnClose" AutomationProperties.Name="Close">
+                    <Path Data="{StaticResource Icon.Close}" Style="{StaticResource IconPath}" Width="11" Height="11"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </Button>
+            </StackPanel>
+
+            <!-- ── side menu ────────────────────────────────────────── -->
+            <Border Grid.Row="1" Background="{StaticResource B.Rail}"
+                    BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="20,24,20,20" LastChildFill="False">
+
+                    <!-- wordmark -->
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,0,26">
+                        <Border Width="40" Height="40" BorderBrush="{StaticResource B.Edge}" BorderThickness="1">
+                            <c:Emblem Margin="6" />
+                        </Border>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="ROAD TO VOSTOK" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="MOD MANAGER" FontSize="11" Foreground="{StaticResource B.Text3}"
+                                       Margin="0,2,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- pages -->
+                    <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Nav}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:NavItem}">
+                                <RadioButton Style="{StaticResource Nav.Item}" GroupName="nav"
+                                             IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                             Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                             CommandParameter="{Binding}" Margin="0,0,0,2"
+                                             AutomationProperties.Name="{Binding Title}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Path Data="{Binding IconKey, Converter={StaticResource ResourceKeyToGeometry}}"
+                                              Style="{StaticResource IconPath}"
+                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" Margin="12,0,8,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="13"
+                                                   Foreground="{StaticResource B.Text3}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </RadioButton>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- versions -->
+                    <StackPanel DockPanel.Dock="Bottom" Margin="4,14,0,0">
+                        <TextBlock Text="{Binding ManagerVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" />
+                        <TextBlock Text="{Binding LoaderVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" Margin="0,2,0,0" />
+                    </StackPanel>
+
+                    <!-- launch panel -->
+                    <Border DockPanel.Dock="Bottom" Background="{StaticResource B.Fill}"
+                            BorderBrush="{StaticResource B.Hairline}" BorderThickness="1" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="DEPLOYING" Style="{StaticResource T.Label}" />
+                            <TextBlock Text="{Binding ProfileName}" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding NextLaunchText}" Style="{StaticResource T.Muted}" Margin="0,2,0,0">
+                                <TextBlock.Visibility>
+                                    <Binding Path="NextLaunchText" Converter="{StaticResource EmptyToCollapsed}" />
+                                </TextBlock.Visibility>
+                            </TextBlock>
+                            <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,1,0,0"
+                                    Margin="0,12,0,12" Padding="0,10,0,0">
+                                <ItemsControl ItemsSource="{Binding Checks}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:LaunchCheck}">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                                         Fill="{Binding Level, Converter={StaticResource CheckLevelToBrush}}" />
+                                                <TextBlock Text="{Binding Text}" FontSize="13" Margin="9,0,0,0"
+                                                           Foreground="{StaticResource B.Text2}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Border>
+                            <Button Style="{StaticResource Btn.Primary}" Command="{Binding LaunchCommand}"
+                                    MinHeight="52" FontSize="18" AutomationProperties.Name="Launch the game">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="{StaticResource Icon.Play}" Fill="{StaticResource B.OnPrimary}"
+                                          Stretch="Uniform" Width="13" Height="13" Margin="0,0,10,0" />
+                                    <TextBlock Text="LAUNCH" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+
+            <!-- ── the open page ────────────────────────────────────── -->
+            <ContentControl Grid.Row="1" Grid.Column="1" Content="{Binding Selected.Page}" Focusable="False" />
+        </Grid>
+    </Border>
+</Window>

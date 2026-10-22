@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The new WPF front end, drawn in Road to Vostok's own UI language
+       (Lora, translucent grey panels, hairlines, white selection).
+       Builds as VostokModManagerWpf until it reaches parity with the
+       WinForms front end; at cutover it takes over the shipped names
+       (VostokModManagerAI / VostokModManagerIntegrated), which the
+       self-update matches against. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>VostokModManager.Wpf</RootNamespace>
+    <AssemblyName>VostokModManagerWpf</AssemblyName>
+    <Product>Vostok Mod Manager</Product>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableAI)' == 'true'">
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EnableAI)' != 'true'">
+    <ApplicationIcon>icon-integrated.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VostokModManager.Core\VostokModManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+  </ItemGroup>
+
+  <!-- Lora, the game's UI typeface (SIL Open Font License, see Fonts/OFL.txt). -->
+  <ItemGroup>
+    <Resource Include="Fonts\*.ttf" />
+    <Resource Include="icon.ico" />
+    <Resource Include="icon-integrated.ico" />
+    <None Include="Fonts\OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\publish\wpf-$(VmmEdition)\</PublishDir>
+  </PropertyGroup>
+
+</Project>
