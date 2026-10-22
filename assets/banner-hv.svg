@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" width="1000" height="250" font-family="'Arial Narrow','Helvetica Condensed',sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#191b12"/>
+      <stop offset="100%" stop-color="#0a0c06"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.18" cy="0.5" r="0.45">
+      <stop offset="0%" stop-color="#9a2a1f" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#9a2a1f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" x="0" y="0" width="22" height="22" patternUnits="userSpaceOnUse">
+      <path d="M 22 0 L 0 0 0 22" fill="none" stroke="#3a3f2e" stroke-width="0.5" opacity="0.4"/>
+    </pattern>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="1.2" numOctaves="2" seed="7"/>
+      <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.16 0"/>
+    </filter>
+    <filter id="distress" x="-0.05" y="-0.05" width="1.1" height="1.1">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05 0.16" numOctaves="2" seed="9"/>
+      <feDisplacementMap in="SourceGraphic" scale="4"/>
+    </filter>
+    <symbol id="rust" viewBox="0 0 10 10">
+      <path d="M2 4 Q4 2 6 3 T9 5 Q7 7 5 6 T2 4 Z" fill="#7a3a18" opacity="0.55"/>
+    </symbol>
+  </defs>
+
+  <rect width="1000" height="250" fill="url(#bg)"/>
+  <rect width="1000" height="250" fill="url(#grid)"/>
+  <rect width="1000" height="250" fill="url(#glow)"/>
+
+  <g opacity="0.6">
+    <use href="#rust" x="40"  y="40"  width="32" height="32"/>
+    <use href="#rust" x="930" y="34"  width="40" height="40"/>
+    <use href="#rust" x="50"  y="200" width="28" height="28"/>
+    <use href="#rust" x="920" y="200" width="44" height="44"/>
+    <use href="#rust" x="500" y="20"  width="22" height="22"/>
+    <use href="#rust" x="700" y="220" width="26" height="26"/>
+  </g>
+
+  <rect width="1000" height="250" fill="#000" filter="url(#grain)" opacity="0.45"/>
+
+  <g filter="url(#distress)">
+    <rect x="14" y="14" width="972" height="222" fill="none" stroke="#8a7a48" stroke-width="2"/>
+    <rect x="22" y="22" width="956" height="206" fill="none" stroke="#8a7a48" stroke-width="1" opacity="0.55"/>
+  </g>
+
+  <g stroke="#b88445" stroke-width="3" fill="none">
+    <polyline points="34,56 34,32 58,32"/>
+    <polyline points="966,56 966,32 942,32"/>
+    <polyline points="34,194 34,218 58,218"/>
+    <polyline points="966,194 966,218 942,218"/>
+  </g>
+
+  <text x="500" y="48" text-anchor="middle" font-size="13" font-weight="800" letter-spacing="6" fill="#c8b893" opacity="0.9">FIELD MAИUAL · M-000 · LOADOUT CONTROL</text>
+  <line x1="80" y1="58" x2="920" y2="58" stroke="#8a7a48" stroke-width="0.8" opacity="0.4"/>
+
+  <line x1="80" y1="194" x2="920" y2="194" stroke="#8a7a48" stroke-width="0.8" opacity="0.4"/>
+  <text x="500" y="214" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="5" fill="#7a6e4a" opacity="0.85">RTV MOD · MOD MAИAGEЯ</text>
+
+  <!-- Hannunvaakuna (St. John's Arms) -->
+  <g transform="translate(76 84)">
+    <g transform="scale(1.5625)">
+      <circle r="14.5" fill="#0c0e08" stroke="#3a3f2e" stroke-width="0.7"/>
+      <path d="M -6.9,-4.2 L 6.9,-4.2 A 2.7 2.7 0 1 0 4.2,-6.9 L 4.2,6.9 A 2.7 2.7 0 1 0 6.9,4.2 L -6.9,4.2 A 2.7 2.7 0 1 0 -4.2,6.9 L -4.2,-6.9 A 2.7 2.7 0 1 0 -6.9,-4.2 Z" fill="none" stroke="#1a1109" stroke-width="3.6" stroke-linejoin="round"/>
+      <path d="M -6.9,-4.2 L 6.9,-4.2 A 2.7 2.7 0 1 0 4.2,-6.9 L 4.2,6.9 A 2.7 2.7 0 1 0 6.9,4.2 L -6.9,4.2 A 2.7 2.7 0 1 0 -4.2,6.9 L -4.2,-6.9 A 2.7 2.7 0 1 0 -6.9,-4.2 Z" fill="none" stroke="#9c9a90" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Instrument vignette (left): the manager -->
+  <g transform="translate(135 128)">
+    <circle r="78" fill="#0c0e08" opacity="0.78"/>
+    <circle r="78" fill="none" stroke="#3a3f2e" stroke-width="1.2" opacity="0.7"/>
+    <circle r="38" fill="none" stroke="#8a7a48" stroke-width="1.5" stroke-dasharray="5 6" opacity="0.55"/>
+    <circle r="66" fill="none" stroke="#b88445" stroke-width="1.5" stroke-dasharray="8 9" opacity="0.7"/>
+    <line x1="-78" y1="0" x2="78" y2="0" stroke="#8a7a48" stroke-width="0.6" opacity="0.35"/>
+    <line x1="0" y1="-78" x2="0" y2="78" stroke="#8a7a48" stroke-width="0.6" opacity="0.35"/>
+    <path d="M 0 0 L 0 -66 A 66 66 0 0 1 57 33 Z" fill="#9a2a1f" opacity="0.12"/>
+    <g transform="scale(1.0)">
+    <!-- the manager: a mod list with ticks, one conflict, and the launch button -->
+    <g transform="translate(8 6) scale(0.92)" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="-46" y="-40" width="92" height="76" rx="3" fill="#0c0e08" stroke="#e6dcbc" stroke-width="3"/>
+      <line x1="-46" y1="-27" x2="46" y2="-27" stroke="#e6dcbc" stroke-width="2"/>
+      <circle cx="-39" cy="-33.5" r="1.8" fill="#e6dcbc"/>
+      <circle cx="-33" cy="-33.5" r="1.8" fill="#e6dcbc"/>
+      <rect x="-36" y="-17" width="8" height="8" fill="none" stroke="#e6dcbc" stroke-width="1.8"/>
+      <path d="M -34.6 -13 L -32.6 -10.6 L -28.8 -15.6" fill="none" stroke="#b88445" stroke-width="2"/>
+      <line x1="-22" y1="-13" x2="30" y2="-13" stroke="#e6dcbc" stroke-width="3" opacity="0.85"/>
+      <rect x="-36" y="-4" width="8" height="8" fill="none" stroke="#e6dcbc" stroke-width="1.8"/>
+      <path d="M -34.6 0 L -32.6 2.4 L -28.8 -2.6" fill="none" stroke="#b88445" stroke-width="2"/>
+      <line x1="-22" y1="0" x2="20" y2="0" stroke="#9a2a1f" stroke-width="3" opacity="0.95"/>
+      <rect x="-36" y="9" width="8" height="8" fill="none" stroke="#e6dcbc" stroke-width="1.8"/>
+      <line x1="-22" y1="13" x2="26" y2="13" stroke="#e6dcbc" stroke-width="3" opacity="0.45"/>
+      <rect x="6" y="21" width="32" height="10" rx="1.5" fill="#b88445"/>
+      <path d="M 18.5 23.2 L 18.5 28.8 L 24 26 Z" fill="#0c0e08"/>
+    </g>
+    </g>
+  </g>
+
+  <!-- Title (one line) -->
+  <g transform="translate(240 148)">
+    <text id="title" x="0" y="0" font-size="60" font-weight="900" fill="#c8b893" letter-spacing="3" opacity="0.95">MOD MAИAGEЯ</text>
+    <line x1="0" y1="18" x2="560" y2="18" stroke="#9a2a1f" stroke-width="2" opacity="0.7"/>
+    <text id="sub" x="0" y="42" font-size="15" font-weight="700" fill="#b8aa88" letter-spacing="4">PROFILES · SAVES · CONFLICTS · ROAD TO VOSTOK</text>
+  </g>
+
+  <!-- ЯEDACTED stamp -->
+  <g transform="translate(888 168) rotate(-15)" opacity="0.7">
+    <rect x="-58" y="-16" width="116" height="32" fill="none" stroke="#9a2a1f" stroke-width="2.5"/>
+    <rect x="-52" y="-11" width="104" height="22" fill="none" stroke="#9a2a1f" stroke-width="1"/>
+    <text x="0" y="5" text-anchor="middle" font-size="17" font-weight="900" letter-spacing="5" fill="#9a2a1f">ЯEDACTED</text>
+  </g>
+</svg>
