@@ -866,7 +866,7 @@ public sealed partial class BrowseViewModel : PageViewModel
                 if (result.InstalledModIds.Count == 0) return;  // the pipeline said why
                 entries = LibraryEntriesFor(result.InstalledModIds, source);
                 await AddToOtherProfilesAsync(targets, entries);
-                await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds);
+                await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds, Views.MissingDependenciesWindow.Resolver(() => System.Windows.Application.Current?.MainWindow));
             }
             else
             {
@@ -913,7 +913,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             var result = await Session.InstallModFilesAsync(new[] { copy.Path });
             if (result.InstalledModIds.Count == 0) return;
             await AddToOtherProfilesAsync(targets, entries);
-            await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds);
+            await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds, Views.MissingDependenciesWindow.Resolver(() => System.Windows.Application.Current?.MainWindow));
         }
         else
         {
@@ -1048,7 +1048,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             {
                 await Session.CheckUpdatesAsync();
                 if (result.InstalledModIds.Count > 0)
-                    await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds);
+                    await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds, Views.MissingDependenciesWindow.Resolver(() => System.Windows.Application.Current?.MainWindow));
             }
         }
         catch (Exception ex)

@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
              xmlns:svc="clr-namespace:VostokModManager.Services;assembly=VostokModManager.Core"
+             xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
              AllowDrop="True" Drop="OnFileDrop" DragOver="OnFileDragOver">
     <UserControl.Resources>
         <!-- Column widths shared by the header row and every mod row. -->
@@ -349,8 +350,9 @@
                     </Border>
 
                     <!-- changelog tab -->
-                    <TextBlock Text="{Binding ChangelogText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}"
-                               Visibility="{Binding DetailTab, Converter={StaticResource TabVisible}, ConverterParameter=changelog}" />
+                    <c:MarkdownView Markdown="{Binding ChangelogText}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                    VerticalScrollBarVisibility="Disabled"
+                                    Visibility="{Binding DetailTab, Converter={StaticResource TabVisible}, ConverterParameter=changelog}" />
 
                     <!-- settings tab (MCM editing lands later) -->
                     <TextBlock Style="{StaticResource T.Muted}"
@@ -359,8 +361,8 @@
 
                     <!-- overview tab -->
                     <StackPanel Visibility="{Binding DetailTab, Converter={StaticResource TabVisible}, ConverterParameter=overview}">
-                    <TextBlock Text="{Binding SelectedDescription}" Style="{StaticResource T.Body}" Foreground="{StaticResource B.Text2}"
-                               Margin="0,0,0,4" />
+                    <c:MarkdownView Markdown="{Binding SelectedDescription}" Foreground="{StaticResource B.Text2}"
+                                    VerticalScrollBarVisibility="Disabled" Margin="0,0,0,10" />
                     <Button Style="{StaticResource Btn.Link}" Content="Refresh description" HorizontalAlignment="Left" Margin="0,0,0,16"
                             Command="{Binding RefreshDescriptionCommand}" Visibility="{Binding SelectedIsLinked, Converter={StaticResource VisibleWhen}}" />
 

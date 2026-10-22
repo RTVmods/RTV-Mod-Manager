@@ -597,26 +597,8 @@ public sealed partial class ModsViewModel : PageViewModel
     private async Task ResolveConflict(ConflictView view)
     {
 #if AI_RESOLVER
-        var verdict = await Session.ResolveAsync(view.Conflict);
-        if (verdict == null) return;
-        if (!verdict.Ok)
-        {
-            Session.Prompt.Inform("Claude couldn't resolve it", string.IsNullOrEmpty(verdict.Error) ? verdict.Reason : verdict.Error, PromptKind.Warning);
-            return;
-        }
-        var head = $"{verdict.Result.Replace('_', ' ')}\n\n{verdict.Reason}"
-                   + (verdict.LoadOrder.Count > 0 ? "\n\nSuggested load order: " + string.Join(" → ", verdict.LoadOrder) : "")
-                   + $"\n\n(cost ${verdict.CostUsd:0.00})";
-        if (verdict.Result != "merge_safe" || string.IsNullOrEmpty(verdict.MergedSource) || verdict.Mods.Count == 0)
-        {
-            Session.Prompt.Inform("Claude's verdict", head);
-            return;
-        }
-        var targets = verdict.Mods.Where(m => m.IsArchive).ToList();
-        var pick = Session.Prompt.Choose("Claude's verdict",
-            head + "\n\nWrite the merged file into one of the mods? Its archive is backed up first.",
-            targets.Select(m => $"Into {(string.IsNullOrEmpty(m.DisplayName) ? m.ModId : m.DisplayName)}").ToList());
-        if (pick >= 0) Session.ApplyMergeToMod(verdict, targets[pick]);
+        if (System.Windows.Application.Current?.MainWindow is { } owner)
+            await Views.ResolutionWindow.ShowAsync(owner, Session, view.Conflict);
 #else
         await Task.CompletedTask;
 #endif

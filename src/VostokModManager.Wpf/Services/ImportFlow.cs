@@ -55,7 +55,7 @@ public sealed class ImportFlow
         {
             await _session.CheckUpdatesAsync();
             if (result.InstalledModIds.Count > 0)
-                await _session.CheckAndPromptMissingDepsAsync(result.InstalledModIds);
+                await _session.CheckAndPromptMissingDepsAsync(result.InstalledModIds, MissingDependenciesWindow.Resolver(_owner));
         }
     }
 

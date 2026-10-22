@@ -27,6 +27,16 @@ public partial class MainWindow : Window
             w.ShowDialog();
             return Task.CompletedTask;
         };
+
+        // The Mods page's full windows (conflicts, dependencies, earlier
+        // versions, drift review, the missing-dependency resolver).
+        var session = Shell.Session;
+        var mods = Shell.Mods;
+        mods.ConflictsViewer = focus => ConflictsWindow.Show(this, session, focus);
+        mods.DependencyEditor = e => DependencyPickerWindow.EditAsync(this, session, e);
+        mods.VersionsViewer = e => RevertWindow.ShowAsync(this, session, e);
+        mods.DriftReviewer = items => DriftReviewWindow.Review(this, items, session.ActiveProfile?.Name ?? "");
+        mods.MissingDepsUi = MissingDependenciesWindow.Resolver(() => this);
     }
 
     protected override void OnClosing(CancelEventArgs e)
