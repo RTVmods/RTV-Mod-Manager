@@ -10,7 +10,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Services.WindowPlacement.Restore(this);
         StateChanged += (_, _) => SyncMaximized();
+        Loaded += (_, _) => SyncMaximized();
         DataContextChanged += (_, _) => Hook();
     }
 
@@ -30,6 +32,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         Shell?.Shutdown();
+        Services.WindowPlacement.Save(this);
         base.OnClosing(e);
     }
 
