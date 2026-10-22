@@ -125,8 +125,7 @@ public class ModConfig
     {
         get
         {
-            var appdata = Environment.GetFolderPath(
-                Environment.SpecialFolder.ApplicationData);
+            var appdata = AppPaths.RoamingAppData;
             return string.IsNullOrEmpty(appdata)
                 ? ""
                 : System.IO.Path.Combine(appdata, "Road to Vostok", "mod_config.cfg");

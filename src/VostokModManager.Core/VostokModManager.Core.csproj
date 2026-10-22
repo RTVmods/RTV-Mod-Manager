@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Everything below the UI: mod registry, config, profiles, saves,
+       VostokMods API, update checks, services. No UI types allowed here,
+       so both the WinForms and WPF front ends can share it. -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>VostokModManager</RootNamespace>
+    <AssemblyName>VostokModManager.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VostokModManager.Tests" />
+  </ItemGroup>
+
+  <!-- Built-in mods the manager installs itself (Domain/BuiltInMods.cs).
+       Resources/save-slots.vmz is written by SaveSlots/_pack.py. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\save-slots.vmz" LogicalName="VostokModManager.BuiltIn.save-slots.vmz" />
+  </ItemGroup>
+
+  <!-- AI-edition-only sources. -->
+  <ItemGroup Condition="'$(EnableAI)' != 'true'">
+    <Compile Remove="Ai\**\*.cs" />
+    <Compile Remove="Api\ClaudeCodeRunner.cs" />
+  </ItemGroup>
+
+</Project>

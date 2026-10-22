@@ -37,9 +37,7 @@ public enum CheckpointSlot
 public static class CrashCheckpoint
 {
     private static string Root =>
-        System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "VostokModManager", "checkpoints");
+        System.IO.Path.Combine(AppPaths.ManagerDir, "checkpoints");
 
     public static string DirFor(CheckpointSlot slot) =>
         System.IO.Path.Combine(Root,

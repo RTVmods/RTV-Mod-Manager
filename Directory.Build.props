@@ -1,0 +1,38 @@
+<Project>
+
+  <!-- Shared by every project in the solution (Core, WinForms, Wpf, Tests). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Single version source — reflected at runtime by the About
+         dialog, the update checks and the support package via
+         Assembly.GetName().Version. -->
+    <Version>0.6.14</Version>
+    <Description>Standalone mod manager for Road to Vostok</Description>
+    <Authors>Joni</Authors>
+    <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>
+  </PropertyGroup>
+
+  <!--
+    Two editions, one source tree.
+
+      EnableAI=true   →  AI edition (default). Includes Claude Code
+                         integration for AI-driven conflict resolution.
+      EnableAI=false  →  Integrated edition. Same conflict detection,
+                         no AI resolver, no Claude CLI dependency.
+
+    The AI_RESOLVER compile constant is defined only in the AI build;
+    every AI-aware code path is wrapped in `#if AI_RESOLVER`.
+  -->
+  <PropertyGroup>
+    <EnableAI Condition="'$(EnableAI)' == ''">true</EnableAI>
+    <VmmEdition Condition="'$(EnableAI)' == 'true'">ai</VmmEdition>
+    <VmmEdition Condition="'$(EnableAI)' != 'true'">integrated</VmmEdition>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableAI)' == 'true'">
+    <DefineConstants>$(DefineConstants);AI_RESOLVER</DefineConstants>
+  </PropertyGroup>
+
+</Project>

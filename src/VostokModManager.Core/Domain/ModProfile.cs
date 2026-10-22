@@ -83,9 +83,7 @@ public class ModProfile
 
     /// <summary>Root folder for all profile subfolders.</summary>
     public static string ProfilesDir =>
-        System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "VostokModManager", "profiles");
+        System.IO.Path.Combine(AppPaths.ManagerDir, "profiles");
 
     /// <summary>Sanitises a profile name into a safe filesystem
     /// folder/filename (≤60 chars, ASCII-friendly). The .json or

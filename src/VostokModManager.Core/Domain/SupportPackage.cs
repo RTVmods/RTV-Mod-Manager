@@ -49,8 +49,7 @@ public static class SupportPackage
     {
         get
         {
-            var appdata = Environment.GetFolderPath(
-                Environment.SpecialFolder.ApplicationData);
+            var appdata = AppPaths.RoamingAppData;
             return string.IsNullOrEmpty(appdata)
                 ? ""
                 : System.IO.Path.Combine(appdata, "Road to Vostok");

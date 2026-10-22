@@ -51,7 +51,7 @@ public static class ModLinker
     }
 
     /// <summary>Lowercase letters and digits only.</summary>
-    internal static string Normalize(string? text)
+    public static string Normalize(string? text)
     {
         if (string.IsNullOrEmpty(text)) return "";
         var chars = new char[text.Length];

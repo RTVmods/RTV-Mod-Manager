@@ -100,23 +100,28 @@ Requires the .NET 8 SDK (Windows).
 
 ```sh
 # Integrated edition (default)
-dotnet publish -c Release -p:EnableAI=false   # → publish/integrated/VostokModManagerIntegrated.exe
+dotnet publish src/VostokModManager.WinForms -c Release -p:EnableAI=false   # → publish/integrated/VostokModManagerIntegrated.exe
 
 # AI edition
-dotnet publish -c Release -p:EnableAI=true    # → publish/ai/VostokModManagerAI.exe
+dotnet publish src/VostokModManager.WinForms -c Release -p:EnableAI=true    # → publish/ai/VostokModManagerAI.exe
+
+# Tests (run against a temp sandbox, never your real files)
+dotnet test
 ```
 
-The single version source is `<Version>` in `VostokModManager.csproj`. The `AI_RESOLVER` compile constant is defined only in the AI build; AI-aware code paths are wrapped in `#if AI_RESOLVER`, and the AI-only source files (`Ai/`, `Api/ClaudeCodeRunner.cs`, `Ui/ResolutionDialog.cs`) are excluded from the Integrated compile.
+The single version source is `<Version>` in `Directory.Build.props`, which also defines the two editions. The `AI_RESOLVER` compile constant is defined only in the AI build; AI-aware code paths are wrapped in `#if AI_RESOLVER`, and the AI-only source files (`Ai/`, `Api/ClaudeCodeRunner.cs`, `Ui/ResolutionDialog.cs`) are excluded from the Integrated compile.
+
+To run the manager against a sandbox instead of your real `%APPDATA%`, set `VMM_APPDATA_ROOT` to a folder standing in for `AppData\Roaming` before starting it.
 
 ### Project layout
 
 | Folder | Contents |
 |---|---|
-| `Domain/` | Core logic: registry, archive parsing, conflict detection, profiles, library, packager, backups, checkpoints. |
-| `Api/` | VostokMods client, GitHub release checkers (MML and the manager itself), Claude CLI runner. |
-| `Ai/` | AI conflict resolver (AI edition only). |
-| `Ui/` | Dialogs (profiles, packager, settings, themed message boxes, etc.). |
-| `MainForm.cs` | The main window. |
+| `src/VostokModManager.Core/Domain/` | Core logic: registry, archive parsing, conflict detection, profiles, library, packager, backups, checkpoints. |
+| `src/VostokModManager.Core/Api/` | VostokMods client, GitHub release checkers (MML and the manager itself), Claude CLI runner. |
+| `src/VostokModManager.Core/Ai/` | AI conflict resolver (AI edition only). |
+| `src/VostokModManager.WinForms/` | The current WinForms front end: `MainForm.cs` and the dialogs in `Ui/`. |
+| `tests/VostokModManager.Tests/` | Tests; each runs in a temp-folder sandbox. |
 
 ---
 

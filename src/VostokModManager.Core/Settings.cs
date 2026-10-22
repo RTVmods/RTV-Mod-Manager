@@ -221,17 +221,7 @@ public class Settings
     public bool IsCacheFresh
         => CachedVersions.Count > 0 && CacheAge < TimeSpan.FromHours(1);
 
-    public static string Path
-    {
-        get
-        {
-            var dir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "VostokModManager"
-            );
-            return System.IO.Path.Combine(dir, "settings.json");
-        }
-    }
+    public static string Path => System.IO.Path.Combine(AppPaths.ManagerDir, "settings.json");
 
     public static Settings Load()
     {

@@ -122,7 +122,7 @@ public class ModEntry
     /// surrounding-quote stripping in ModArchive's parser already
     /// handles `"a, b, c"` (whole value quoted) before we see it,
     /// so we only need to handle the array brackets here.</summary>
-    internal static List<string> ParseCsvOrArray(string raw)
+    public static List<string> ParseCsvOrArray(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return new();
         raw = raw.Trim();

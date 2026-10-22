@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- Single-file self-contained release build for the app projects.
+       Lives in .targets (not .props) so it can see each project's
+       OutputType. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(OutputType)' == 'WinExe'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- No .pdb in the publish output. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <!-- Keep the publish folder "just the .exe" (no WebView2 .xml docs). -->
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+</Project>
