@@ -47,6 +47,9 @@
     <DataTemplate DataType="{x:Type vm:ModsViewModel}">
         <v:ModsView />
     </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:ProfilesViewModel}">
+        <v:ProfilesView />
+    </DataTemplate>
     <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
         <v:SettingsView />
     </DataTemplate>

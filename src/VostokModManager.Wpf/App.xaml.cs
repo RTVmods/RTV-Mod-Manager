@@ -18,8 +18,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // A DEBUG screenshot render is not a second manager; let it run alongside.
+        var rendering = Array.IndexOf(e.Args, "--screenshot") >= 0;
         _single = new Mutex(true, @"Local\VostokModManager.SingleInstance", out var first);
-        if (!first)
+        if (!first && !rendering)
         {
             MessageBox.Show("Vostok Mod Manager is already running.", "Vostok Mod Manager",
                 MessageBoxButton.OK, MessageBoxImage.Information);
