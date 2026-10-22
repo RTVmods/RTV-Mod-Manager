@@ -8,6 +8,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 - The launch arrow offers **New game in slot N**: a new run in the first empty slot, tied to the active profile. **Launch game** stays there while the button reads CONTINUE.
 - **The side menu opens on Browse VostokMods**, followed by Mods, Profiles, Saves, Library and Tools. Settings moved out of the list to a cog beside the version lines.
 - A manager running against a sandbox folder (`VMM_APPDATA_ROOT`) no longer counts as a second copy of the real one.
+- A mod description with a link whose text is itself a web address (`[https://…](https://…)`) no longer raises "Something went wrong" when the mod is selected; the link shows normally. Any description the renderer can't lay out now falls back to plain text.
 
 ## 0.7.0 (2026-10-22)
 

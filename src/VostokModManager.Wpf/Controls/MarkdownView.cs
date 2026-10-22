@@ -85,7 +85,14 @@ public class MarkdownView : FlowDocumentScrollViewer
 
     private void Rebuild()
     {
-        var doc = MarkdownDocument.Build(Markdown ?? "", this);
+        FlowDocument doc;
+        try { doc = MarkdownDocument.Build(Markdown ?? "", this); }
+        catch
+        {
+            // Markdown this renderer can't place must never take the page
+            // down: show the text as it is.
+            doc = new FlowDocument(new Paragraph(new Run(Markdown ?? ""))) { PagePadding = new Thickness(0) };
+        }
         doc.SetBinding(FlowDocument.FontFamilyProperty, new Binding(nameof(FontFamily)) { Source = this });
         doc.SetBinding(FlowDocument.FontSizeProperty, new Binding(nameof(FontSize)) { Source = this });
         doc.SetBinding(FlowDocument.ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
@@ -625,9 +632,33 @@ public static class MarkdownDocument
             Cursor = Cursors.Hand,
             ToolTip = url,
         };
-        foreach (var i in content) link.Inlines.Add(i);
+        // Link text that is itself a URL ("[https://…](https://…)") was
+        // auto-linked too; WPF can't nest a Hyperlink, so keep only its text.
+        foreach (var i in content) link.Inlines.Add(Unlinked(i));
         link.Click += (_, _) => OpenUrl(url);
         return link;
+    }
+
+    /// <summary>`inline` with every Hyperlink in it (itself included)
+    /// turned into a plain Span holding the same text.</summary>
+    private static Inline Unlinked(Inline inline)
+    {
+        if (inline is not Span span) return inline;
+        foreach (var child in span.Inlines.ToList())
+        {
+            var plain = Unlinked(child);
+            if (ReferenceEquals(plain, child)) continue;
+            span.Inlines.InsertBefore(child, plain);
+            span.Inlines.Remove(child);
+        }
+        if (span is not Hyperlink) return span;
+        var flat = new Span();
+        foreach (var child in span.Inlines.ToList())
+        {
+            span.Inlines.Remove(child);
+            flat.Inlines.Add(child);
+        }
+        return flat;
     }
 
     private static bool IsSafeUrl(string url)
