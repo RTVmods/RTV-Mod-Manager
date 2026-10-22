@@ -67,7 +67,7 @@ public sealed record NewerVersionCandidate(
 public enum DependencyStatus { Enabled, Disabled, Missing }
 
 /// <summary>One declared dependency and its live state.</summary>
-public sealed record DependencyState(string DepId, bool Required, DependencyStatus Status, string StatusText)
+public sealed record ProfileDependencyState(string DepId, bool Required, DependencyStatus Status, string StatusText)
 {
     public string Icon => Status switch
     {
@@ -78,7 +78,7 @@ public sealed record DependencyState(string DepId, bool Required, DependencyStat
 }
 
 /// <summary>A mod of the active profile that declares dependencies.</summary>
-public sealed record ProfileDependent(ModEntry Mod, string Label, IReadOnlyList<DependencyState> Dependencies);
+public sealed record ProfileDependent(ModEntry Mod, string Label, IReadOnlyList<ProfileDependencyState> Dependencies);
 
 /// <summary>Every mod in the active profile (plus locked ones) that
 /// declares dependencies, with each dependency's state.

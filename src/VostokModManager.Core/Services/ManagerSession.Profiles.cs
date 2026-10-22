@@ -768,13 +768,13 @@ public sealed partial class ManagerSession
             : !string.IsNullOrEmpty(e.ModId) ? e.ModId
             : Path.GetFileName(e.Path);
 
-        DependencyState State(string depId, bool required)
+        ProfileDependencyState State(string depId, bool required)
         {
             if (byId.TryGetValue(depId, out var dep))
                 return dep.IsEnabled
-                    ? new DependencyState(depId, required, DependencyStatus.Enabled, "Installed and enabled")
-                    : new DependencyState(depId, required, DependencyStatus.Disabled, "Installed but currently disabled");
-            return new DependencyState(depId, required, DependencyStatus.Missing, required
+                    ? new ProfileDependencyState(depId, required, DependencyStatus.Enabled, "Installed and enabled")
+                    : new ProfileDependencyState(depId, required, DependencyStatus.Disabled, "Installed but currently disabled");
+            return new ProfileDependencyState(depId, required, DependencyStatus.Missing, required
                 ? "Not installed — required, install or disable the dependent"
                 : "Not installed (optional)");
         }
