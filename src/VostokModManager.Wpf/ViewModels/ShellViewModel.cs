@@ -91,7 +91,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
         session.Changed += OnSessionChanged;
         session.Status += OnStatus;
-        Mods.ImportRequested += files => ImportFilesRequested?.Invoke(files);
+        Imports = new Wpf.Services.ImportFlow(session, () => Application.Current?.MainWindow);
+        Mods.ImportRequested += async files =>
+        {
+            foreach (var f in files) await Imports.RunFileAsync(f);
+        };
     }
 
     public ManagerSession Session { get; }
@@ -102,8 +106,8 @@ public sealed partial class ShellViewModel : ObservableObject
     /// adopting profiles) and returns once it closes.</summary>
     public Func<SetupReason, Task>? ShowSetupAsync { get; set; }
 
-    /// <summary>Dropped modpacks / mod lists for the import flow.</summary>
-    public event Action<IReadOnlyList<string>>? ImportFilesRequested;
+    /// <summary>Bringing mod lists and modpacks into a profile.</summary>
+    public Wpf.Services.ImportFlow Imports { get; }
 
     [ObservableProperty] private NavItem _selected;
 

@@ -1,0 +1,74 @@
+<Window x:Class="VostokModManager.Wpf.Views.ImportPlanWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Width="980" Height="720" MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="IMPORT" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Style="{StaticResource T.Muted}" Margin="0,0,0,14" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="{Binding CloseLabel}" Margin="0,0,8,0" Click="OnClose" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="{Binding RunLabel}" Command="{Binding RunCommand}"
+                            IsEnabled="{Binding CanRun}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource Btn.Quiet}" Content="Select all" Command="{Binding SelectAllCommand}" IsEnabled="{Binding CanRun}" />
+                    <Button Style="{StaticResource Btn.Quiet}" Content="Required only" Command="{Binding SelectRequiredCommand}" IsEnabled="{Binding CanRun}" />
+                    <Button Style="{StaticResource Btn.Quiet}" Content="None" Command="{Binding SelectNoneCommand}" IsEnabled="{Binding CanRun}" />
+                </StackPanel>
+            </DockPanel>
+
+            <Border DockPanel.Dock="Bottom" Style="{StaticResource Panel.Notice}" Margin="0,12,0,0" MaxHeight="150"
+                    Visibility="{Binding HasLog, Converter={StaticResource VisibleWhen}}">
+                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Log}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Style="{StaticResource T.Mono}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <ListBox ItemsSource="{Binding Rows}" AutomationProperties.Name="Import plan">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ImportRowItem}">
+                        <Grid MinHeight="48">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="230" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox IsChecked="{Binding Apply}" IsEnabled="{Binding IsCheckable}" Margin="12,0,0,0"
+                                      AutomationProperties.Name="{Binding Label}" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock>
+                                    <Run Text="{Binding Label, Mode=OneWay}" />
+                                    <Run Text="{Binding OptionalTag, Mode=OneWay}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource B.Text4}" />
+                                </TextBlock>
+                                <TextBlock Text="{Binding Via}" FontSize="12" Foreground="{StaticResource B.Text4}"
+                                           Visibility="{Binding Via, Converter={StaticResource VisibleWhen}}" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="{Binding Version}" FontSize="13" Foreground="{StaticResource B.Text2}" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="3" FontSize="13" Foreground="{StaticResource B.Text2}" VerticalAlignment="Center" TextWrapping="Wrap">
+                                <Run Text="{Binding StatusIcon, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding StatusText, Mode=OneWay}" />
+                            </TextBlock>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+    </Border>
+</Window>
