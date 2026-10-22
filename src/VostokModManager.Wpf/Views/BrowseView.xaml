@@ -1,0 +1,448 @@
+<UserControl x:Class="VostokModManager.Wpf.Views.BrowseView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+             Loaded="OnLoaded" Unloaded="OnUnloaded">
+    <UserControl.Resources>
+        <!-- Browser toolbar glyphs (24-unit strokes, like Templates.xaml's icons). -->
+        <Geometry x:Key="Web.Back">M15,5 L8,12 L15,19</Geometry>
+        <Geometry x:Key="Web.Forward">M9,5 L16,12 L9,19</Geometry>
+        <Geometry x:Key="Web.Reload">M19,12 A7,7 0 1 1 16.9,7 M19,3.5 V7.5 H15</Geometry>
+        <Geometry x:Key="Web.Home">M4,11 L12,4 L20,11 M6.5,9 V20 H17.5 V9</Geometry>
+
+        <!-- The card grid: a ListBox (selection, arrow keys, screen readers)
+             drawn as a wrap of cards, with no scroller of its own so the
+             page's scroller carries the wheel. -->
+        <Style x:Key="CardList" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="KeyboardNavigation.DirectionalNavigation" Value="Contained" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBox">
+                        <ItemsPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Margin" Value="0,0,16,16" />
+                        <Setter Property="Foreground" Value="{StaticResource B.Text}" />
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A tab above the cards. -->
+        <DataTemplate x:Key="TabTemplate" DataType="{x:Type vm:BrowseTab}">
+            <RadioButton Style="{StaticResource Tab.Item}" GroupName="browseTabs"
+                         IsChecked="{Binding IsActive, Mode=OneWay}"
+                         Command="{Binding DataContext.SetTabCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                         CommandParameter="{Binding Key}">
+                <TextBlock>
+                    <Run Text="{Binding Label, Mode=OneWay}" />
+                    <Run Text="{Binding Count, Mode=OneWay}" FontSize="13" Foreground="{StaticResource B.Text4}" />
+                </TextBlock>
+            </RadioButton>
+        </DataTemplate>
+
+        <!-- A mod card. -->
+        <DataTemplate x:Key="ModCardTemplate" DataType="{x:Type vm:ModCard}">
+            <Border x:Name="card" Width="330" Style="{StaticResource Panel.Card}">
+                <StackPanel>
+                    <Border Height="150" Background="{StaticResource B.Raised}" ClipToBounds="True">
+                        <Grid>
+                            <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource T.Label}" Margin="14,0,14,12"
+                                       VerticalAlignment="Bottom" />
+                            <Image Source="{Binding Thumb}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Margin="16,14,16,16">
+                        <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Meta}" Style="{StaticResource T.Muted}" TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,8" />
+                        <TextBlock Text="{Binding Summary}" FontSize="13.5" Foreground="{StaticResource B.Text2}"
+                                   TextWrapping="Wrap" TextTrimming="WordEllipsis" LineHeight="20"
+                                   LineStackingStrategy="BlockLineHeight" Height="40" />
+                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,12,0,0">
+                            <DockPanel>
+                                <Button x:Name="act" DockPanel.Dock="Right" Content="{Binding ActionText}" Style="{StaticResource Btn.Primary}"
+                                        MinHeight="34" FontSize="13.5" Margin="10,0,0,0" MinWidth="88"
+                                        Command="{Binding ActCommand}" IsEnabled="{Binding CanAct}"
+                                        AutomationProperties.HelpText="{Binding Name}" />
+                                <TextBlock x:Name="line" Text="{Binding Line}" FontSize="13" Foreground="{StaticResource B.Text3}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Line}" />
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.Update}">
+                    <Setter TargetName="act" Property="Style" Value="{StaticResource Btn.Chip.Amber}" />
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.AmberText}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.Installed}">
+                    <Setter TargetName="act" Property="Style" Value="{StaticResource Btn.Outline}" />
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.Green}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.OtherProfile}">
+                    <Setter TargetName="act" Property="Style" Value="{StaticResource Btn.Outline}" />
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.Blue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.InLibrary}">
+                    <Setter TargetName="act" Property="Style" Value="{StaticResource Btn.Outline}" />
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.Blue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.NoFile}">
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.Text4}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.Text2}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Error, Converter={StaticResource HasText}}" Value="True">
+                    <Setter TargetName="line" Property="Foreground" Value="{StaticResource B.SalmonText}" />
+                </DataTrigger>
+                <Trigger SourceName="card" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.Edge}" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.EdgeStrong}" />
+                    <Setter TargetName="card" Property="Background" Value="{StaticResource B.Raised}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- A modpack card (the Modpacks tab). -->
+        <DataTemplate x:Key="PackCardTemplate" DataType="{x:Type vm:ModpackCard}">
+            <Border Width="330" Margin="0,0,16,16" Style="{StaticResource Panel.Card}">
+                <StackPanel>
+                    <Border Height="150" Background="{StaticResource B.Raised}" ClipToBounds="True">
+                        <Grid>
+                            <TextBlock Text="MODPACK" Style="{StaticResource T.Label}" Margin="14,0,14,12" VerticalAlignment="Bottom" />
+                            <Image Source="{Binding Thumb}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Margin="16,14,16,16">
+                        <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Meta}" Style="{StaticResource T.Muted}" TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,8" />
+                        <TextBlock Text="{Binding Summary}" FontSize="13.5" Foreground="{StaticResource B.Text2}"
+                                   TextWrapping="Wrap" TextTrimming="WordEllipsis" LineHeight="20"
+                                   LineStackingStrategy="BlockLineHeight" Height="40" />
+                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,12,0,0">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Import…" Style="{StaticResource Btn.Primary}" MinHeight="34"
+                                        FontSize="13.5" MinWidth="88" Command="{Binding ImportCommand}"
+                                        AutomationProperties.HelpText="{Binding Name}" />
+                                <Button Content="Open page" Style="{StaticResource Btn.Link}" HorizontalAlignment="Left"
+                                        VerticalAlignment="Center" Command="{Binding OpenPageCommand}"
+                                        AutomationProperties.HelpText="{Binding Name}" />
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="560" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ═══ cards column ══════════════════════════════════════════ -->
+        <DockPanel Margin="32,26,32,22">
+
+            <!-- header: site, title, search -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom">
+                    <Border Width="280" Height="44" Background="{StaticResource B.Fill}"
+                            BorderBrush="{StaticResource B.EdgeSoft}" BorderThickness="1"
+                            Visibility="{Binding IsWebsiteTab, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}">
+                        <DockPanel Margin="14,0">
+                            <Path DockPanel.Dock="Left" Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}"
+                                  Width="15" Height="15" Stroke="{StaticResource B.Text2}" />
+                            <Grid Margin="10,0,0,0">
+                                <TextBlock Text="Search mods and modpacks" Foreground="{StaticResource B.Text4}"
+                                           VerticalAlignment="Center" IsHitTestVisible="False"
+                                           Visibility="{Binding Query, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged, Delay=150}" Background="Transparent"
+                                         BorderThickness="0" Padding="0" VerticalAlignment="Center"
+                                         AutomationProperties.Name="Search VostokMods" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                    <Button Content="Refresh" Margin="10,0,0,0" MinHeight="44" Padding="18,0" FontSize="15"
+                            Command="{Binding RefreshCommand}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="VOSTOKMODS.NET" Style="{StaticResource T.Label}" />
+                    <TextBlock Text="Browse" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- a network failure -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Warning}" Margin="0,0,0,16"
+                    Visibility="{Binding Error, Converter={StaticResource VisibleWhen}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Try again" Style="{StaticResource Btn.Link}"
+                            Foreground="{StaticResource B.AmberText}" Command="{Binding RefreshCommand}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Error}" Style="{StaticResource T.Body}" FontSize="14"
+                               Foreground="{StaticResource B.AmberText}" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+
+            <!-- featured modpack -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Card}" Margin="0,0,0,16" DataContext="{Binding Featured}"
+                    Visibility="{Binding DataContext.ShowFeatured, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource VisibleWhen}}">
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="196" Height="118" Background="{StaticResource B.Raised}" ClipToBounds="True">
+                        <Grid>
+                            <TextBlock Text="MODPACK" Style="{StaticResource T.Label}" Margin="14,0,14,12" VerticalAlignment="Bottom" />
+                            <Image Source="{Binding Thumb}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Grid>
+                    </Border>
+                    <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,16,18,16">
+                        <Button Content="{Binding InstallMissingText}" Style="{StaticResource Btn.Primary}"
+                                Command="{Binding ImportCommand}" IsEnabled="{Binding CanInstallMissing}" />
+                        <Button Content="New profile from pack" Margin="0,8,0,0" Command="{Binding NewProfileCommand}"
+                                IsEnabled="{Binding IsBusy, Converter={StaticResource EqualsParam}, ConverterParameter=False}" />
+                    </StackPanel>
+                    <StackPanel Margin="20,14,0,14" VerticalAlignment="Center">
+                        <TextBlock Text="FEATURED MODPACK" Style="{StaticResource T.Label}" />
+                        <TextBlock Text="{Binding Name}" FontSize="22" FontWeight="Medium" TextTrimming="CharacterEllipsis" Margin="0,3,0,4"
+                                   ToolTip="{Binding Name}" />
+                        <TextBlock Text="{Binding HaveLine}" Style="{StaticResource T.Muted}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- tabs: All, categories, More, Modpacks, Website -->
+            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1">
+                <DockPanel>
+                    <WrapPanel>
+                        <ItemsControl ItemsSource="{Binding Tabs}" ItemTemplate="{StaticResource TabTemplate}" Focusable="False">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                        <RadioButton x:Name="MoreTab" Style="{StaticResource Tab.Item}" GroupName="browseMore"
+                                     IsChecked="{Binding MoreActive, Mode=OneWay}" Click="OnMoreClick"
+                                     Visibility="{Binding HasMoreTabs, Converter={StaticResource VisibleWhen}}"
+                                     AutomationProperties.Name="More categories">
+                            <TextBlock>
+                                <Run Text="{Binding MoreLabel, Mode=OneWay}" />
+                                <Run Text="▾" FontSize="12" Foreground="{StaticResource B.Text3}" />
+                            </TextBlock>
+                            <RadioButton.ContextMenu>
+                                <ContextMenu ItemsSource="{Binding MoreTabs}" Closed="OnMoreClosed">
+                                    <ContextMenu.ItemContainerStyle>
+                                        <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                            <Setter Property="Header" Value="{Binding Label}" />
+                                            <Setter Property="IsChecked" Value="{Binding IsActive, Mode=OneWay}" />
+                                            <Setter Property="Command"
+                                                    Value="{Binding DataContext.SetTabCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <Setter Property="CommandParameter" Value="{Binding Key}" />
+                                        </Style>
+                                    </ContextMenu.ItemContainerStyle>
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
+                        </RadioButton>
+                        <ItemsControl ItemsSource="{Binding TailTabs}" ItemTemplate="{StaticResource TabTemplate}" Focusable="False">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
+
+            <Grid>
+                <!-- mods -->
+                <ScrollViewer x:Name="ModsScroll" VerticalScrollBarVisibility="Auto" Margin="0,16,0,0"
+                              Visibility="{Binding IsModsTab, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding LoadingText}" Style="{StaticResource T.Muted}" Margin="0,0,0,14"
+                                   Visibility="{Binding IsLoading, Converter={StaticResource VisibleWhen}}" />
+                        <TextBlock Text="{Binding ResultText}" Style="{StaticResource T.Muted}" Margin="0,0,0,14"
+                                   Visibility="{Binding Query, Converter={StaticResource VisibleWhen}}" />
+                        <TextBlock Text="Nothing on VostokMods matches." Style="{StaticResource T.Muted}" Margin="0,0,0,14"
+                                   Visibility="{Binding NothingFound, Converter={StaticResource VisibleWhen}}" />
+                        <ListBox Style="{StaticResource CardList}" ItemsSource="{Binding Cards}" SelectedItem="{Binding Selected}"
+                                 ItemTemplate="{StaticResource ModCardTemplate}" AutomationProperties.Name="Mods on VostokMods" />
+                        <Button Content="{Binding ShowMoreText}" HorizontalAlignment="Left" Margin="0,0,0,8"
+                                Command="{Binding ShowMoreCommand}"
+                                Visibility="{Binding HasMore, Converter={StaticResource VisibleWhen}}" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- modpacks -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,16,0,0"
+                              Visibility="{Binding IsModpacksTab, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel>
+                        <Border Style="{StaticResource Panel.Warning}" Margin="0,0,0,16"
+                                Visibility="{Binding ModpackError, Converter={StaticResource VisibleWhen}}">
+                            <TextBlock Text="{Binding ModpackError}" Style="{StaticResource T.Body}" FontSize="14"
+                                       Foreground="{StaticResource B.AmberText}" />
+                        </Border>
+                        <TextBlock Text="Importing a pack adds its mods, at the versions it lists, to a profile you pick."
+                                   Style="{StaticResource T.Muted}" Margin="0,0,0,14" />
+                        <ItemsControl ItemsSource="{Binding ShownModpacks}" ItemTemplate="{StaticResource PackCardTemplate}" Focusable="False">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- the site itself -->
+                <DockPanel Margin="0,14,0,0" Visibility="{Binding IsWebsiteTab, Converter={StaticResource VisibleWhen}}">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                            <Button Style="{StaticResource Btn.Quiet}" Width="38" MinHeight="38" Padding="0" Click="OnWebBack"
+                                    AutomationProperties.Name="Back" ToolTip="Back">
+                                <Path Data="{StaticResource Web.Back}" Style="{StaticResource IconPath}" Width="15" Height="15" />
+                            </Button>
+                            <Button Style="{StaticResource Btn.Quiet}" Width="38" MinHeight="38" Padding="0" Click="OnWebForward"
+                                    AutomationProperties.Name="Forward" ToolTip="Forward">
+                                <Path Data="{StaticResource Web.Forward}" Style="{StaticResource IconPath}" Width="15" Height="15" />
+                            </Button>
+                            <Button Style="{StaticResource Btn.Quiet}" Width="38" MinHeight="38" Padding="0" Click="OnWebReload"
+                                    AutomationProperties.Name="Reload" ToolTip="Reload">
+                                <Path Data="{StaticResource Web.Reload}" Style="{StaticResource IconPath}" Width="15" Height="15" />
+                            </Button>
+                            <Button Style="{StaticResource Btn.Quiet}" Width="38" MinHeight="38" Padding="0" Click="OnWebHome"
+                                    AutomationProperties.Name="VostokMods home" ToolTip="Explore mods">
+                                <Path Data="{StaticResource Web.Home}" Style="{StaticResource IconPath}" Width="15" Height="15" />
+                            </Button>
+                        </StackPanel>
+                        <Button DockPanel.Dock="Right" Content="{Binding WebInstallText}" Style="{StaticResource Btn.Primary}"
+                                IsEnabled="{Binding WebInstallEnabled}" Command="{Binding WebInstallCommand}" Margin="10,0,0,0" />
+                        <Button DockPanel.Dock="Right" Content="Open in browser" Style="{StaticResource Btn.Quiet}" Margin="10,0,0,0"
+                                Click="OnWebExternal" />
+                        <Border Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeSoft}" BorderThickness="1"
+                                Margin="8,0,0,0" Padding="12,0" Height="38">
+                            <TextBlock Text="{Binding WebAddress}" Style="{StaticResource T.Mono}" TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </Border>
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding WebStatus}" Style="{StaticResource T.Muted}" Margin="0,8,0,0" />
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Warning}" Margin="0,0,0,10"
+                            Visibility="{Binding WebError, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Text="{Binding WebError}" Style="{StaticResource T.Body}" FontSize="14"
+                                   Foreground="{StaticResource B.AmberText}" />
+                    </Border>
+                    <Border x:Name="WebHost" Background="{StaticResource B.Card}" BorderBrush="{StaticResource B.Hairline}"
+                            BorderThickness="1" />
+                </DockPanel>
+            </Grid>
+        </DockPanel>
+
+        <!-- ═══ details panel ═════════════════════════════════════════ -->
+        <Border Grid.Column="1" Width="400" Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.Hairline}"
+                BorderThickness="1,0,0,0" Visibility="{Binding IsModsTab, Converter={StaticResource VisibleWhen}}">
+            <Grid>
+                <TextBlock Text="Pick a mod to see it here." Style="{StaticResource T.Muted}" Margin="28,26,28,24"
+                           Visibility="{Binding Selected, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              Visibility="{Binding Selected, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel Margin="28,26,28,24" DataContext="{Binding Selected}">
+                        <Border Height="194" Background="{StaticResource B.Raised}" ClipToBounds="True"
+                                BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="1">
+                            <Image Source="{Binding Thumb}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                        <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource T.Label}" Margin="0,18,0,4" />
+                        <TextBlock Text="{Binding Name}" Style="{StaticResource T.H2}" />
+                        <TextBlock Text="{Binding DetailMeta}" Style="{StaticResource T.Muted}" Margin="0,6,0,0" />
+                        <TextBlock x:Name="DetailLine" Text="{Binding Line}" FontSize="14" TextWrapping="Wrap" Margin="0,10,0,16">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.Update}">
+                                            <Setter Property="Foreground" Value="{StaticResource B.AmberText}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.Installed}">
+                                            <Setter Property="Foreground" Value="{StaticResource B.Green}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.OtherProfile}">
+                                            <Setter Property="Foreground" Value="{StaticResource B.Blue}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding State}" Value="{x:Static vm:BrowseCardState.InLibrary}">
+                                            <Setter Property="Foreground" Value="{StaticResource B.Blue}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Error, Converter={StaticResource HasText}}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource B.SalmonText}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <WrapPanel Margin="0,0,0,18">
+                            <Button Content="{Binding DetailActionText}" Style="{StaticResource Btn.Primary}" Margin="0,0,8,8"
+                                    MinWidth="110" Command="{Binding ActCommand}" IsEnabled="{Binding CanAct}" />
+                            <Button Content="Open page" Margin="0,0,8,8" Command="{Binding OpenPageCommand}" />
+                        </WrapPanel>
+
+                        <TextBlock Text="INSTALL INTO" Style="{StaticResource T.Label}" Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding DataContext.TicksNote, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                   Style="{StaticResource T.Muted}" Margin="0,0,0,8"
+                                   Visibility="{Binding DataContext.TicksNote, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource VisibleWhen}}" />
+                        <ItemsControl ItemsSource="{Binding DataContext.Ticks, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      Focusable="False" Margin="0,0,0,20">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:ProfileTick}">
+                                    <CheckBox IsChecked="{Binding IsChecked}" Margin="0,0,0,10">
+                                        <TextBlock>
+                                            <Run Text="{Binding Name, Mode=OneWay}" />
+                                            <Run Text="{Binding Note, Mode=OneWay}" FontSize="12.5" Foreground="{StaticResource B.Text4}" />
+                                        </TextBlock>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Text="ABOUT" Style="{StaticResource T.Label}" Margin="0,0,0,8" />
+                        <TextBlock Text="Reading the description…" Style="{StaticResource T.Muted}"
+                                   Visibility="{Binding DetailLoading, Converter={StaticResource VisibleWhen}}" />
+                        <TextBlock Text="{Binding Description}" Style="{StaticResource T.Body}" FontSize="14" LineHeight="22"
+                                   Foreground="{StaticResource B.Text2}" />
+                        <TextBlock Text="{Binding Stats}" Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text4}"
+                                   Margin="0,16,0,0" Visibility="{Binding Stats, Converter={StaticResource VisibleWhen}}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
