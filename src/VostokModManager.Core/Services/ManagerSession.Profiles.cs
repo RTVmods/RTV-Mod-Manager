@@ -69,6 +69,7 @@ public sealed partial class ManagerSession
         {
             if (string.IsNullOrEmpty(pm.ModId) || string.IsNullOrEmpty(pm.Version)) continue;
             if (protectedIds.Contains(pm.ModId, StringComparer.OrdinalIgnoreCase)) continue;
+            if (Settings.SaveSlotsBuiltIn && IsReplacedSlotMod(pm.ModId)) continue;  // retired, never "updated"
             // Same mod_id is not enough: an abandoned mod and its
             // successor can share an id (ModLineage has the example),
             // so only a release of the same lineage counts as newer.

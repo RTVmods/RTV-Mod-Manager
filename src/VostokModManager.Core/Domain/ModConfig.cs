@@ -221,6 +221,30 @@ public class ModConfig
             pr.Remove(key);
     }
 
+    /// <summary>Drops every entry for `modId`, at any version, from every
+    /// profile's enabled / priority sections and from [mod_sources].
+    /// Used when a mod is retired for good (another save-slot mod once
+    /// the built-in save slots replace it). Returns how many entries went.</summary>
+    public int RemoveModEverywhere(string modId)
+    {
+        if (string.IsNullOrEmpty(modId)) return 0;
+        var removed = 0;
+        foreach (var sec in _sections)
+        {
+            var isProfile = sec.Name.StartsWith("profile.", StringComparison.Ordinal)
+                && (sec.Name.EndsWith(".enabled", StringComparison.Ordinal)
+                    || sec.Name.EndsWith(".priority", StringComparison.Ordinal));
+            if (!isProfile && sec.Name != ModSourcesSection) continue;
+            foreach (var key in sec.Entries.Select(e => e.Key).ToList())
+            {
+                SplitKey(key, out var id, out _);
+                if (!string.Equals(id, modId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (sec.Remove(key)) removed++;
+            }
+        }
+        return removed;
+    }
+
     /// <summary>Wipes both `[profile.<name>.enabled]` and
     /// `[profile.<name>.priority]` sections for the given profile.
     /// Used by ProfileSwitcher to make cfg deterministic from

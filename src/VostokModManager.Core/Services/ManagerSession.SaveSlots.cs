@@ -449,15 +449,88 @@ public sealed partial class ManagerSession
             try { p.SaveMetadataOnly(); changed = true; } catch { /* left as is */ }
         }
         if (changed) ReloadProfiles();
-        if (Settings.SaveSlotsOtherModsAsked) return;
+        RetireOtherSlotMods(everywhere: true);
+    }
 
-        var others = SaveSlots.OtherSlotModIds;
-        var hits = profiles.Where(p => !string.IsNullOrEmpty(p.FolderPath)
-            && p.Mods.Any(m => m.IsEnabled && others.Any(o =>
-                string.Equals(m.ModId, o, StringComparison.OrdinalIgnoreCase)))).ToList();
-        Settings.SaveSlotsOtherModsAsked = true;
-        try { Settings.Save(); } catch { /* asked again next start */ }
-        if (hits.Count > 0) TurnOffOtherSlotMods(hits, ask: true, slotLaunch: false);
+    /// <summary>True for a save-slot mod the built-in save slots replace
+    /// (Multi Save Slots and Multi Save Slots Reborn, which also share
+    /// the mod id `multi-save-slots`).</summary>
+    public static bool IsReplacedSlotMod(string? modId)
+        => !string.IsNullOrEmpty(modId) && SaveSlots.OtherSlotModIds.Any(o =>
+            string.Equals(modId, o, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>While the built-in save slots are on, the other save-slot
+    /// mods are retired rather than just switched off: they manage the
+    /// same slot folder, and two unrelated mods sharing one id made a
+    /// profile switch offer one as an "update" of the other. Their live
+    /// archives (mods\ and mods\Disabled\) go to the Recycle Bin and their
+    /// mod_config.cfg entries go in every profile. With `everywhere` (startup,
+    /// and turning the feature on) the Library copies are recycled and every
+    /// saved profile's list drops them too; otherwise only the active
+    /// profile's list is touched. Returns how many things were removed.</summary>
+    internal int RetireOtherSlotMods(bool everywhere)
+    {
+        if (!Settings.SaveSlotsBuiltIn || BuiltInMods.SaveSlotsArchive == null) return 0;
+        var removed = new List<string>();
+        static string Label(string name, string id, string version)
+            => $"{(string.IsNullOrEmpty(name) ? id : name)} {version}".Trim();
+
+        foreach (var e in Registry.Entries.Where(e => IsReplacedSlotMod(e.ModId)).ToList())
+        {
+            try
+            {
+                RecycleModPath(e.Path);
+                removed.Add($"{Label(e.DisplayName, e.ModId, e.Version)} — mods folder");
+            }
+            catch { /* locked by the game; tried again on the next scan */ }
+        }
+
+        var cfgRemoved = 0;
+        if (!Config.LoadFailed)
+            foreach (var id in SaveSlots.OtherSlotModIds) cfgRemoved += Config.RemoveModEverywhere(id);
+        if (cfgRemoved > 0)
+        {
+            try { Config.Save(); } catch { /* retried on the next scan */ }
+        }
+
+        IEnumerable<ModProfile> profiles;
+        if (everywhere)
+        {
+            try
+            {
+                foreach (var le in ModLibrary.List(ModsDir).Where(l => IsReplacedSlotMod(l.ModId)))
+                {
+                    try
+                    {
+                        RecycleModPath(le.Path);
+                        removed.Add($"{Label(le.DisplayName, le.ModId, le.Version)} — Library");
+                    }
+                    catch { /* left for the next start */ }
+                }
+            }
+            catch { /* no Library yet */ }
+            try { profiles = ModProfile.LoadAll(); }
+            catch { profiles = Array.Empty<ModProfile>(); }
+        }
+        else
+        {
+            profiles = ActiveProfile != null ? new[] { ActiveProfile } : Array.Empty<ModProfile>();
+        }
+        var profilesTouched = false;
+        foreach (var p in profiles)
+        {
+            if (string.IsNullOrEmpty(p.FolderPath)) continue;
+            if (p.Mods.RemoveAll(m => IsReplacedSlotMod(m.ModId)) == 0) continue;
+            p.UpdatedAt = DateTime.UtcNow;
+            try { p.SaveMetadataOnly(); profilesTouched = true; removed.Add($"'{p.Name}' profile"); }
+            catch { /* left as is */ }
+        }
+        if (profilesTouched && everywhere) ReloadProfiles();
+
+        if (removed.Count > 0)
+            Say(StatusArea.Mods, "Removed the save-slot mods the built-in save slots replace: "
+                + string.Join(", ", removed) + ".");
+        return removed.Count + cfgRemoved;
     }
 
     /// <summary>Turns other save-slot mods off in `profiles` (after asking

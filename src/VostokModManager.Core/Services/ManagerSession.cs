@@ -140,6 +140,9 @@ public sealed partial class ManagerSession
         EnsureBuiltIns();
         RecordDownloadedSources();
         var ok = Registry.Scan(ModsDir, Config);
+        // A Multi Save Slots archive dropped in later is retired before
+        // orphan adoption could put it back into the profile.
+        if (RetireOtherSlotMods(everywhere: false) > 0) Registry.Scan(ModsDir, Config);
         AdoptLoaderActiveProfile();
         AutoAdoptOrphansIntoActiveProfile();
         FollowLiveVersions();

@@ -215,28 +215,39 @@ public class SaveSlotsTests
     }
 
     [Fact]
-    public void Startup_offers_once_to_turn_other_slot_mods_off_in_saved_profiles()
+    public void Built_in_save_slots_retire_the_save_slot_mods_they_replace_everywhere()
     {
         using var sb = new Sandbox();
-        sb.WriteCfg("[settings]\n\nactive_profile=\"Alpha\"\n\n[profile.Alpha.enabled]\n\nmulti-save-slots@1.0=true\n");
-        sb.AddMod("multi-save-slots", "1.0");
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Alpha\"\n\n"
+            + "[profile.Alpha.enabled]\n\nmulti-save-slots@1.1.0=false\nkeep@1.0=true\n\n"
+            + "[profile.Beta.enabled]\n\nmulti-save-slots@1.1.16=true\n\n"
+            + "[profile.Beta.priority]\n\nmulti-save-slots@1.1.16=6\n");
+        // Two different mods sharing one id: Reborn 1.1.0 live, the original 1.4 in the Library.
+        sb.AddMod("multi-save-slots", "1.1.0", "Multi Save Slots Reborn");
+        sb.AddMod("multi-save-slots", "1.1.0", "Multi Save Slots Reborn", inDisabledFolder: true, fileName: "old.vmz");
+        sb.AddMod("multi-save-slots", "1.4", "Multi Save Slots", dir: ModLibrary.LibraryDir(sb.ModsDir),
+            fileName: "multi-save-slots__v1.4.vmz");
+        sb.AddMod("keep", "1.0");
         var prompt = new ScriptedPrompt();
         var session = LaunchKit.Open(sb, prompt, new RecordingLauncher(), saveSlots: true, activeProfile: "Alpha",
-            profiles: new[] { Profile("Alpha", "multi-save-slots"), Profile("Beta", "multi-save-slots") });
-        session.Refresh();
+            profiles: new[] { Profile("Alpha", "multi-save-slots", "keep"), Profile("Beta", "multi-save-slots") });
+        var recycled = new List<string>();
+        session.RecycleOverride = p => { recycled.Add(p); File.Delete(p); };
 
-        session.SetUpBuiltInSaveSlots();
+        session.Refresh();               // a scan retires the live archives and the cfg rows
+        session.SetUpBuiltInSaveSlots(); // startup also clears the Library and every saved profile
 
-        Assert.Contains("confirm:Save slots", prompt.Asked);
-        Assert.True(session.Settings.SaveSlotsOtherModsAsked);
-        Assert.All(ModProfile.LoadAll(), p =>
-            Assert.False(p.Mods.Single(m => m.ModId == "multi-save-slots").IsEnabled));
-        Assert.False(sb.LoadCfg().IsEnabled("multi-save-slots", "1.0"));
-
-        // Asked once only.
-        prompt.Asked.Clear();
-        session.SetUpBuiltInSaveSlots();
-        Assert.Empty(prompt.Asked);
+        Assert.Empty(Directory.GetFiles(sb.ModsDir, "*.vmz", SearchOption.AllDirectories)
+            .Where(f => Path.GetFileName(f).StartsWith("multi-save-slots", StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(f) == "old.vmz"));
+        Assert.Equal(3, recycled.Count);
+        Assert.DoesNotContain(session.Registry.Entries, e => e.ModId == "multi-save-slots");
+        var cfg = sb.LoadCfg();
+        Assert.Empty(cfg.ProfileEntries("Beta"));
+        Assert.True(cfg.HasEntry("keep", "1.0"));
+        Assert.All(ModProfile.LoadAll(), p => Assert.DoesNotContain(p.Mods, m => m.ModId == "multi-save-slots"));
+        Assert.Contains(ModProfile.LoadAll().Single(p => p.Name == "Alpha").Mods, m => m.ModId == "keep");
+        Assert.DoesNotContain("confirm:Save slots", prompt.Asked);  // no question: they're replaced
     }
 
     [Fact]

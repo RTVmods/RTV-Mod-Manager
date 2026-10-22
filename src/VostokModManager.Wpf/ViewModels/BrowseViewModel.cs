@@ -696,7 +696,17 @@ public sealed partial class BrowseViewModel : PageViewModel
             var latest = LatestFor(c, e);
             if (latest.Length > 0) c.Version = latest;
 
-            if (e != null)
+            // Multi Save Slots (and Reborn) are what the built-in save slots
+            // replace; installing one would only be retired again.
+            if (Session.Settings.SaveSlotsBuiltIn
+                && (ManagerSession.IsReplacedSlotMod(c.Slug)
+                    || c.Mod.Name.Contains("Multi Save Slots", StringComparison.OrdinalIgnoreCase)))
+            {
+                c.State = BrowseCardState.NoFile;
+                c.StateText = "Replaced by the built-in save slots";
+                c.ActionText = "Built in";
+            }
+            else if (e != null)
             {
                 if (Session.IsOutdated(e))
                 {

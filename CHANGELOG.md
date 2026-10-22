@@ -12,6 +12,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 - **Browse VostokMods**: the site's catalogue inside the manager, with each card showing its state against your setup, **Install into** ticks for every profile, modpacks with **Install the missing mods**, and the real site in a Website tab.
 - **Setup**: on first run a setup window walks through five checks (game folder, Mod Loader, mods and profiles, save slots, VostokMods links); Settings → Run setup again reopens it.
 - **Tools**: log analysis, the Mod Packager and the support package in one place. In the AI edition, **Analyze with Claude** reads the game's log and proposes a load order.
+- **Multi Save Slots and Multi Save Slots Reborn are retired while the built-in save slots are on**, instead of only being switched off: their archives (mods folder, Disabled, Library) go to the Recycle Bin, their `mod_config.cfg` rows and profile entries are removed, imports skip them and Browse shows them as replaced. The two share the mod id `multi-save-slots`, which made a profile switch offer one as a "newer version" of the other.
 - Only one manager runs at a time, the window remembers its size and position, and an unexpected error is written to `crash.log` instead of closing the manager.
 
 ## 0.6.14 (2026-10-19)

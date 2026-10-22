@@ -382,6 +382,10 @@ public sealed partial class ManagerSession
         }
 
         var flat = import.Flatten();
+        // A pack that lists Multi Save Slots doesn't bring it back while
+        // the built-in save slots replace it.
+        if (Settings.SaveSlotsBuiltIn && BuiltInMods.SaveSlotsArchive != null)
+            flat.RemoveAll(fe => IsReplacedSlotMod(fe.Entry.ModId));
         // Patch missing sources in place; the rest reads the augmented values.
         foreach (var fe in flat)
         {
