@@ -1,0 +1,82 @@
+<Window x:Class="VostokModManager.Wpf.Views.DependencyPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
+        Title="Required dependencies"
+        Width="700" Height="760" MinWidth="560" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="REQUIRED DEPENDENCIES" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding ModLabel}" Style="{StaticResource T.H2}" Margin="0,4,0,10" />
+            <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Notice}" Margin="0,0,0,12">
+                <TextBlock c:MarkdownView.InlineText="{Binding Header}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
+                           Foreground="{StaticResource B.Text2}" />
+            </Border>
+            <TextBlock DockPanel.Dock="Top" c:MarkdownView.InlineText="{Binding PromptText}" Style="{StaticResource T.Muted}" Margin="0,0,0,6" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding OptionalNote}" Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text3}"
+                       Margin="0,0,0,6" Visibility="{Binding HasOptionalNote, Converter={StaticResource VisibleWhen}}" />
+
+            <!-- filter -->
+            <Grid DockPanel.Dock="Top" Margin="0,8,0,10">
+                <TextBox x:Name="FilterBox" Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" Padding="16,5,5,5"
+                         AutomationProperties.Name="Filter mods" />
+                <Path Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}" Width="15" Height="15"
+                      Stroke="{StaticResource B.Text3}" HorizontalAlignment="Left" Margin="11,0,0,0" IsHitTestVisible="False" />
+                <TextBlock Text="Filter by id or name" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center"
+                           Margin="35,0,0,0" IsHitTestVisible="False"
+                           Visibility="{Binding Text, ElementName=FilterBox, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+            </Grid>
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Cancel" MinWidth="96" Margin="0,0,8,0" Click="OnCancel" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="Save to mod.txt" MinWidth="120" Click="OnSave"
+                            IsEnabled="{Binding IsSaving, Converter={StaticResource EqualsParam}, ConverterParameter=False}" />
+                </StackPanel>
+                <Button Style="{StaticResource Btn.Quiet}" Content="Clear all" Command="{Binding ClearAllCommand}" HorizontalAlignment="Left" />
+            </DockPanel>
+
+            <!-- add by id -->
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                <TextBlock DockPanel.Dock="Left" Text="ADD BY MOD ID" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <Button DockPanel.Dock="Right" Content="Add" MinWidth="80" MinHeight="36" Margin="8,0,0,0" Command="{Binding AddCommand}" />
+                <Grid>
+                    <TextBox x:Name="AddBox" Text="{Binding NewId, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}"
+                             FontSize="13" Padding="5,5" KeyDown="OnAddKeyDown" AutomationProperties.Name="Mod id to add" />
+                    <TextBlock Text="mod_id_not_installed_yet" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                               Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" Margin="13,0,0,0" IsHitTestVisible="False"
+                               Visibility="{Binding Text, ElementName=AddBox, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                </Grid>
+            </DockPanel>
+
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding CountText}" Style="{StaticResource T.Muted}" Margin="0,8,0,0" />
+
+            <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,1,0,1">
+                <ListBox ItemsSource="{Binding ItemsView}" AutomationProperties.Name="Mods">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:DependencyChoiceItem}">
+                            <CheckBox IsChecked="{Binding IsChecked}" Margin="12,0,8,0" MinHeight="40"
+                                      AutomationProperties.Name="{Binding ModId}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding ModId}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}" FontSize="13" Foreground="{StaticResource B.Text3}"
+                                               VerticalAlignment="Center" Margin="12,0,0,0" />
+                                    <TextBlock Text="{Binding State}" FontSize="12" FontStyle="Italic" VerticalAlignment="Center" Margin="12,0,0,0"
+                                               Foreground="{Binding StateBrushKey, Converter={StaticResource ResourceKey}}" />
+                                </StackPanel>
+                            </CheckBox>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </DockPanel>
+    </Border>
+</Window>

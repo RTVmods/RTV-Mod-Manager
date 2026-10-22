@@ -1,0 +1,61 @@
+<Window x:Class="VostokModManager.Wpf.Views.DriftReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svc="clr-namespace:VostokModManager.Services;assembly=VostokModManager.Core"
+        Title="Drift"
+        Width="820" Height="600" MinWidth="620" MinHeight="380"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="DRIFT · LIVE STATE VS PROFILE" Style="{StaticResource T.Label}" Foreground="{StaticResource B.AmberText}" />
+            <TextBlock DockPanel.Dock="Top" x:Name="TitleText" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" x:Name="Intro" Style="{StaticResource T.Muted}" Margin="0,0,0,16" />
+
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                <Button Content="Cancel" MinWidth="96" Margin="0,0,8,0" Click="OnCancel" />
+                <Button Style="{StaticResource Btn.Primary}" Content="Save to profile" MinWidth="120" IsDefault="True" Click="OnSave" />
+            </StackPanel>
+
+            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="30">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="260" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="WHAT DRIFTED" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <ItemsControl x:Name="Rows" Focusable="False" AutomationProperties.Name="Drifted mods">
+                <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                            <ItemsPresenter />
+                        </ScrollViewer>
+                    </ControlTemplate>
+                </ItemsControl.Template>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type svc:DriftItem}">
+                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="260" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding DisplayName}" FontSize="14" TextWrapping="Wrap" Margin="0,0,14,0"
+                                           ToolTip="{Binding ModId}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding Description}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                           TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DockPanel>
+    </Border>
+</Window>

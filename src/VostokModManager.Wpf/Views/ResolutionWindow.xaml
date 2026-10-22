@@ -1,0 +1,136 @@
+<!-- AI edition only. The XAML compiles in both editions (a .xaml page
+     can't be #if'd), but only the AI build's code-behind gives it a
+     view-model and an entry point; bindings here are late-bound so they
+     name no AI-only type. -->
+<Window x:Class="VostokModManager.Wpf.Views.ResolutionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
+        Title="Conflict resolution"
+        Width="1000" Height="760" MinWidth="720" MinHeight="460"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="AI RESOLVE · CLAUDE CODE" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" c:MarkdownView.InlineText="{Binding Title}" Style="{StaticResource T.H2}" FontSize="22" Margin="0,4,0,4" />
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Margin="0,0,0,16">
+                <Run Text="Mods: " Foreground="{StaticResource B.Text3}" /><Run Text="{Binding ModsText, Mode=OneWay}" />
+            </TextBlock>
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Primary}" Content="Close" MinWidth="96" Click="OnClose" />
+                <TextBlock Text="{Binding Note}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="0,0,16,0" />
+            </DockPanel>
+
+            <!-- Claude's raw output, for when the verdict needs checking -->
+            <Expander DockPanel.Dock="Bottom" Margin="0,12,0,0" IsExpanded="{Binding RawExpanded}"
+                      Visibility="{Binding HasRaw, Converter={StaticResource VisibleWhen}}">
+                <Expander.Header>
+                    <TextBlock Text="Claude's raw output" />
+                </Expander.Header>
+                <DockPanel>
+                    <Button DockPanel.Dock="Top" HorizontalAlignment="Left" Style="{StaticResource Btn.Quiet}" Content="Copy output"
+                            Command="{Binding CopyRawCommand}" Margin="0,0,0,6" />
+                    <TextBox Style="{StaticResource TextBox.Code}" Text="{Binding RawText, Mode=OneWay}" Height="200"
+                             AutomationProperties.Name="Claude's raw output" />
+                </DockPanel>
+            </Expander>
+
+            <Grid>
+                <!-- working -->
+                <StackPanel VerticalAlignment="Top" Visibility="{Binding IsWorking, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock Text="{Binding Intro}" Style="{StaticResource T.Body}" Foreground="{StaticResource B.Text2}" Margin="0,0,0,22" />
+                    <Border Style="{StaticResource Panel.Notice}" Padding="18,14">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding ElapsedText}" Style="{StaticResource T.Mono}" FontSize="14"
+                                       Foreground="{StaticResource B.Text}" VerticalAlignment="Center" />
+                            <StackPanel>
+                                <TextBlock Text="Asking Claude Code…" Style="{StaticResource T.Body}" FontWeight="SemiBold" />
+                                <TextBlock Text="This usually takes a minute or two. Closing the window drops the answer; nothing on disk changes."
+                                           Style="{StaticResource T.Muted}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- didn't run (busy, Claude missing, unsupported type) -->
+                <Border VerticalAlignment="Top" Style="{StaticResource Panel.Warning}"
+                        Visibility="{Binding NotRun, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel>
+                        <TextBlock Text="RESOLVE DIDN'T RUN" Style="{StaticResource T.Label}" Foreground="{StaticResource B.AmberText}" Margin="0,0,0,4" />
+                        <TextBlock Text="{Binding NotRunText}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
+                                   Foreground="{StaticResource B.AmberText}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- the verdict -->
+                <DockPanel Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
+                    <TextBlock DockPanel.Dock="Top" Text="{Binding VerdictText}" FontSize="24" FontWeight="Medium"
+                               Foreground="{Binding VerdictBrushKey, Converter={StaticResource ResourceKey}}" />
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Margin="0,2,0,10"
+                               Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}}">
+                        <Run Text="{Binding VerdictWord, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" FontSize="12" /><Run Text="   " /><Run Text="{Binding CostText, Mode=OneWay}" />
+                    </TextBlock>
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Conflict}" Margin="0,10,0,12"
+                            Visibility="{Binding Failed, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Text="{Binding ErrorText}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
+                                   Foreground="{StaticResource B.SalmonText}" />
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" Text="{Binding ReasonText}" Style="{StaticResource T.Body}"
+                               Foreground="{StaticResource B.Text2}" Margin="0,0,0,16"
+                               Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}}" />
+
+                    <!-- suggested load order -->
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16"
+                                Visibility="{Binding HasLoadOrder, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Text="SUGGESTED LOAD ORDER · EARLIER FIRST" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                        <Border Style="{StaticResource Panel.Notice}">
+                            <ItemsControl ItemsSource="{Binding LoadOrder}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Style="{StaticResource T.Mono}" FontSize="13" Margin="0,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- merged source -->
+                    <DockPanel Visibility="{Binding HasMerge, Converter={StaticResource VisibleWhen}}">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Quiet}" Content="Copy source"
+                                    Command="{Binding CopyMergedCommand}" />
+                            <TextBlock Text="MERGED SOURCE · REVIEW IT, THEN APPLY IT TO A MOD OR COPY IT OUT" Style="{StaticResource T.Label}"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Targets}" Focusable="False" Margin="0,0,0,8">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding Label}" Margin="0,0,8,6" ToolTip="{Binding Tooltip}"
+                                            Command="{Binding DataContext.ApplyCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding Applied, Converter={StaticResource EqualsParam}, ConverterParameter=False}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Margin="0,0,0,8"
+                                   Text="None of these mods is a .vmz archive, so the merge can't be applied for you: copy the source into the mod by hand."
+                                   Visibility="{Binding NoArchiveTargets, Converter={StaticResource VisibleWhen}}" />
+                        <TextBox Style="{StaticResource TextBox.Code}" Text="{Binding MergedSource, Mode=OneWay}" MinHeight="160"
+                                 AutomationProperties.Name="Merged source" />
+                    </DockPanel>
+                </DockPanel>
+            </Grid>
+        </DockPanel>
+    </Border>
+</Window>

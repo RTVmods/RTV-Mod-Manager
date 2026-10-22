@@ -1,0 +1,139 @@
+<Window x:Class="VostokModManager.Wpf.Views.ConflictsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
+        Title="Conflicts"
+        Width="1180" Height="780" MinWidth="860" MinHeight="460"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <!-- One column layout for the header and the rows. -->
+        <GridLength x:Key="Col.Mods">250</GridLength>
+        <GridLength x:Key="Col.Wins">230</GridLength>
+        <GridLength x:Key="Col.Actions">190</GridLength>
+    </Window.Resources>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="CONFLICTS" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="What the enabled mods fight over" Style="{StaticResource T.H2}" Margin="0,4,0,6" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+
+            <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Notice}" Margin="0,0,0,14"
+                    Visibility="{Binding HasFocus, Converter={StaticResource VisibleWhen}}">
+                <DockPanel>
+                    <CheckBox DockPanel.Dock="Right" Content="{Binding FocusToggleText}" IsChecked="{Binding OnlyFocused}"
+                              FontSize="13" Margin="16,0,0,0" />
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="3" Height="16" Background="{StaticResource B.Amber}" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding FocusNote}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Details" Margin="0,0,8,0" MinWidth="96" Command="{Binding DetailsCommand}"
+                            IsEnabled="{Binding HasSelection}" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="Close" MinWidth="96" Click="OnClose" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource Btn.Quiet}" Content="Scan again" Command="{Binding RescanCommand}"
+                            ToolTip="Re-read the mods folder and detect conflicts again." />
+                    <TextBlock Text="Double-click a conflict for the per-method / per-file detail." Style="{StaticResource T.Muted}"
+                               Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- column header -->
+            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="30">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="{StaticResource Col.Mods}" />
+                        <ColumnDefinition Width="{StaticResource Col.Wins}" />
+                        <ColumnDefinition Width="{StaticResource Col.Actions}" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="WHAT" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="16,0,0,0" />
+                    <TextBlock Grid.Column="1" Text="MODS · LOAD ORDER" Style="{StaticResource T.Label}" VerticalAlignment="Center"
+                               ToolTip="Earliest-loading first: the last mod listed loads last." />
+                    <TextBlock Grid.Column="2" Text="WINS" Style="{StaticResource T.Label}" VerticalAlignment="Center"
+                               ToolTip="Which mod's version the game actually sees, given the current load order." />
+                </Grid>
+            </Border>
+
+            <Grid>
+                <TextBlock Text="{Binding EmptyText}" Style="{StaticResource T.Muted}" Margin="16,18,0,0"
+                           Visibility="{Binding IsEmpty, Converter={StaticResource VisibleWhen}}" />
+                <ListBox x:Name="List" ItemsSource="{Binding RowsView}" SelectedItem="{Binding Selected}"
+                         ScrollViewer.CanContentScroll="False" AutomationProperties.Name="Conflicts"
+                         MouseDoubleClick="OnRowDoubleClick" PreviewKeyDown="OnListKeyDown">
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,14,0,0" Padding="14,7" BorderThickness="1"
+                                            Background="{Binding Name.FillKey, Converter={StaticResource ResourceKey}}"
+                                            BorderBrush="{Binding Name.EdgeKey, Converter={StaticResource ResourceKey}}"
+                                            ToolTip="{Binding Name.Tooltip}">
+                                        <TextBlock Text="{Binding Name.Label}" FontSize="12.5" FontWeight="SemiBold"
+                                                   Foreground="{Binding Name.TextKey, Converter={StaticResource ResourceKey}}" />
+                                    </Border>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ConflictRowItem}">
+                            <Grid MinHeight="58">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="{StaticResource Col.Mods}" />
+                                    <ColumnDefinition Width="{StaticResource Col.Wins}" />
+                                    <ColumnDefinition Width="{StaticResource Col.Actions}" />
+                                </Grid.ColumnDefinitions>
+                                <!-- the focus mod's conflicts carry an amber edge -->
+                                <Border Width="3" HorizontalAlignment="Left" Background="{StaticResource B.Amber}"
+                                        Visibility="{Binding IsFocused, Converter={StaticResource VisibleWhen}}" />
+                                <StackPanel VerticalAlignment="Center" Margin="16,10,16,10">
+                                    <TextBlock c:MarkdownView.InlineText="{Binding Title}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Subtitle}" FontSize="12" Foreground="{StaticResource B.Text3}"
+                                               TextWrapping="Wrap" Margin="0,2,0,0" ToolTip="{Binding RawTooltip}" />
+                                </StackPanel>
+                                <ItemsControl Grid.Column="1" ItemsSource="{Binding ModNames}" VerticalAlignment="Center"
+                                              Focusable="False" Margin="0,8,12,8">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontSize="13" Foreground="{StaticResource B.Text2}"
+                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Grid.Column="2" Text="{Binding WinnerText}" FontSize="13" TextWrapping="Wrap"
+                                           VerticalAlignment="Center" Margin="0,0,12,0"
+                                           Foreground="{Binding WinnerBrushKey, Converter={StaticResource ResourceKey}}"
+                                           ToolTip="{Binding WinnerWhy}" />
+                                <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                                            VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <Button Style="{StaticResource Btn.Chip.Amber}" Content="Resolve…" Margin="0,0,6,0"
+                                            Command="{Binding DataContext.ResolveCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding DataContext.CanResolve, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Visibility="{Binding HasResolveButton, Converter={StaticResource VisibleWhen}}"
+                                            ToolTip="{Binding ResolveHint}" ToolTipService.ShowOnDisabled="True" />
+                                    <Button Style="{StaticResource Btn.Quiet}" Content="Details"
+                                            Command="{Binding DataContext.DetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </DockPanel>
+    </Border>
+</Window>
