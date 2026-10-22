@@ -55,6 +55,14 @@ public sealed partial class SlotCard : ObservableObject
         }
     }
 
+    public string NumberLabel => $"#{Slot.Number}";
+    /// <summary>The save's name, or "Empty" for an empty slot.</summary>
+    public string SaveName => Slot.Occupied ? (Slot.DisplayName.Length > 0 ? Slot.DisplayName : $"Slot {Slot.Number}") : "Empty";
+    public string MapText => Slot.Occupied ? (Slot.LastMap.Length > 0 ? Slot.LastMap : "?") : "";
+    public string PlayedText => Slot.LastPlayed is { } t ? t.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "";
+    public string PlayedAgo => Slot.LastPlayed is { } t ? Ago(t.ToLocalTime()) : "";
+    public bool IsDead => Slot.Occupied && Slot.Dead;
+
     public string Where => string.Join(" · ", new[]
     {
         Slot.LastMap,
