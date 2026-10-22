@@ -59,16 +59,19 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         Session = session;
         Mods = new ModsViewModel(session);
+        // Browse opens first: finding and installing mods is where most
+        // visits start. Settings is not in the list; the cog beside the
+        // version lines opens it.
         Nav = new ObservableCollection<NavItem>
         {
+            new("browse", "Browse VostokMods", "Icon.Browse", new BrowseViewModel(session, () => Imports, Open, Mods)),
             new("mods", "Mods", "Icon.Mods", Mods),
             new("profiles", "Profiles", "Icon.Profiles", new ProfilesViewModel(session)),
             new("saves", "Saves", "Icon.Saves", new SavesViewModel(session)),
-            new("browse", "Browse VostokMods", "Icon.Browse", new BrowseViewModel(session, () => Imports, Open, Mods)),
             new("library", "Library", "Icon.Library", new LibraryViewModel(session)),
             new("tools", "Tools", "Icon.Tools", new ToolsViewModel(session)),
         };
-        Nav.Add(new("settings", "Settings", "Icon.Settings", new SettingsViewModel(session, this)));
+        SettingsNav = new("settings", "Settings", "Icon.Settings", new SettingsViewModel(session, this));
         _selected = Nav[0];
         _selected.IsSelected = true;
         ManagerVersion = "Manager " + ManagerSession.ManagerInstalledVersion();
@@ -101,6 +104,13 @@ public sealed partial class ShellViewModel : ObservableObject
     public ModsViewModel Mods { get; }
     public ObservableCollection<NavItem> Nav { get; }
 
+    /// <summary>The Settings page, opened from the cog beside the version
+    /// lines rather than from the list.</summary>
+    public NavItem SettingsNav { get; }
+
+    private NavItem? NavByKey(string key)
+        => key == SettingsNav.Key ? SettingsNav : Nav.FirstOrDefault(n => n.Key == key);
+
     /// <summary>Set by the window: shows the setup window (first run,
     /// adopting profiles) and returns once it closes.</summary>
     public Func<SetupReason, Task>? ShowSetupAsync { get; set; }
@@ -123,7 +133,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>Opens a page by its key ("mods", "profiles", ...).</summary>
     public void Open(string key)
     {
-        var item = Nav.FirstOrDefault(n => n.Key == key);
+        var item = NavByKey(key);
         if (item != null) Selected = item;
     }
 
@@ -257,6 +267,10 @@ public sealed partial class ShellViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+            // The first page is selected before anything is scanned and never
+            // got its "shown" call; Browse loads its catalogue on that call,
+            // and reads the scan to say what you have.
+            Selected.Page.OnShown();
         }
     }
 
@@ -306,13 +320,13 @@ public sealed partial class ShellViewModel : ObservableObject
         var ver = MmlInstall.DetectInstalledVersion(Session.ModsDir);
         LoaderVersion = string.IsNullOrEmpty(ver) ? "Mod Loader not found" : $"Mod Loader {ver}";
 
-        Nav[0].Count = Session.CountMods().Total.ToString();
-        Nav[1].Count = Session.AllProfiles.Count == 0 ? "" : Session.AllProfiles.Count.ToString();
+        NavByKey("mods")!.Count = Session.CountMods().Total.ToString();
+        NavByKey("profiles")!.Count = Session.AllProfiles.Count == 0 ? "" : Session.AllProfiles.Count.ToString();
 
         try
         {
             var saves = Session.GetSavesView();
-            Nav[2].Count = saves.Slots.Count(s => s.Occupied) is var n and > 0 ? n.ToString() : "";
+            NavByKey("saves")!.Count = saves.Slots.Count(s => s.Occupied) is var n and > 0 ? n.ToString() : "";
             // Only a save made with this profile's mods is continued: one
             // tied to another profile would load against the wrong mods.
             var active = Session.ActiveProfile?.Name ?? "";

@@ -83,7 +83,7 @@
             <!-- ── side menu ────────────────────────────────────────── -->
             <Border Grid.Row="1" Background="{StaticResource B.Rail}"
                     BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,1,0">
-                <DockPanel Margin="20,24,20,20" LastChildFill="False">
+                <DockPanel Margin="16,24,16,20" LastChildFill="False">
 
                     <!-- wordmark -->
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,0,26">
@@ -115,9 +115,10 @@
                                         <Path Data="{Binding IconKey, Converter={StaticResource ResourceKeyToGeometry}}"
                                               Style="{StaticResource IconPath}"
                                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-                                        <TextBlock Grid.Column="1" Text="{Binding Title}" Margin="12,0,8,0"
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" Margin="10,0,0,0"
                                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="13"
+                                        <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="13" Margin="8,0,0,0"
+                                                   Visibility="{Binding Count, Converter={StaticResource VisibleWhen}}"
                                                    Foreground="{StaticResource B.Text3}" VerticalAlignment="Center" />
                                     </Grid>
                                 </RadioButton>
@@ -125,8 +126,13 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <!-- versions -->
-                    <StackPanel DockPanel.Dock="Bottom" Margin="4,14,0,0">
+                    <!-- versions, and the cog that opens Settings -->
+                    <Grid DockPanel.Dock="Bottom" Margin="4,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
                         <!-- Each line opens its releases page, or offers the update when there is one. -->
                         <StackPanel Orientation="Horizontal">
                             <Button Style="{StaticResource Btn.Quiet}" Content="{Binding ManagerVersion}" FontSize="12" Padding="0" MinHeight="18"
@@ -145,6 +151,23 @@
                                     Visibility="{Binding LoaderUpdate, Converter={StaticResource VisibleWhen}}" />
                         </StackPanel>
                     </StackPanel>
+                    <Button Grid.Column="1" VerticalAlignment="Center" Padding="7" MinHeight="0"
+                            Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNav}"
+                            ToolTip="Settings" AutomationProperties.Name="Settings">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Quiet}">
+                                <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SettingsNav.IsSelected}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource B.Text}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource B.Edge}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <Path Data="{StaticResource Icon.Settings}" Style="{StaticResource IconPath}" Width="18" Height="18" />
+                    </Button>
+                    </Grid>
 
                     <!-- launch panel -->
                     <Border DockPanel.Dock="Bottom" Background="{StaticResource B.Fill}"
