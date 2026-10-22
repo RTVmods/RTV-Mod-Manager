@@ -38,6 +38,12 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target.Show();
             }
             else shell.Open(req.Page);
+            // Browse loads its catalogue from VostokMods; let it (and its thumbnails) land.
+            if (shell.Selected.Page is BrowseViewModel { Loading: { } loading })
+            {
+                try { await loading; } catch { /* the page shows the error */ }
+                await Task.Delay(4000);
+            }
             await Task.Delay(800);
             target.UpdateLayout();
 

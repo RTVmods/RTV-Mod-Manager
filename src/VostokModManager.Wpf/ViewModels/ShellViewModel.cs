@@ -71,7 +71,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new("mods", "Mods", "Icon.Mods", Mods),
             new("profiles", "Profiles", "Icon.Profiles", new ProfilesViewModel(session)),
             new("saves", "Saves", "Icon.Saves", new SavesViewModel(session)),
-            new("browse", "Browse VostokMods", "Icon.Browse", new PlaceholderViewModel(session, "Browse VostokMods")),
+            new("browse", "Browse VostokMods", "Icon.Browse", new BrowseViewModel(session, () => Imports, Open, Mods)),
             new("library", "Library", "Icon.Library", new LibraryViewModel(session)),
             new("tools", "Tools", "Icon.Tools", new ToolsViewModel(session)),
         };
