@@ -45,6 +45,9 @@
                         <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Quiet}" Content="Refresh" Command="{Binding LoadLogsCommand}" />
                         <TextBlock Text="GAME LOGS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
                     </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Margin="0,4,0,0"
+                               Text="No game logs yet. Play once with the Mod Loader and its log shows up here."
+                               Visibility="{Binding HasLogs, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
                     <ListBox ItemsSource="{Binding Logs}" SelectedItem="{Binding SelectedLog}" AutomationProperties.Name="Logs">
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type svc:LogFileItem}">

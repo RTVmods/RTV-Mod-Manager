@@ -35,6 +35,7 @@ public sealed partial class ToolsViewModel : PageViewModel
     public ObservableCollection<LogFileItem> Logs { get; } = new();
     [ObservableProperty] private LogFileItem? _selectedLog;
     [ObservableProperty] private LogAnalysisReport? _report;
+    [ObservableProperty] private bool _hasLogs = true;
 
     partial void OnSelectedLogChanged(LogFileItem? value)
     {
@@ -47,6 +48,7 @@ public sealed partial class ToolsViewModel : PageViewModel
         Logs.Clear();
         var logs = Session.AvailableLogFiles();
         foreach (var l in logs) Logs.Add(l);
+        HasLogs = Logs.Count > 0;
         var i = ManagerSession.PreferredLogIndex(logs);
         SelectedLog = i >= 0 ? Logs[i] : null;
     }

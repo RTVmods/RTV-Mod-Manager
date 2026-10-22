@@ -47,6 +47,9 @@
     <DataTemplate DataType="{x:Type vm:ModsViewModel}">
         <v:ModsView />
     </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:SavesViewModel}">
+        <v:SavesView />
+    </DataTemplate>
     <DataTemplate DataType="{x:Type vm:ToolsViewModel}">
         <v:ToolsView />
     </DataTemplate>

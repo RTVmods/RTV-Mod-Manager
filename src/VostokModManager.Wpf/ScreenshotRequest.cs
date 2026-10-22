@@ -28,11 +28,20 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
             window.Width = req.Width;
             window.Height = req.Height;
             await shell.StartAsync();
-            shell.Open(req.Page);
-            await Task.Delay(600);
-            window.UpdateLayout();
+            Window target = window;
+            if (req.Page == "setup")
+            {
+                target = new Views.SetupWindow(new SetupViewModel(shell.Session, SetupReason.FromSettings))
+                {
+                    Width = req.Width, Height = req.Height,
+                };
+                target.Show();
+            }
+            else shell.Open(req.Page);
+            await Task.Delay(800);
+            target.UpdateLayout();
 
-            var root = (FrameworkElement)window.Content;
+            var root = (FrameworkElement)target.Content;
             var dpi = VisualTreeHelper.GetDpi(window);
             var bmp = new RenderTargetBitmap(
                 (int)(root.ActualWidth * dpi.DpiScaleX), (int)(root.ActualHeight * dpi.DpiScaleY),

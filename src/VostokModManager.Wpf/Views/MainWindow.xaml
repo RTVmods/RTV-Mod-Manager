@@ -127,8 +127,18 @@
 
                     <!-- versions -->
                     <StackPanel DockPanel.Dock="Bottom" Margin="4,14,0,0">
-                        <TextBlock Text="{Binding ManagerVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" />
-                        <TextBlock Text="{Binding LoaderVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" Margin="0,2,0,0" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding ManagerVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" />
+                            <Button Style="{StaticResource Btn.Link}" Content="{Binding ManagerUpdate}" FontSize="12" Padding="8,0,0,0"
+                                    Foreground="{StaticResource B.AmberText}" Command="{Binding ManagerUpdateClickCommand}"
+                                    Visibility="{Binding ManagerUpdate, Converter={StaticResource VisibleWhen}}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBlock Text="{Binding LoaderVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" />
+                            <Button Style="{StaticResource Btn.Link}" Content="{Binding LoaderUpdate}" FontSize="12" Padding="8,0,0,0"
+                                    Foreground="{StaticResource B.AmberText}" Command="{Binding LoaderUpdateClickCommand}"
+                                    Visibility="{Binding LoaderUpdate, Converter={StaticResource VisibleWhen}}" />
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- launch panel -->
@@ -151,7 +161,7 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                                 <Ellipse Width="7" Height="7" VerticalAlignment="Center"
                                                          Fill="{Binding Level, Converter={StaticResource CheckLevelToBrush}}" />
-                                                <TextBlock Text="{Binding Text}" FontSize="13" Margin="9,0,0,0"
+                                                <TextBlock Text="{Binding Text}" FontSize="13" Margin="9,0,0,0" TextWrapping="Wrap" MaxWidth="150"
                                                            Foreground="{StaticResource B.Text2}" />
                                             </StackPanel>
                                         </DataTemplate>

@@ -1,0 +1,110 @@
+<UserControl x:Class="VostokModManager.Wpf.Views.SavesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="32,26,32,32">
+            <DockPanel Margin="0,0,0,18">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom">
+                    <Button Content="Open backups folder" Margin="0,0,10,0" MinHeight="44" Command="{Binding OpenBackupsCommand}" />
+                    <Button Content="Back up all slots" MinHeight="44" Command="{Binding BackUpAllCommand}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="SAVE SLOTS" Style="{StaticResource T.Label}" />
+                    <TextBlock Text="Saves" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+                    <TextBlock Text="Each slot remembers the profile it was played with. Launching a slot switches to that profile first."
+                               Style="{StaticResource T.Muted}" Margin="0,6,0,0" MaxWidth="620" HorizontalAlignment="Left" />
+                </StackPanel>
+            </DockPanel>
+
+            <Border Style="{StaticResource Panel.Warning}" Margin="0,0,0,18"
+                    Visibility="{Binding Warning, Converter={StaticResource VisibleWhen}}">
+                <TextBlock Text="{Binding Warning}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.AmberText}" />
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding Slots}" Focusable="False">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:SlotCard}">
+                        <Border x:Name="card" Width="330" Margin="0,0,16,16" Style="{StaticResource Panel.Card}">
+                            <Grid>
+                                <!-- an occupied slot -->
+                                <StackPanel Visibility="{Binding IsEmpty, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}">
+                                    <Border Height="108" Background="{StaticResource B.Raised}" Padding="14,12">
+                                        <DockPanel LastChildFill="False">
+                                            <Border DockPanel.Dock="Right" VerticalAlignment="Bottom" Background="{StaticResource B.Primary}" Padding="8,3"
+                                                    Visibility="{Binding IsNext, Converter={StaticResource VisibleWhen}}">
+                                                <TextBlock Text="LAST PLAYED" FontSize="11" Foreground="{StaticResource B.OnPrimary}" />
+                                            </Border>
+                                            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Slot.LastMap}" FontSize="12"
+                                                       Foreground="{StaticResource B.Text3}" />
+                                        </DockPanel>
+                                    </Border>
+                                    <StackPanel Margin="16,14,16,16">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding SlotLabel}" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding Where}" Style="{StaticResource T.Muted}" Margin="0,4,0,10" />
+                                        <TextBlock Text="TIED TO" Style="{StaticResource T.Label}" Margin="0,0,0,4" />
+                                        <ComboBox ItemsSource="{Binding ProfileChoices}" SelectedItem="{Binding TiedProfile}" Margin="0,0,0,10"
+                                                  AutomationProperties.Name="Profile this slot is tied to" />
+                                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,0,0,12">
+                                            <Grid>
+                                                <TextBlock Text="{Binding ModCheck}" FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource B.Green}"
+                                                           Visibility="{Binding ModCheckOk, Converter={StaticResource VisibleWhen}}" />
+                                                <TextBlock Text="{Binding ModCheck}" FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource B.SalmonText}"
+                                                           Visibility="{Binding ModCheckBad, Converter={StaticResource VisibleWhen}}" />
+                                            </Grid>
+                                        </Border>
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="⋯" Width="44" Margin="8,0,0,0" Click="OnMore"
+                                                    AutomationProperties.Name="More for this slot">
+                                                <Button.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Rename…" Command="{Binding RenameCommand}" />
+                                                        <MenuItem Header="New game in this slot…" Command="{Binding NewGameCommand}" />
+                                                        <Separator />
+                                                        <MenuItem Header="Delete…" Command="{Binding DeleteCommand}" />
+                                                    </ContextMenu>
+                                                </Button.ContextMenu>
+                                            </Button>
+                                            <Button Content="Launch slot" Style="{StaticResource Btn.Primary}" IsEnabled="{Binding Slot.CanLaunch}"
+                                                    Command="{Binding LaunchCommand}" />
+                                        </DockPanel>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- an empty slot -->
+                                <StackPanel Visibility="{Binding IsEmpty, Converter={StaticResource VisibleWhen}}" Margin="24,40" MinHeight="250">
+                                    <TextBlock Text="{Binding SlotLabel}" Style="{StaticResource T.Label}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="Start a new game here" FontSize="18" HorizontalAlignment="Center" Margin="0,10,0,8" />
+                                    <TextBlock Text="The slot keeps the profile you start it under." Style="{StaticResource T.Muted}"
+                                               TextAlignment="Center" HorizontalAlignment="Center" MaxWidth="240" Margin="0,0,0,16" />
+                                    <Button Content="New game…" HorizontalAlignment="Center"
+                                            Command="{Binding NewGameCommand}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsNext}" Value="True">
+                                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.EdgeStrong}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding ModCheckBad}" Value="True">
+                                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.SalmonEdge}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                                <Setter TargetName="card" Property="Background" Value="Transparent" />
+                                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.EdgeSoft}" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

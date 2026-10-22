@@ -1,0 +1,206 @@
+<Window x:Class="VostokModManager.Wpf.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:VostokModManager.Wpf.Controls"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Title="Set up Vostok Mod Manager" Width="1240" Height="860" MinWidth="900" MinHeight="620"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Ground}" Foreground="{StaticResource B.Text}"
+        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <!-- A step's header: the number (or tick), title, summary and tag. -->
+        <DataTemplate x:Key="StepHeader" DataType="{x:Type vm:SetupStep}">
+            <Button Style="{StaticResource Btn.Quiet}" HorizontalContentAlignment="Stretch" MinHeight="64" Padding="20,0"
+                    Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"
+                    Foreground="{StaticResource B.Text}" FontSize="{StaticResource Size.Body}">
+                <DockPanel>
+                    <Border x:Name="mark" DockPanel.Dock="Left" Width="26" Height="26" BorderThickness="1" BorderBrush="{StaticResource B.Edge}">
+                        <TextBlock x:Name="markText" Text="{Binding Mark}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" />
+                    </Border>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding Tag}" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="18" />
+                        <TextBlock Text="{Binding Summary}" FontSize="13" Foreground="{StaticResource B.Text2}" />
+                    </StackPanel>
+                </DockPanel>
+            </Button>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsDone}" Value="True">
+                    <Setter TargetName="mark" Property="Background" Value="{StaticResource B.Green}" />
+                    <Setter TargetName="mark" Property="BorderBrush" Value="{StaticResource B.Green}" />
+                    <Setter TargetName="markText" Property="Foreground" Value="{StaticResource B.OnPrimary}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <Style x:Key="StepCard" TargetType="Border" BasedOn="{StaticResource Panel.Card}">
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+        <Style x:Key="StepBody" TargetType="StackPanel">
+            <Setter Property="Margin" Value="60,0,20,22" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource B.Ground}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="420" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ═══ intro and progress ═══ -->
+        <Border Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="48,56,48,36">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,32">
+                    <Border Width="40" Height="40" BorderBrush="{StaticResource B.Edge}" BorderThickness="1">
+                        <c:Emblem Margin="6" />
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="ROAD TO VOSTOK" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="MOD MANAGER" FontSize="11" Foreground="{StaticResource B.Text3}" Margin="0,2,0,0" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Before you head out" Style="{StaticResource T.H1}" FontSize="42" TextWrapping="Wrap" />
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Body}" Foreground="{StaticResource B.Text2}" Margin="0,14,0,28"
+                           Text="Five checks, about a minute. Each step changes nothing until you act on it." />
+                <TextBlock DockPanel.Dock="Top" Text="{Binding ProgressText}" Style="{StaticResource T.Muted}" Margin="0,0,0,8" />
+                <ProgressBar DockPanel.Dock="Top" Value="{Binding Progress}" Maximum="1" Height="3" Margin="0,0,0,24"
+                             Background="{StaticResource B.Hairline}" Foreground="{StaticResource B.Primary}" BorderThickness="0" />
+                <TextBlock DockPanel.Dock="Bottom" Text="You can run this again any time from Settings." Style="{StaticResource T.Muted}" />
+                <ItemsControl ItemsSource="{Binding Steps}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:SetupStep}">
+                            <RadioButton Style="{StaticResource Nav.Item}" GroupName="setupSteps" IsChecked="{Binding IsOpen, Mode=OneWay}"
+                                         Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         CommandParameter="{Binding}" FontSize="16" Margin="0,0,0,2">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Mark}" Width="24" />
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Tag}" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Title}" Margin="6,0,0,0" />
+                                </DockPanel>
+                            </RadioButton>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══ the steps ═══ -->
+        <DockPanel Grid.Column="1" Margin="48,56,48,32">
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,18,0,0">
+                <Button DockPanel.Dock="Left" Style="{StaticResource Btn.Link}" Content="Skip setup" Command="{Binding SkipCommand}" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <CheckBox Content="Back up my mods and settings first" IsChecked="{Binding WantsBackup}" Margin="0,0,18,0" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="Finish and open the manager" MinHeight="50" Padding="22,0" FontSize="16"
+                            IsEnabled="{Binding CanFinish}" Command="{Binding FinishCommand}" />
+                </StackPanel>
+                <Border />
+            </DockPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <!-- 1 game folder -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <ContentControl Content="{Binding Steps[0]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
+                            <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[0].IsOpen, Converter={StaticResource VisibleWhen}}">
+                                <DockPanel Margin="0,0,0,10">
+                                    <Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseFolderCommand}" />
+                                    <TextBox Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" FontSize="13"
+                                             AutomationProperties.Name="Game folder" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding FolderMessage}" Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+                                <ItemsControl ItemsSource="{Binding DetectedFolders}" Focusable="False" Margin="0,0,0,12">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource Btn.Quiet}" HorizontalContentAlignment="Left"
+                                                    Command="{Binding DataContext.UseFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}">
+                                                <TextBlock><Run Text="Use " /><Run Text="{Binding Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button Content="Use this folder" HorizontalAlignment="Left" Command="{Binding UseFolderCommand}" CommandParameter="" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 2 mod loader -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <ContentControl Content="{Binding Steps[1]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
+                            <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[1].IsOpen, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Text="{Binding LoaderText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}" Margin="0,0,0,12" />
+                                <CheckBox Content="Skip the loader's own window when I launch from the manager" IsChecked="{Binding SkipLauncher}"
+                                          IsEnabled="{Binding SkipLauncherSupported}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 3 mods and profiles -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <ContentControl Content="{Binding Steps[2]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
+                            <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[2].IsOpen, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Text="{Binding ProfilesText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}" Margin="0,0,0,14" />
+                                <StackPanel Visibility="{Binding ProfilesAdopted, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}">
+                                    <TextBlock Text="NAME FOR YOUR CURRENT SETUP" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                                    <TextBox Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Width="320" HorizontalAlignment="Left"
+                                             Margin="0,0,0,14" AutomationProperties.Name="Profile name" />
+                                    <Border Style="{StaticResource Panel.Notice}" Margin="0,0,0,14"
+                                            Visibility="{Binding LoaderProfiles, Converter={StaticResource VisibleWhen}}">
+                                        <StackPanel>
+                                            <CheckBox Content="Also bring in the Mod Loader's other profiles" IsChecked="{Binding KeepLoaderProfiles}" Margin="0,0,0,10" />
+                                            <ItemsControl ItemsSource="{Binding LoaderProfiles}" Margin="28,0,0,0" Focusable="False"
+                                                          IsEnabled="{Binding KeepLoaderProfiles}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type vm:LoaderProfileChoice}">
+                                                        <CheckBox Content="{Binding Label}" IsChecked="{Binding Import}" Margin="0,0,0,8" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Text="Mods, load order and settings come across as they are. Every mod archive is also kept in the Library so switching profiles can put it back."
+                                               Style="{StaticResource T.Muted}" Margin="0,0,0,14" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Style="{StaticResource Btn.Primary}" Content="Use profiles" Command="{Binding AdoptProfilesCommand}" />
+                                        <Button Style="{StaticResource Btn.Link}" Content="Not now" Margin="14,0,0,0" Command="{Binding DeclineProfilesCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 4 save slots -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <ContentControl Content="{Binding Steps[3]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
+                            <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[3].IsOpen, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Text="{Binding SaveSlotsText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}" Margin="0,0,0,12" />
+                                <CheckBox Content="Turn on save slots" IsChecked="{Binding SaveSlotsOn}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 5 update checks -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <ContentControl Content="{Binding Steps[4]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
+                            <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[4].IsOpen, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Text="{Binding LinkText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}" Margin="0,0,0,12" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Match them on VostokMods" Command="{Binding LinkModsCommand}" />
+                                    <TextBlock Text="Matching…" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="12,0,0,0"
+                                               Visibility="{Binding Linking, Converter={StaticResource VisibleWhen}}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Grid>
+</Window>
