@@ -7,9 +7,12 @@
     <UserControl.Resources>
         <!-- Column widths shared by the header row and every mod row. -->
         <GridLength x:Key="Col.On">48</GridLength>
-        <GridLength x:Key="Col.Ord">56</GridLength>
+        <GridLength x:Key="Col.Pos">36</GridLength>
+        <GridLength x:Key="Col.Ord">64</GridLength>
         <GridLength x:Key="Col.Ver">96</GridLength>
         <GridLength x:Key="Col.Status">156</GridLength>
+        <SolidColorBrush x:Key="Tint.Testing" Color="#14E3B55A" />
+        <SolidColorBrush x:Key="Tint.New" Color="#14A9D18E" />
 
         <ContextMenu x:Key="RowMenu" DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
             <MenuItem Header="Set load order…" Command="{Binding SetLoadOrderCommand}" />
@@ -17,40 +20,85 @@
             <MenuItem Header="Testing build" Command="{Binding ToggleTestingCommand}" />
             <MenuItem Header="Personal note…" Command="{Binding EditNoteCommand}" />
             <Separator />
+            <MenuItem Header="Edit required dependencies…" Command="{Binding EditDependenciesCommand}" />
+            <MenuItem Header="Link / change VostokMods page…" Command="{Binding LinkSelectedCommand}" />
+            <MenuItem Header="Revert to an earlier version…" Command="{Binding RevertCommand}" />
+            <MenuItem Header="Conflicts…" Command="{Binding ShowConflictsCommand}" />
+            <Separator />
             <MenuItem Header="VostokMods page" Command="{Binding OpenPageCommand}" />
             <MenuItem Header="Show in folder" Command="{Binding ShowInFolderCommand}" />
             <Separator />
             <MenuItem Header="Remove…" Command="{Binding DeleteCommand}" />
         </ContextMenu>
 
+        <!-- The load-order box: reads as text until focused, Enter commits. -->
+        <Style x:Key="OrdBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+            <Setter Property="Width" Value="52" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{StaticResource B.EdgeSoft}" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="Background" Value="{StaticResource B.Fill}" />
+                    <Setter Property="Foreground" Value="{StaticResource B.Text}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- A mod row. -->
         <DataTemplate x:Key="ModRowTemplate" DataType="{x:Type vm:ModItem}">
-            <Grid MinHeight="44" Background="Transparent" ToolTip="{Binding Tooltip}"
-                  ToolTipService.IsEnabled="{Binding Tooltip, Converter={StaticResource HasText}}"
-                  Opacity="{Binding IsEnabled, Converter={StaticResource EnabledToOpacity}}">
+            <Grid x:Name="row" MinHeight="44" Background="Transparent" ToolTip="{Binding Tooltip}"
+                  ToolTipService.IsEnabled="{Binding Tooltip, Converter={StaticResource HasText}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="{StaticResource Col.On}" />
+                    <ColumnDefinition Width="{StaticResource Col.Pos}" />
                     <ColumnDefinition Width="{StaticResource Col.Ord}" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="{StaticResource Col.Ver}" />
                     <ColumnDefinition Width="{StaticResource Col.Status}" />
                 </Grid.ColumnDefinitions>
+                <!-- the download band, along the whole row -->
+                <ProgressBar Grid.ColumnSpan="6" VerticalAlignment="Bottom" Height="3" Minimum="0" Maximum="100"
+                             Value="{Binding Download, TargetNullValue=0}" IsIndeterminate="False"
+                             Background="Transparent" Foreground="{StaticResource B.Amber}" BorderThickness="0"
+                             Visibility="{Binding IsDownloading, Converter={StaticResource VisibleWhen}}" />
                 <CheckBox IsChecked="{Binding IsEnabled}" Margin="14,0,0,0"
                           AutomationProperties.Name="{Binding Name, StringFormat=Enable {0}}" />
-                <TextBlock Grid.Column="1" Text="{Binding Priority}" FontSize="13"
-                           Foreground="{StaticResource B.Text3}" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Grid.Column="1" Text="{Binding Position}" FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" />
+                <TextBox Grid.Column="2" Style="{StaticResource OrdBox}" Text="{Binding PriorityText, UpdateSourceTrigger=PropertyChanged}"
+                         VerticalAlignment="Center" KeyDown="OnOrdKeyDown" LostKeyboardFocus="OnOrdLostFocus"
+                         AutomationProperties.Name="{Binding Name, StringFormat=Load order of {0}}" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
+                            Opacity="{Binding IsEnabled, Converter={StaticResource EnabledToOpacity}}">
                     <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="  locked" FontSize="12" FontStyle="Italic" Foreground="{StaticResource B.Text4}"
                                Visibility="{Binding IsLocked, Converter={StaticResource VisibleWhen}}" />
                     <TextBlock Text="  note" FontSize="12" FontStyle="Italic" Foreground="{StaticResource B.Text4}"
                                Visibility="{Binding HasNote, Converter={StaticResource VisibleWhen}}" />
+                    <TextBlock Text="  new" FontSize="12" FontStyle="Italic" Foreground="{StaticResource B.Green}"
+                               Visibility="{Binding IsNew, Converter={StaticResource VisibleWhen}}" />
                 </StackPanel>
-                <TextBlock Grid.Column="3" Text="{Binding Version}" FontSize="14"
-                           Foreground="{StaticResource B.Text2}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="4" Text="{Binding Status}" FontSize="13" VerticalAlignment="Center"
-                           Foreground="{Binding StatusKind, Converter={StaticResource StatusToBrush}}" />
+                <TextBlock Grid.Column="4" Text="{Binding Version}" FontSize="14" Foreground="{StaticResource B.Text2}" VerticalAlignment="Center"
+                           Opacity="{Binding IsEnabled, Converter={StaticResource EnabledToOpacity}}" />
+                <Button Grid.Column="5" Style="{StaticResource Btn.Quiet}" HorizontalAlignment="Left" Padding="0" MinHeight="30"
+                        Command="{Binding StatusClickCommand}" FontSize="13"
+                        Foreground="{Binding StatusKind, Converter={StaticResource StatusToBrush}}" Content="{Binding Status}"
+                        AutomationProperties.Name="{Binding Status}" />
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsTesting}" Value="True">
+                    <Setter TargetName="row" Property="Background" Value="{StaticResource Tint.Testing}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsNew}" Value="True">
+                    <Setter TargetName="row" Property="Background" Value="{StaticResource Tint.New}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- A pack's header row: click to collapse or expand the pack. -->
@@ -70,8 +118,13 @@
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" MinWidth="560" />
-            <ColumnDefinition Width="400" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition x:Name="DetailsColumn" Width="400" MinWidth="300" MaxWidth="760" />
         </Grid.ColumnDefinitions>
+
+        <!-- drag to widen or narrow the details panel -->
+        <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" ResizeBehavior="PreviousAndNext"
+                      Background="Transparent" Cursor="SizeWE" Focusable="False" />
 
         <!-- ═══ list column ═══════════════════════════════════════════ -->
         <DockPanel Margin="32,26,32,22">
@@ -89,32 +142,72 @@
                                            VerticalAlignment="Center" IsHitTestVisible="False"
                                            Visibility="{Binding Query, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
                                 <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" Background="Transparent"
-                                         BorderThickness="0" Padding="0" VerticalAlignment="Center"
+                                         BorderThickness="0" Padding="0,0,22,0" VerticalAlignment="Center" KeyDown="OnFilterKeyDown"
                                          AutomationProperties.Name="Filter mods" />
+                                <Button Style="{StaticResource Btn.Quiet}" HorizontalAlignment="Right" Padding="4,0" MinHeight="24"
+                                        Content="×" FontSize="16" Command="{Binding ClearQueryCommand}" AutomationProperties.Name="Clear the filter"
+                                        Visibility="{Binding Query, Converter={StaticResource VisibleWhen}}" />
                             </Grid>
                         </DockPanel>
                     </Border>
-                    <Button Content="Install mod…" Margin="10,0,0,0" MinHeight="44" Padding="18,0" FontSize="15"
-                            Command="{Binding InstallFilesCommand}" />
+                    <Button Margin="10,0,0,0" MinHeight="44" Padding="18,0" FontSize="15" Click="OnInstallMenu">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Install mod files (.vmz, modpack .zip, mod list .json)…" Command="{Binding InstallFilesCommand}" />
+                                <MenuItem Header="Install from a VostokMods page URL…" Command="{Binding InstallFromUrlCommand}" />
+                                <MenuItem Header="Import a modpack from VostokMods…" Command="{Binding ImportModpackUrlCommand}" />
+                                <Separator />
+                                <MenuItem Header="Save a mod-list template…" Command="{Binding SaveListTemplateCommand}" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                        <TextBlock Text="Install mod ▾" />
+                    </Button>
                 </StackPanel>
                 <StackPanel>
-                    <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource T.Label}" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                        <Button Style="{StaticResource Btn.Quiet}" Content="Switch ▾" Margin="8,0,0,0" Padding="4,0" MinHeight="20" FontSize="12"
+                                Click="OnSwitchMenu" AutomationProperties.Name="Switch profile">
+                            <Button.ContextMenu>
+                                <ContextMenu ItemsSource="{Binding ProfileChoices}">
+                                    <ContextMenu.ItemContainerStyle>
+                                        <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                            <Setter Property="Header" Value="{Binding}" />
+                                            <Setter Property="Command" Value="{Binding DataContext.SwitchProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <Setter Property="CommandParameter" Value="{Binding}" />
+                                        </Style>
+                                    </ContextMenu.ItemContainerStyle>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                    </StackPanel>
                     <TextBlock Text="{Binding ProfileName}" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
                 </StackPanel>
             </DockPanel>
 
+            <!-- what still needs setting up (Claude missing, mods folder, Decomp) -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Warning}" Margin="0,0,0,14"
+                    Visibility="{Binding SetupIssues, Converter={StaticResource VisibleWhen}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Open setup" Command="{Binding RunSetupCommand}" MinHeight="32" FontSize="13" />
+                    <TextBlock Text="{Binding SetupIssues}" Style="{StaticResource T.Body}" FontSize="13" Foreground="{StaticResource B.AmberText}"
+                               VerticalAlignment="Center" Margin="0,0,12,0" />
+                </DockPanel>
+            </Border>
+
             <!-- status chips (one row replaces the old status lines) -->
             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,16">
                 <Button Style="{StaticResource Btn.Chip.Amber}" Margin="0,0,8,8" Command="{Binding UpdateAllCommand}"
+                        ToolTip="{Binding UpdatesSummary}"
                         Visibility="{Binding UpdateCount, Converter={StaticResource VisibleWhen}}">
                     <TextBlock>
                         <Run Text="↑ " /><Run Text="{Binding UpdateCount, Mode=OneWay}" /><Run Text=" updates · Update all" />
                     </TextBlock>
                 </Button>
-                <Button Style="{StaticResource Btn.Chip.Salmon}" Margin="0,0,8,8" Command="{Binding SetFilterCommand}" CommandParameter="conflicts"
+                <Button Style="{StaticResource Btn.Chip.Salmon}" Margin="0,0,8,8" Command="{Binding ShowConflictsCommand}"
                         Visibility="{Binding ConflictCount, Converter={StaticResource VisibleWhen}}">
                     <TextBlock>
-                        <Run Text="⇄ " /><Run Text="{Binding ConflictCount, Mode=OneWay}" /><Run Text=" conflicts" />
+                        <Run Text="⇄ " /><Run Text="{Binding ConflictCount, Mode=OneWay}" /><Run Text=" conflicts · Review" />
                     </TextBlock>
                 </Button>
                 <Button Style="{StaticResource Btn.Chip}" Margin="0,0,8,8" Command="{Binding LinkAllCommand}"
@@ -125,7 +218,8 @@
                 </Button>
                 <Button Style="{StaticResource Btn.Chip}" Margin="0,0,8,8" Command="{Binding SyncDriftCommand}" Content="{Binding DriftText}"
                         Visibility="{Binding DriftText, Converter={StaticResource VisibleWhen}}" />
-                <Button Style="{StaticResource Btn.Quiet}" Margin="0,0,8,8" Content="Check for updates" Command="{Binding CheckUpdatesCommand}" />
+                <Button Style="{StaticResource Btn.Quiet}" Margin="0,0,8,8" Content="Refresh" Command="{Binding RefreshAllCommand}"
+                        ToolTip="Rescan the mods folder, re-detect conflicts and check VostokMods for updates now." />
                 <TextBlock Text="{Binding InstallProgress}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="4,0,0,8" />
             </WrapPanel>
 
@@ -162,12 +256,18 @@
                         <Button Style="{StaticResource Btn.Quiet}" Content="Enable all" Command="{Binding EnableAllCommand}" />
                         <Button Style="{StaticResource Btn.Quiet}" Content="Disable all" Command="{Binding DisableAllCommand}" Margin="0,0,8,0" />
                         <Button Content="Undo last change" MinHeight="32" FontSize="13" Margin="0,0,8,0"
+                                ToolTip="{Binding CheckpointText}"
+                                Visibility="{Binding HasCheckpoint, Converter={StaticResource VisibleWhen}}"
                                 Command="{Binding DataContext.UndoCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
                         <Button Content="Analyze last log" MinHeight="32" FontSize="13"
                                 Command="{Binding DataContext.GoCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 CommandParameter="tools" />
                     </StackPanel>
-                    <TextBlock Text="{Binding Footer}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Footer}" Style="{StaticResource T.Muted}" />
+                        <TextBlock Text="{Binding CheckpointText}" FontSize="12" Foreground="{StaticResource B.Text4}"
+                                   Visibility="{Binding CheckpointText, Converter={StaticResource VisibleWhen}}" />
+                    </StackPanel>
                 </DockPanel>
             </Border>
 
@@ -175,22 +275,27 @@
             <Grid DockPanel.Dock="Top" Height="34">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="{StaticResource Col.On}" />
+                    <ColumnDefinition Width="{StaticResource Col.Pos}" />
                     <ColumnDefinition Width="{StaticResource Col.Ord}" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="{StaticResource Col.Ver}" />
                     <ColumnDefinition Width="{StaticResource Col.Status}" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="ON" Style="{StaticResource T.Label}" Margin="14,0,0,0" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="ORD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="2" Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="3" Text="VERSION" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="4" Text="STATUS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="#" Style="{StaticResource T.Label}" VerticalAlignment="Center"
+                           ToolTip="Load position among the enabled mods shown" />
+                <TextBlock Grid.Column="2" Text="ORDER" Style="{StaticResource T.Label}" VerticalAlignment="Center" Margin="4,0,0,0"
+                           ToolTip="Load-order priority: lower loads earlier. Click a number to edit it." />
+                <TextBlock Grid.Column="3" Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="4" Text="VERSION" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="5" Text="STATUS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
             </Grid>
 
             <!-- the list: drag rows to reorder, drop files to install -->
             <ListBox x:Name="List" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}"
                      SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
                      AllowDrop="True" PreviewMouseLeftButtonDown="OnRowMouseDown" PreviewMouseMove="OnRowMouseMove"
+                     MouseDoubleClick="OnRowDoubleClick" KeyDown="OnListKeyDown"
                      AutomationProperties.Name="Mods">
                 <ListBox.ItemTemplateSelector>
                     <vm:ModRowTemplateSelector ModTemplate="{StaticResource ModRowTemplate}"
@@ -206,7 +311,7 @@
         </DockPanel>
 
         <!-- ═══ details panel ═════════════════════════════════════════ -->
-        <Border Grid.Column="1" Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.Hairline}"
+        <Border Grid.Column="2" Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.Hairline}"
                 BorderThickness="1,0,0,0">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="28,26,28,24"
@@ -223,6 +328,8 @@
                         <Button Content="Link to VostokMods…" Margin="0,0,8,8" Command="{Binding LinkSelectedCommand}"
                                 Visibility="{Binding SelectedIsLinked, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
                         <Button Content="Show folder" Margin="0,0,8,8" Command="{Binding ShowInFolderCommand}" />
+                        <Button Style="{StaticResource Btn.Link}" Content="Change link…" Margin="0,0,8,8" Command="{Binding LinkSelectedCommand}"
+                                Visibility="{Binding SelectedIsLinked, Converter={StaticResource VisibleWhen}}" />
                     </WrapPanel>
 
                     <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Margin="0,0,0,16">
@@ -231,6 +338,8 @@
                                          IsChecked="{Binding DetailTab, Converter={StaticResource EqualsParam}, ConverterParameter=overview, Mode=OneWay}"
                                          Command="{Binding SetDetailTabCommand}" CommandParameter="overview" />
                             <RadioButton Style="{StaticResource Tab.Item}" GroupName="modDetail" Content="Changelog"
+                                         IsEnabled="{Binding SelectedHasChangelog}"
+                                         ToolTipService.ShowOnDisabled="True" ToolTip="Shown when the mod's archive carries a changelog file"
                                          IsChecked="{Binding DetailTab, Converter={StaticResource EqualsParam}, ConverterParameter=changelog, Mode=OneWay}"
                                          Command="{Binding SetDetailTabCommand}" CommandParameter="changelog" />
                             <RadioButton Style="{StaticResource Tab.Item}" GroupName="modDetail" Content="Settings"
@@ -251,10 +360,17 @@
                     <!-- overview tab -->
                     <StackPanel Visibility="{Binding DetailTab, Converter={StaticResource TabVisible}, ConverterParameter=overview}">
                     <TextBlock Text="{Binding SelectedDescription}" Style="{StaticResource T.Body}" Foreground="{StaticResource B.Text2}"
-                               Margin="0,0,0,20" />
+                               Margin="0,0,0,4" />
+                    <Button Style="{StaticResource Btn.Link}" Content="Refresh description" HorizontalAlignment="Left" Margin="0,0,0,16"
+                            Command="{Binding RefreshDescriptionCommand}" Visibility="{Binding SelectedIsLinked, Converter={StaticResource VisibleWhen}}" />
 
-                    <TextBlock Text="DEPENDS ON" Style="{StaticResource T.Label}" Margin="0,0,0,6"
-                               Visibility="{Binding SelectedDependencies, Converter={StaticResource VisibleWhen}}" />
+                    <DockPanel Margin="0,0,0,6">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Link}" Content="Edit…" Command="{Binding EditDependenciesCommand}" Padding="4,0" />
+                        <TextBlock Text="DEPENDS ON" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,0,0,16" TextWrapping="Wrap"
+                               Text="This mod declares no dependencies in its mod.txt. Edit… adds the mods it needs, so they're fetched with it."
+                               Visibility="{Binding SelectedHasNoDependencies, Converter={StaticResource VisibleWhen}}" />
                     <ItemsControl ItemsSource="{Binding SelectedDependencies}" Margin="0,0,0,20" Focusable="False">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type svc:DependencyView}">
@@ -300,7 +416,8 @@
                     <TextBlock Text="IN THIS PROFILE" Style="{StaticResource T.Label}" Margin="0,8,0,8" />
                     <CheckBox Content="Testing build (DEV)" IsChecked="{Binding SelectedIsTesting, Mode=OneWay}"
                               Command="{Binding ToggleTestingCommand}" Margin="0,0,0,10" />
-                    <CheckBox Content="Lock this version" IsChecked="{Binding SelectedIsLocked, Mode=OneWay}"
+                    <CheckBox Content="Lock this version" IsChecked="{Binding SelectedIsLocked, Mode=OneWay}" IsEnabled="{Binding SelectedCanLock}"
+                              ToolTipService.ShowOnDisabled="True" ToolTip="Built-in mods are always kept; nothing to lock."
                               Command="{Binding ToggleLockCommand}" Margin="0,0,0,14" />
                     <TextBlock Text="Personal note" FontSize="14" Margin="0,0,0,6" />
                     <TextBox x:Name="NoteBox" Text="{Binding SelectedNote, Mode=OneWay}" AcceptsReturn="True"
@@ -309,7 +426,8 @@
 
                     <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,8,0,0">
                         <WrapPanel>
-                            <Button Style="{StaticResource Btn.Link}" Content="Revert to an earlier version…" Command="{Binding RevertCommand}" Margin="0,0,10,0" />
+                            <Button Style="{StaticResource Btn.Link}" Content="Earlier versions…" Command="{Binding RevertCommand}" Margin="0,0,10,0"
+                                    Visibility="{Binding SelectedHasBackups, Converter={StaticResource VisibleWhen}}" />
                             <Button Style="{StaticResource Btn.Link}" Content="Remove from profile…" Command="{Binding DeleteCommand}"
                                     Foreground="{StaticResource B.SalmonText}" />
                         </WrapPanel>

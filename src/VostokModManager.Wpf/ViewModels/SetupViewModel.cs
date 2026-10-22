@@ -64,12 +64,21 @@ public sealed partial class SetupViewModel : ObservableObject
             new(SetupStepId.VostokMods, 5, "Update checks", false),
         };
         WantsBackup = session.IsFirstRun;
+        var items = session.GetFirstRunBackupItems();
+        BackupItems = "The backup zip holds:\n"
+            + $"  • every file at the top of the mods folder ({items.ModsDir})\n"
+            + $"  • mod_config.cfg ({items.ModConfigPath})\n"
+            + $"  • the MCM settings ({items.McmDir})\n\n"
+            + $"It is written to {items.BackupsDir}.";
         Read();
         var firstOpen = Steps.FirstOrDefault(s => s.Required && !s.IsDone) ?? Steps[0];
         Open(firstOpen);
     }
 
     public SetupReason Reason { get; }
+
+    /// <summary>What the first-run backup captures and where it goes.</summary>
+    public string BackupItems { get; }
     public ObservableCollection<SetupStep> Steps { get; }
     public ObservableCollection<LoaderProfileChoice> LoaderProfiles { get; } = new();
     public ObservableCollection<string> DetectedFolders { get; } = new();

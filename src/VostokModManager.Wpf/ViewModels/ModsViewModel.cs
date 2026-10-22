@@ -22,6 +22,7 @@ public sealed partial class ModItem : ObservableObject
         _owner = owner;
         Row = row;
         _isEnabled = row.Enabled;
+        _priorityText = row.Priority.ToString();
         (StatusKind, Status) = StatusOf(row);
     }
 
@@ -31,14 +32,34 @@ public sealed partial class ModItem : ObservableObject
     public string Name => IsPackHeader ? Row.PackName : Row.DisplayName;
     public string Version => Row.Version;
     public int Priority => Row.Priority;
+    /// <summary>The mod's place in the load among the enabled rows shown ("" when off).</summary>
+    public string Position => Row.Position?.ToString() ?? "";
     public bool IsLocked => Row.Locked;
     public bool IsTesting => Row.Testing;
+    public bool IsNew => Row.InstalledThisSession;
     public bool InConflict => Row.InConflict;
     public bool HasNote => Row.Note.Length > 0;
+    public bool CanLock => !Row.BuiltIn;
     public string PackSummary => Row.PackCollapsed ? $"{Row.PackCount} mods · collapsed" : $"{Row.PackCount} mods";
     public string Status { get; }
     public RowStatusKind StatusKind { get; }
-    public string Tooltip => Row.Update?.Tooltip ?? "";
+
+    /// <summary>The row's hover text: what the old grid's name and update
+    /// cells said (update state, built in, locked, testing, the note).</summary>
+    public string Tooltip
+    {
+        get
+        {
+            var lines = new List<string>();
+            if (Row.BuiltIn) lines.Add("Built into the manager; kept on in every profile and updated with it.");
+            if (Row.Locked && !Row.BuiltIn) lines.Add("Locked: profile switches leave this mod's file and version alone.");
+            if (Row.Testing) lines.Add("Marked as a testing build.");
+            if (Row.InstalledThisSession) lines.Add("Installed in this session.");
+            if (Row.Update?.Tooltip is { Length: > 0 } u) lines.Add(u);
+            if (Row.Note.Length > 0) lines.Add("Note: " + Row.Note);
+            return string.Join("\n\n", lines);
+        }
+    }
 
     /// <summary>Two-way with the row's checkbox: ticking it enables the mod.</summary>
     [ObservableProperty] private bool _isEnabled;
@@ -48,6 +69,24 @@ public sealed partial class ModItem : ObservableObject
         if (Entry == null || value == Row.Enabled) return;
         _owner.SetEnabled(this, value);
     }
+
+    /// <summary>The load-order box, edited in place; committed on Enter / leaving it.</summary>
+    [ObservableProperty] private string _priorityText;
+
+    public void CommitPriority()
+    {
+        if (Entry == null || PriorityText.Trim() == Row.Priority.ToString()) return;
+        if (!_owner.Session.SetModPriorityFromText(Entry, PriorityText)) PriorityText = Row.Priority.ToString();
+    }
+
+    /// <summary>0–100 while this mod downloads, -1 for an unknown size,
+    /// null when it isn't downloading. Drives the band along the row.</summary>
+    [ObservableProperty] private double? _download;
+    public bool IsDownloading => Download != null;
+    partial void OnDownloadChanged(double? value) => OnPropertyChanged(nameof(IsDownloading));
+
+    [RelayCommand]
+    private Task StatusClick() => _owner.ActivateStatusAsync(this);
 
     private static (RowStatusKind, string) StatusOf(ModRow r)
     {
@@ -114,6 +153,50 @@ public sealed partial class ModsViewModel : PageViewModel
     /// <summary>Rows the list has selected (several with Ctrl/Shift).</summary>
     public List<ModItem> MultiSelection { get; } = new();
 
+    // Header: profile switcher, setup issues, checkpoint, update summary
+    public ObservableCollection<string> ProfileChoices { get; } = new();
+    [ObservableProperty] private string _setupIssues = "";
+    [ObservableProperty] private string _checkpointText = "";
+    [ObservableProperty] private bool _hasCheckpoint;
+    [ObservableProperty] private string _updatesSummary = "";
+
+    /// <summary>Set by the shell: the import flow (modpack by URL) and the setup window.</summary>
+    public Wpf.Services.ImportFlow? Imports { get; set; }
+    public Func<Task>? OpenSetup { get; set; }
+
+    [RelayCommand]
+    private void SwitchProfile(string name)
+    {
+        var target = Session.AllProfiles.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (target != null) Session.SwitchActiveProfile(target);
+    }
+
+    [RelayCommand]
+    private async Task RunSetup()
+    {
+        if (OpenSetup != null) await OpenSetup();
+    }
+
+    [RelayCommand]
+    private void ClearQuery() => Query = "";
+
+    /// <summary>Refresh: rescan the folder, re-detect conflicts and check
+    /// VostokMods again now (the old toolbar's Refresh).</summary>
+    [RelayCommand]
+    private async Task RefreshAll()
+    {
+        Busy = true;
+        try
+        {
+            Session.Refresh();
+            await Session.CheckUpdatesAsync(forceFresh: true);
+        }
+        finally { Busy = false; }
+    }
+
+    [RelayCommand]
+    private void OpenItemPage(ModItem? item) => OpenPage(item);
+
     partial void OnQueryChanged(string value) => Rebuild();
     partial void OnFilterChanged(string value)
     {
@@ -151,6 +234,14 @@ public sealed partial class ModsViewModel : PageViewModel
                 ? $"{d.Count} change(s) not saved to '{d.ProfileName}' · Save to profile"
                 : "";
             Footer = $"{all.Count(r => r.Enabled)} of {all.Count} enabled";
+            UpdatesSummary = string.Join("\n", new[] { Session.SummarizeUpdates(), Session.UnlinkedHint() }.Where(s => s.Length > 0));
+            SetupIssues = string.Join("\n", Session.GetSetupIssues());
+            var cp = Session.GetCheckpointStatus();
+            HasCheckpoint = cp.Any;
+            CheckpointText = cp.LastLaunch != null ? $"Checkpoint from before the last launch {cp.LastLaunch.Age}"
+                : cp.LastKnownGood != null ? $"Last clean session {cp.LastKnownGood.Age}" : "";
+            ProfileChoices.Clear();
+            foreach (var p in Session.AllProfiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)) ProfileChoices.Add(p.Name);
 
             var view = Session.BuildModRows(new ModListQuery(Query.Trim()));
             Displayed = view.Displayed;
@@ -283,6 +374,45 @@ public sealed partial class ModsViewModel : PageViewModel
     // ── install ───────────────────────────────────────────────────────
 
     [RelayCommand]
+    private async Task InstallFromUrl()
+    {
+        Busy = true;
+        try
+        {
+            var progress = new Progress<(long done, long total)>(p =>
+                InstallProgress = p.total > 0 ? $"Downloading … {p.done * 100 / p.total}%" : "Downloading …");
+            var result = await Session.InstallFromVostokModsUrlAsync(progress);
+            if (result is { InstalledModIds.Count: > 0 })
+                await Session.CheckAndPromptMissingDepsAsync(result.InstalledModIds, MissingDepsUi);
+        }
+        finally { Busy = false; InstallProgress = ""; }
+    }
+
+    [RelayCommand]
+    private async Task ImportModpackUrl()
+    {
+        if (Imports == null) return;
+        var import = await Session.AskForModpackAsync();
+        if (import != null) await Imports.RunAsync(import, null);
+    }
+
+    [RelayCommand]
+    private void SaveListTemplate()
+    {
+        var dlg = new SaveFileDialog
+        {
+            Title = "Save a mod-list template",
+            FileName = ManagerSession.ModListTemplateFileName,
+            Filter = "Mod list (*.json)|*.json",
+        };
+        if (dlg.ShowDialog() == true) Session.SaveModListTemplate(dlg.FileName);
+    }
+
+    /// <summary>Set by the shell: the window that lets the user paste a
+    /// page for each missing dependency (null = only fetch known sources).</summary>
+    public Func<MissingDependencyResolver, Task>? MissingDepsUi { get; set; }
+
+    [RelayCommand]
     private async Task InstallFiles()
     {
         var dlg = new OpenFileDialog
@@ -307,7 +437,7 @@ public sealed partial class ModsViewModel : PageViewModel
         InstallProgress = "";
         // What the new mods need and isn't here: fetch the ones with a known source.
         if (result.Install is { InstalledModIds.Count: > 0 } installed)
-            await Session.CheckAndPromptMissingDepsAsync(installed.InstalledModIds);
+            await Session.CheckAndPromptMissingDepsAsync(installed.InstalledModIds, MissingDepsUi);
         if (result.ModpackFiles.Count > 0 || result.ModListFiles.Count > 0)
             ImportRequested?.Invoke(result.ModpackFiles.Concat(result.ModListFiles).ToList());
     }
@@ -331,8 +461,34 @@ public sealed partial class ModsViewModel : PageViewModel
     [ObservableProperty] private string _driftText = "";
     [ObservableProperty] private bool _busy;
 
+    /// <summary>Download progress: the status text, plus the band along
+    /// the downloading mod's row (found by path, since rows are rebuilt).</summary>
     private IProgress<DownloadProgress> DownloadReporter(string label)
-        => new Progress<DownloadProgress>(p => InstallProgress = p.StatusText(label));
+        => new Progress<DownloadProgress>(p =>
+        {
+            InstallProgress = p.StatusText(label);
+            foreach (var r in Rows)
+            {
+                if (r.Entry == null) continue;
+                var mine = string.Equals(r.Entry.Path, p.Path, StringComparison.OrdinalIgnoreCase);
+                r.Download = mine ? (p.Percent < 0 ? -1 : p.Percent) : null;
+            }
+        });
+
+    private void ClearDownloadBands()
+    {
+        foreach (var r in Rows) r.Download = null;
+    }
+
+    /// <summary>The Status cell's click, as the old Update column: update
+    /// an outdated mod, link an unlinked one, explain a "same release".</summary>
+    internal async Task ActivateStatusAsync(ModItem item)
+    {
+        if (item.Entry == null || Busy) return;
+        Busy = true;
+        try { await Session.ActivateUpdateCellAsync(item.Entry, DownloadReporter(item.Name)); }
+        finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
+    }
 
     [RelayCommand]
     private async Task UpdateSelected()
@@ -340,7 +496,7 @@ public sealed partial class ModsViewModel : PageViewModel
         if (Selected?.Entry is not { } e || Busy) return;
         Busy = true;
         try { await Session.UpdateModAsync(e, DownloadReporter(Selected.Name)); }
-        finally { Busy = false; InstallProgress = ""; }
+        finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
     }
 
     [RelayCommand]
@@ -357,7 +513,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         Busy = true;
         try { await Session.UpdateAllAsync(DownloadReporter("mods"), null); }
-        finally { Busy = false; InstallProgress = ""; }
+        finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
     }
 
     [RelayCommand]
@@ -377,18 +533,46 @@ public sealed partial class ModsViewModel : PageViewModel
         finally { Busy = false; }
     }
 
+    /// <summary>Link a mod to its VostokMods page, or change the page an
+    /// already-linked mod points at.</summary>
     [RelayCommand]
-    private async Task LinkSelected()
+    private async Task LinkSelected(ModItem? item)
     {
-        if (Selected?.Entry is { } e) await Session.LinkModAsync(e);
+        if ((item ?? Selected)?.Entry is { } e) await Session.LinkModAsync(e);
     }
 
     [RelayCommand]
-    private void SyncDrift() => Session.SyncLiveStateIntoActiveProfile();
+    private void SyncDrift() => Session.SyncLiveStateIntoActiveProfile(DriftReviewer);
+
+    /// <summary>Set by the shell: the full windows for conflicts, the
+    /// dependency picker, earlier versions and the drift review.</summary>
+    public Action<string?>? ConflictsViewer { get; set; }
+    public Func<ModEntry, Task>? DependencyEditor { get; set; }
+    public Func<ModEntry, Task>? VersionsViewer { get; set; }
+    public Func<IReadOnlyList<DriftItem>, bool>? DriftReviewer { get; set; }
 
     [RelayCommand]
-    private async Task Revert()
+    private void ShowConflicts(ModItem? item)
     {
+        var focus = (item ?? (ConflictsViewer == null ? null : Selected))?.Entry?.ModId;
+        if (ConflictsViewer != null) ConflictsViewer(item == null ? null : focus);
+        else Filter = "conflicts";
+    }
+
+    [RelayCommand]
+    private async Task EditDependencies(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is { } e && DependencyEditor != null) await DependencyEditor(e);
+    }
+
+    [RelayCommand]
+    private async Task Revert(ModItem? item)
+    {
+        if ((item ?? Selected)?.Entry is { } chosen && VersionsViewer != null)
+        {
+            await VersionsViewer(chosen);
+            return;
+        }
         if (Selected?.Entry is not { } e) return;
         var backups = Session.GetBackups(e);
         if (backups.Count == 0)
@@ -481,6 +665,9 @@ public sealed partial class ModsViewModel : PageViewModel
         catch { /* the cached text (or the mod.txt one) stays */ }
     }
 
+    [RelayCommand]
+    private void RefreshDescription() => LoadDescription(Selected?.Entry);
+
     public string SelectedName => Selected?.Name ?? "";
     public string SelectedMeta
     {
@@ -501,6 +688,10 @@ public sealed partial class ModsViewModel : PageViewModel
     partial void OnRemoteDescriptionChanged(string value) => OnPropertyChanged(nameof(SelectedDescription));
     public string SelectedNote => Selected?.Entry is { } e ? Session.GetModNote(e) : "";
     public bool SelectedIsLinked => Selected?.Entry?.Source.IsValid == true;
+    public bool SelectedCanLock => Selected?.CanLock == true;
+    public bool SelectedHasChangelog => Selected?.Entry is { } e && ManagerSession.HasInternalChangelog(e);
+    public bool SelectedHasBackups => Selected?.Entry is { } e && Session.GetBackups(e).Count > 0;
+    public bool SelectedHasNoDependencies => Selected?.Entry != null && SelectedDependencies.Count == 0;
     public bool SelectedIsTesting => Selected?.IsTesting == true;
     public bool SelectedIsLocked => Selected?.IsLocked == true;
     public IReadOnlyList<string> SelectedRequires => Selected?.Entry?.RequiredDependencies ?? new List<string>();
@@ -517,6 +708,8 @@ public sealed partial class ModsViewModel : PageViewModel
                      nameof(SelectedIsLinked), nameof(SelectedIsTesting), nameof(SelectedIsLocked),
                      nameof(SelectedRequires), nameof(SelectedConflicts), nameof(SelectedUpdateLabel),
                      nameof(SelectedCanUpdate), nameof(SelectedConflictViews), nameof(SelectedDependencies),
+                     nameof(SelectedCanLock), nameof(SelectedHasChangelog), nameof(SelectedHasBackups),
+                     nameof(SelectedHasNoDependencies),
                  })
             OnPropertyChanged(name);
         // A rebuild re-selects the same mod; keep its description and tab.

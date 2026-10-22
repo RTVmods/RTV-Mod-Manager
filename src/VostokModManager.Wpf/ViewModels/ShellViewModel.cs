@@ -89,6 +89,12 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             foreach (var f in files) await Imports.RunFileAsync(f);
         };
+        Mods.Imports = Imports;
+        Mods.OpenSetup = async () =>
+        {
+            if (ShowSetupAsync != null) await ShowSetupAsync(SetupReason.FromSettings);
+            Session.Refresh();
+        };
     }
 
     public ManagerSession Session { get; }

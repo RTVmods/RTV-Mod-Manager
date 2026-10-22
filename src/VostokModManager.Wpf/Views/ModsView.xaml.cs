@@ -25,6 +25,77 @@ public partial class ModsView : UserControl
 
     private void OnNoteLostFocus(object sender, RoutedEventArgs e) => Vm?.SaveNote(NoteBox.Text);
 
+    /// <summary>A button whose menu opens on a left click (Install mod ▾, Switch ▾).</summary>
+    private static void OpenMenu(object sender)
+    {
+        if (sender is Button { ContextMenu: { } menu } b)
+        {
+            menu.PlacementTarget = b;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.DataContext = b.DataContext;
+            menu.IsOpen = true;
+        }
+    }
+
+    private void OnInstallMenu(object sender, RoutedEventArgs e) => OpenMenu(sender);
+    private void OnSwitchMenu(object sender, RoutedEventArgs e) => OpenMenu(sender);
+
+    /// <summary>Esc in the filter box clears it.</summary>
+    private void OnFilterKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || Vm == null) return;
+        Vm.Query = "";
+        e.Handled = true;
+    }
+
+    /// <summary>Enter in a load-order box commits it (and Esc puts the old value back).</summary>
+    private void OnOrdKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: ModItem item } box) return;
+        if (e.Key == Key.Enter)
+        {
+            item.CommitPriority();
+            List.Focus();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            item.PriorityText = item.Priority.ToString();
+            List.Focus();
+            e.Handled = true;
+        }
+    }
+
+    private void OnOrdLostFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: ModItem item }) item.CommitPriority();
+    }
+
+    /// <summary>Double-click a mod opens its VostokMods page (not on the
+    /// tick, the load-order box or the status button).</summary>
+    private void OnRowDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        var src = e.OriginalSource as DependencyObject;
+        if (FindParent<CheckBox>(src) != null || FindParent<TextBox>(src) != null || FindParent<Button>(src) != null) return;
+        if (ItemAt(src) is { Entry: not null } item) Vm?.OpenItemPageCommand.Execute(item);
+    }
+
+    /// <summary>Delete removes the selected mods; F5 refreshes.</summary>
+    private void OnListKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Vm == null || e.OriginalSource is TextBox) return;
+        if (e.Key == Key.Delete && Vm.Selected != null)
+        {
+            Vm.DeleteCommand.Execute(Vm.Selected);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F5)
+        {
+            Vm.RefreshAllCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
     // ── drag rows to reorder ──────────────────────────────────────────
 
     private void OnRowMouseDown(object sender, MouseButtonEventArgs e)

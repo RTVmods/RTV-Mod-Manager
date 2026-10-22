@@ -91,7 +91,8 @@
             <DockPanel DockPanel.Dock="Bottom" Margin="0,18,0,0">
                 <Button DockPanel.Dock="Left" Style="{StaticResource Btn.Link}" Content="Skip setup" Command="{Binding SkipCommand}" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <CheckBox Content="Back up my mods and settings first" IsChecked="{Binding WantsBackup}" Margin="0,0,18,0" />
+                    <CheckBox Content="Back up my mods and settings first" IsChecked="{Binding WantsBackup}" Margin="0,0,18,0"
+                              ToolTip="{Binding BackupItems}" />
                     <Button Style="{StaticResource Btn.Primary}" Content="Finish and open the manager" MinHeight="50" Padding="22,0" FontSize="16"
                             IsEnabled="{Binding CanFinish}" Command="{Binding FinishCommand}" />
                 </StackPanel>

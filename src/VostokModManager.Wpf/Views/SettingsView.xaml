@@ -101,12 +101,19 @@
                             <TextBlock Text="{Binding VersionLine}" Style="{StaticResource SectionTitle}" />
                             <TextBlock Style="{StaticResource T.Muted}" Margin="0,0,0,10"
                                        Text="Made by Joni for the Road to Vostok modding community. Licensed under GPL-3.0. The interface is set in Lora (SIL Open Font License), the typeface the game itself uses." />
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel>
+                                <Button Style="{StaticResource Btn.Link}" Content="Source on GitHub" Margin="0,0,14,0"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/RTVmods/RTV-Mod-Manager" />
+                                <Button Style="{StaticResource Btn.Link}" Content="Releases" Margin="0,0,14,0"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/RTVmods/RTV-Mod-Manager/releases" />
                                 <Button Style="{StaticResource Btn.Link}" Content="VostokMods" Margin="0,0,14,0"
                                         Command="{Binding OpenUrlCommand}" CommandParameter="https://vostokmods.net" />
-                                <Button Style="{StaticResource Btn.Link}" Content="Releases on GitHub"
-                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/RTVmods/RTV-Mod-Manager/releases" />
-                            </StackPanel>
+                                <Button Style="{StaticResource Btn.Link}" Content="Road to Vostok" Margin="0,0,14,0"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://www.roadtovostok.com" />
+                                <Button Style="{StaticResource Btn.Link}" Content="Claude Code docs" Margin="0,0,14,0"
+                                        Command="{Binding OpenUrlCommand}" CommandParameter="https://docs.claude.com/en/docs/claude-code"
+                                        Visibility="{Binding IsAiEdition, Converter={StaticResource VisibleWhen}}" />
+                            </WrapPanel>
                         </StackPanel>
                     </DockPanel>
                 </Border>

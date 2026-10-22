@@ -127,14 +127,19 @@
 
                     <!-- versions -->
                     <StackPanel DockPanel.Dock="Bottom" Margin="4,14,0,0">
+                        <!-- Each line opens its releases page, or offers the update when there is one. -->
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding ManagerVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" />
+                            <Button Style="{StaticResource Btn.Quiet}" Content="{Binding ManagerVersion}" FontSize="12" Padding="0" MinHeight="18"
+                                    Foreground="{StaticResource B.Text4}" Command="{Binding ManagerUpdateClickCommand}"
+                                    ToolTip="The manager's releases on GitHub" />
                             <Button Style="{StaticResource Btn.Link}" Content="{Binding ManagerUpdate}" FontSize="12" Padding="8,0,0,0"
                                     Foreground="{StaticResource B.AmberText}" Command="{Binding ManagerUpdateClickCommand}"
                                     Visibility="{Binding ManagerUpdate, Converter={StaticResource VisibleWhen}}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                            <TextBlock Text="{Binding LoaderVersion}" FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" />
+                            <Button Style="{StaticResource Btn.Quiet}" Content="{Binding LoaderVersion}" FontSize="12" Padding="0" MinHeight="18"
+                                    Foreground="{StaticResource B.Text4}" Command="{Binding LoaderUpdateClickCommand}"
+                                    ToolTip="The Mod Loader's releases on GitHub" />
                             <Button Style="{StaticResource Btn.Link}" Content="{Binding LoaderUpdate}" FontSize="12" Padding="8,0,0,0"
                                     Foreground="{StaticResource B.AmberText}" Command="{Binding LoaderUpdateClickCommand}"
                                     Visibility="{Binding LoaderUpdate, Converter={StaticResource VisibleWhen}}" />
