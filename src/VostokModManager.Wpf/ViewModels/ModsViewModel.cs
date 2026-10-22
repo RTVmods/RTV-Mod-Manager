@@ -146,7 +146,10 @@ public sealed partial class ModsViewModel : PageViewModel
             Count("testing", all.Count(r => r.Testing));
             UpdateCount = all.Count(IsUpdate);
             ConflictCount = Session.LastConflicts.Count;
-            UnlinkedCount = Session.UnlinkedMods().Count;
+            UnlinkedCount = Session.UnlinkedMods().Count(e => !Session.IsBuiltInActive(e.ModId));
+            DriftText = Session.GetDriftStatus() is { Count: > 0 } d
+                ? $"{d.Count} change(s) not saved to '{d.ProfileName}' · Save to profile"
+                : "";
             Footer = $"{all.Count(r => r.Enabled)} of {all.Count} enabled";
 
             var view = Session.BuildModRows(new ModListQuery(Query.Trim()));
@@ -320,7 +323,128 @@ public sealed partial class ModsViewModel : PageViewModel
         Session.DragReorder(Displayed, entries, index);
     }
 
+    // ── updates, links, drift ─────────────────────────────────────────
+
+    [ObservableProperty] private string _driftText = "";
+    [ObservableProperty] private bool _busy;
+
+    private IProgress<DownloadProgress> DownloadReporter(string label)
+        => new Progress<DownloadProgress>(p => InstallProgress = p.StatusText(label));
+
+    [RelayCommand]
+    private async Task UpdateSelected()
+    {
+        if (Selected?.Entry is not { } e || Busy) return;
+        Busy = true;
+        try { await Session.UpdateModAsync(e, DownloadReporter(Selected.Name)); }
+        finally { Busy = false; InstallProgress = ""; }
+    }
+
+    [RelayCommand]
+    private async Task UpdateAll()
+    {
+        if (Busy) return;
+        var outdated = Session.GetOutdatedMods();
+        if (outdated.Count == 0) return;
+        if (!Session.Prompt.Confirm("Update all",
+                $"Download the latest version of {outdated.Count} mod(s)?\n\n"
+                + string.Join("\n", outdated.Take(12).Select(m => "  • " + (string.IsNullOrEmpty(m.DisplayName) ? m.ModId : m.DisplayName)))
+                + (outdated.Count > 12 ? $"\n  …and {outdated.Count - 12} more" : "")
+                + "\n\nEach mod's current file is backed up first, so it can be reverted."))
+            return;
+        Busy = true;
+        try { await Session.UpdateAllAsync(DownloadReporter("mods"), null); }
+        finally { Busy = false; InstallProgress = ""; }
+    }
+
+    [RelayCommand]
+    private async Task CheckUpdates()
+    {
+        Busy = true;
+        try { await Session.CheckUpdatesAsync(forceFresh: true); }
+        finally { Busy = false; }
+    }
+
+    [RelayCommand]
+    private async Task LinkAll()
+    {
+        Busy = true;
+        try { await Session.AutoLinkModsAsync(); }
+        catch (Exception ex) { Session.Prompt.Error("Couldn't reach VostokMods", ex); }
+        finally { Busy = false; }
+    }
+
+    [RelayCommand]
+    private async Task LinkSelected()
+    {
+        if (Selected?.Entry is { } e) await Session.LinkModAsync(e);
+    }
+
+    [RelayCommand]
+    private void SyncDrift() => Session.SyncLiveStateIntoActiveProfile();
+
+    [RelayCommand]
+    private async Task Revert()
+    {
+        if (Selected?.Entry is not { } e) return;
+        var backups = Session.GetBackups(e);
+        if (backups.Count == 0)
+        {
+            Session.Prompt.Inform("Nothing to revert to",
+                "There are no earlier versions of this mod. A copy is kept each time the manager updates a mod.");
+            return;
+        }
+        var pick = Session.Prompt.Choose("Revert to an earlier version",
+            $"Pick the copy of {Selected.Name} to put back. The current file is kept as a backup too.",
+            backups.Take(5).Select(b => $"{b.VersionLabel}  ·  {b.WhenLabel}").ToList());
+        if (pick < 0) return;
+        Busy = true;
+        try { await Session.RevertModFromBackupAsync(e, backups[pick].Path); }
+        finally { Busy = false; }
+    }
+
     // ── the selected mod (details panel) ──────────────────────────────
+
+    [ObservableProperty] private string _detailTab = "overview";
+    [ObservableProperty] private string _remoteDescription = "";
+    [ObservableProperty] private string _changelogText = "";
+
+    [RelayCommand]
+    private void SetDetailTab(string tab)
+    {
+        DetailTab = tab;
+        if (tab == "changelog" && Selected?.Entry is { } e)
+        {
+            var log = Session.ReadChangelog(e);
+            ChangelogText = log == null
+                ? "This mod's archive has no changelog file. Its VostokMods page may list the changes."
+                : log.Text;
+        }
+    }
+
+    public string SelectedUpdateLabel => Selected?.Row.Update is { State: ModUpdateState.Outdated } u ? $"Update to {u.Latest}" : "";
+    public bool SelectedCanUpdate => SelectedUpdateLabel.Length > 0 && !(Selected?.Row.Locked ?? true);
+    public IReadOnlyList<ConflictView> SelectedConflictViews =>
+        Selected?.Entry is { } e ? Session.ConflictsInvolving(e) : Array.Empty<ConflictView>();
+    public IReadOnlyList<DependencyView> SelectedDependencies =>
+        Selected?.Entry is { } e ? Session.GetDependencies(e).Rows : Array.Empty<DependencyView>();
+
+    private int _descriptionToken;
+
+    /// <summary>Shows the cached VostokMods description at once, then
+    /// fetches a fresh one in the background (linked mods only).</summary>
+    private async void LoadDescription(ModEntry? e)
+    {
+        var token = ++_descriptionToken;
+        RemoteDescription = e == null ? "" : Session.GetCachedDescription(e);
+        if (e == null || !e.Source.IsValid) return;
+        try
+        {
+            var r = await Session.FetchDescriptionAsync(e);
+            if (token == _descriptionToken && r.Ok) RemoteDescription = r.Text;
+        }
+        catch { /* the cached text (or the mod.txt one) stays */ }
+    }
 
     public string SelectedName => Selected?.Name ?? "";
     public string SelectedMeta
@@ -334,9 +458,12 @@ public sealed partial class ModsViewModel : PageViewModel
         }
     }
     public string SelectedDescription => Selected?.Entry is not { } e ? "" :
-        string.IsNullOrWhiteSpace(e.Description)
+        !string.IsNullOrWhiteSpace(RemoteDescription) && !RemoteDescription.StartsWith("(") ? RemoteDescription
+        : string.IsNullOrWhiteSpace(e.Description)
             ? "This mod's mod.txt has no description. Linked mods show the description from their VostokMods page."
             : e.Description;
+
+    partial void OnRemoteDescriptionChanged(string value) => OnPropertyChanged(nameof(SelectedDescription));
     public string SelectedNote => Selected?.Entry is { } e ? Session.GetModNote(e) : "";
     public bool SelectedIsLinked => Selected?.Entry?.Source.IsValid == true;
     public bool SelectedIsTesting => Selected?.IsTesting == true;
@@ -347,15 +474,22 @@ public sealed partial class ModsViewModel : PageViewModel
             ? Array.Empty<ConflictDetector.Conflict>()
             : Session.LastConflicts.Where(c => c.ModIds.Contains(e.ModId, StringComparer.OrdinalIgnoreCase)).ToList();
 
-    partial void OnSelectedChanged(ModItem? value)
+    partial void OnSelectedChanged(ModItem? oldValue, ModItem? newValue)
     {
         foreach (var name in new[]
                  {
                      nameof(SelectedName), nameof(SelectedMeta), nameof(SelectedDescription), nameof(SelectedNote),
                      nameof(SelectedIsLinked), nameof(SelectedIsTesting), nameof(SelectedIsLocked),
-                     nameof(SelectedRequires), nameof(SelectedConflicts),
+                     nameof(SelectedRequires), nameof(SelectedConflicts), nameof(SelectedUpdateLabel),
+                     nameof(SelectedCanUpdate), nameof(SelectedConflictViews), nameof(SelectedDependencies),
                  })
             OnPropertyChanged(name);
+        // A rebuild re-selects the same mod; keep its description and tab.
+        if (oldValue?.Entry?.Path != newValue?.Entry?.Path)
+        {
+            LoadDescription(newValue?.Entry);
+            if (DetailTab == "changelog") SetDetailTab("changelog");
+        }
     }
 
     /// <summary>The note box in the details panel lost focus.</summary>
