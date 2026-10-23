@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.3 (2026-10-23)
+
+- **Update checks work when GitHub's API says no.** GitHub allows 60 API requests an hour per connection; past that, the manager and the Mod Loader checks now read the latest release from GitHub's releases page instead, so a new version is still offered (and the manager can still update itself).
+- **A check that couldn't reach GitHub no longer reads "✓ up to date".** The line says the check couldn't be made; an update an earlier check found is still offered.
+
 ## 0.7.2 (2026-10-23)
 
 - **CONTINUE launches the save the panel shows.** The launch panel no longer goes stale when the game moves its save slots on (a new run, a slot switch in game): it follows the save-slot folder, refreshes when the manager window comes back to the front and when the game exits, and CONTINUE re-reads the slots when pressed. If the save to continue changed since the panel was drawn, it asks before launching.

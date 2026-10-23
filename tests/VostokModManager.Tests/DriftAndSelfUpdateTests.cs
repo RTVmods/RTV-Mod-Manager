@@ -149,6 +149,50 @@ public class DriftAndSelfUpdateTests
     }
 
     [Fact]
+    public async Task A_failed_check_never_reads_as_up_to_date()
+    {
+        using var sb = new Sandbox();
+        var s = Offline(RefreshTests.OpenWithProfile(sb, new ScriptedPrompt()));
+        var installed = ManagerSession.ManagerInstalledVersion();
+        s.Settings.ManagerReleaseVersion = installed;
+        s.UpdateNet.FetchManagerRelease = () => Task.FromResult<(ManagerReleaseStatus, ManagerRelease?)>(
+            (ManagerReleaseStatus.Failed, null));
+
+        var same = await s.CheckManagerUpdateAsync(forceFresh: true);
+        Assert.Equal(VersionState.Unknown, same.State);
+        Assert.Contains("couldn't check", same.Text);
+
+        // An update an earlier check saw is still offered.
+        s.Settings.ManagerReleaseVersion = "99.0.0";
+        var newer = await s.CheckManagerUpdateAsync(forceFresh: true);
+        Assert.True(newer.IsOutdated);
+        Assert.Contains("(from an earlier check)", newer.Text);
+
+        Assert.Equal(VersionState.Unknown, ManagerSession.DescribeMml("3.4.2", "v3.4.2", true, checkFailed: true).State);
+        Assert.Equal(VersionState.Outdated, ManagerSession.DescribeMml("3.4.1", "v3.4.2", true, checkFailed: true).State);
+    }
+
+    [Fact]
+    public void The_release_page_redirect_names_the_latest_tag()
+    {
+        const string repo = "https://github.com/RTVmods/RTV-Mod-Manager";
+        Assert.Equal((LatestTagStatus.Found, "v0.7.2"),
+            GitHubReleasePage.ReadRedirect(repo, 302, new Uri(repo + "/releases/tag/v0.7.2")));
+        Assert.Equal((LatestTagStatus.Found, "v3.4.2"),
+            GitHubReleasePage.ReadRedirect(repo, 302, new Uri("/x/y/releases/tag/v3.4.2", UriKind.Relative)));
+        Assert.Equal(LatestTagStatus.NoRelease,
+            GitHubReleasePage.ReadRedirect(repo, 302, new Uri(repo + "/releases")).Status);
+        Assert.Equal(LatestTagStatus.Failed, GitHubReleasePage.ReadRedirect(repo, 404, null).Status);
+        Assert.Equal(LatestTagStatus.Failed, GitHubReleasePage.ReadRedirect(repo, 302, new Uri("https://github.com/login")).Status);
+
+        var release = ManagerReleaseChecker.FromTag("v0.7.2");
+        Assert.Equal("0.7.2", release.Version);
+        Assert.Equal(repo + "/releases/download/v0.7.2/VostokModManagerAI.exe",
+            release.AssetFor("VostokModManagerAI.exe")?.DownloadUrl);
+        Assert.NotNull(release.AssetFor("VostokModManagerIntegrated.exe"));
+    }
+
+    [Fact]
     public async Task Auto_update_writes_the_swap_script_and_asks_the_app_to_exit()
     {
         using var sb = new Sandbox();

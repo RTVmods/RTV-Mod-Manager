@@ -7,7 +7,8 @@
 //
 // API used: https://api.github.com/repos/ametrocavich/vostok-mod-loader/releases/latest
 // Auth-free, but rate-limited at 60 req/hr per IP for unauthenticated
-// requests — well within our usage given the 24h cache.
+// requests; when it refuses, the release page's redirect gives the tag
+// (GitHubReleasePage).
 
 using System.Net.Http;
 using System.Text.Json;
@@ -23,6 +24,7 @@ public record MmlRelease
 
 public class MmlVersionChecker
 {
+    private const string REPO_URL = "https://github.com/ametrocavich/vostok-mod-loader";
     private const string LATEST_URL =
         "https://api.github.com/repos/ametrocavich/vostok-mod-loader/releases/latest";
     private const string USER_AGENT =
@@ -70,10 +72,21 @@ public class MmlVersionChecker
         await stream.CopyToAsync(file, ct);
     }
 
-    /// <summary>Fetches the latest MML release. Returns null on
-    /// network/parse failure — caller decides whether to fall back
-    /// to a cached value or surface the error.</summary>
+    /// <summary>Fetches the latest MML release: from the API, else from
+    /// the release page's redirect (the API's rate limit). Returns null
+    /// when both fail — caller decides whether to fall back to a cached
+    /// value or surface the error.</summary>
     public async Task<MmlRelease?> FetchLatestAsync(CancellationToken ct = default)
+    {
+        var api = await FetchFromApiAsync(ct);
+        if (api != null) return api;
+        var (status, tag) = await GitHubReleasePage.FetchLatestTagAsync(REPO_URL, ct);
+        return status == LatestTagStatus.Found
+            ? new MmlRelease { TagName = tag, HtmlUrl = $"{REPO_URL}/releases/tag/{Uri.EscapeDataString(tag)}" }
+            : null;
+    }
+
+    private async Task<MmlRelease?> FetchFromApiAsync(CancellationToken ct)
     {
         try
         {

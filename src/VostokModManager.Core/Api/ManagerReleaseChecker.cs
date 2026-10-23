@@ -3,7 +3,8 @@
 //
 // API used: https://api.github.com/repos/RTVmods/RTV-Mod-Manager/releases/latest
 // Auth-free, rate-limited at 60 req/hr per IP for unauthenticated
-// requests — well within our usage given the 24h cache.
+// requests; when it refuses, the release page's redirect gives the tag
+// (GitHubReleasePage).
 //
 // A release carries one asset per edition (VostokModManagerAI.exe and
 // VostokModManagerIntegrated.exe, or a .zip holding one of them).
@@ -74,8 +75,45 @@ public class ManagerReleaseChecker
         return c;
     }
 
+    /// <summary>Every release since 0.7.0 carries both editions as bare
+    /// exes under these names.</summary>
+    public static readonly IReadOnlyList<string> EditionExes =
+        new[] { "VostokModManagerIntegrated.exe", "VostokModManagerAI.exe" };
+
+    /// <summary>The latest release from the API; when the API fails (the
+    /// unauthenticated rate limit, mostly), from the release page's
+    /// redirect, with the assets at their usual download URLs.</summary>
     public async Task<(ManagerReleaseStatus Status, ManagerRelease? Release)> FetchLatestAsync(
         CancellationToken ct = default)
+    {
+        var api = await FetchFromApiAsync(ct);
+        if (api.Status != ManagerReleaseStatus.Failed) return api;
+        var (status, tag) = await GitHubReleasePage.FetchLatestTagAsync(RepoUrl, ct);
+        return status switch
+        {
+            LatestTagStatus.Found => (ManagerReleaseStatus.Found, FromTag(tag)),
+            LatestTagStatus.NoRelease => (ManagerReleaseStatus.NoRelease, null),
+            _ => api,
+        };
+    }
+
+    /// <summary>A release known only by its tag: both editions' exes at
+    /// the release's download URLs (sizes unknown).</summary>
+    public static ManagerRelease FromTag(string tag)
+    {
+        var t = Uri.EscapeDataString(tag);
+        return new ManagerRelease
+        {
+            Version = tag.TrimStart('v', 'V'),
+            HtmlUrl = $"{ReleasesUrl}/tag/{t}",
+            Assets = EditionExes
+                .Select(n => new ManagerReleaseAsset { Name = n, DownloadUrl = $"{ReleasesUrl}/download/{t}/{n}" })
+                .ToList(),
+        };
+    }
+
+    private async Task<(ManagerReleaseStatus Status, ManagerRelease? Release)> FetchFromApiAsync(
+        CancellationToken ct)
     {
         try
         {

@@ -52,7 +52,7 @@ public sealed partial class ManagerSession
         var installed = MmlInstall.DetectInstalledVersion(ModsDir);
 
         string latest = "";
-        bool fromCache = false;
+        bool fromCache = false, checkFailed = false;
         var cacheUsable = Settings.IsMmlCacheFresh
             && (string.IsNullOrEmpty(installed)
                 || ModRegistry.CompareVersions(installed, Settings.MmlLatestTag) <= 0);
@@ -76,18 +76,20 @@ public sealed partial class ManagerSession
             else if (!string.IsNullOrEmpty(Settings.MmlLatestTag))
             {
                 latest = Settings.MmlLatestTag;
-                fromCache = true;
+                fromCache = checkFailed = true;
             }
         }
-        var status = DescribeMml(installed, latest, fromCache);
+        var status = DescribeMml(installed, latest, fromCache, checkFailed);
         Say(StatusArea.Loader, status.Text);
         return status;
     }
 
-    /// <summary>The Loader line for an installed / latest pair.</summary>
-    public static MmlStatus DescribeMml(string installed, string latest, bool fromCache)
+    /// <summary>The Loader line for an installed / latest pair. With
+    /// `checkFailed`, `latest` is what an earlier check saw: it can still
+    /// show an update, but not that none exists.</summary>
+    public static MmlStatus DescribeMml(string installed, string latest, bool fromCache, bool checkFailed = false)
     {
-        var freshness = fromCache ? " (cached)" : "";
+        var freshness = checkFailed ? " (from an earlier check)" : fromCache ? " (cached)" : "";
         // Release tags carry a leading "v"; the text adds its own.
         var shown = latest.TrimStart('v', 'V');
         var hasInstalled = !string.IsNullOrEmpty(installed);
@@ -103,6 +105,9 @@ public sealed partial class ManagerSession
             return new(installed, latest, fromCache, VersionState.Unknown,
                 $"MML: installed v{installed}; latest unknown — click to open releases page.");
         var cmp = ModRegistry.CompareVersions(installed, shown);
+        if (cmp == 0 && checkFailed)
+            return new(installed, latest, fromCache, VersionState.Unknown,
+                $"MML: installed v{installed}; couldn't check GitHub for a newer release right now — click to open releases page.");
         var (state, text) = cmp == 0 ? (VersionState.UpToDate, "✓ up to date")
             : cmp > 0 ? (VersionState.Ahead, "↑ ahead of release")
             : (VersionState.Outdated, "⬆ outdated");
@@ -247,7 +252,7 @@ public sealed partial class ManagerSession
     {
         var installed = ManagerInstalledVersion();
         string latest = "";
-        bool fromCache = false;
+        bool fromCache = false, checkFailed = false;
 
         if (!forceFresh && Settings.IsManagerCacheFresh)
         {
@@ -281,24 +286,30 @@ public sealed partial class ManagerSession
                 // The check failed: keep the last good value rather than
                 // blanking the line.
                 latest = Settings.ManagerReleaseVersion;
-                fromCache = true;
+                fromCache = checkFailed = true;
             }
         }
-        var result = DescribeManager(installed, latest, fromCache, _managerNoRelease);
+        var result = DescribeManager(installed, latest, fromCache, _managerNoRelease, checkFailed);
         Say(StatusArea.Manager, result.Text);
         return result;
     }
 
     /// <summary>The Manager line for an installed / latest pair. The
-    /// outdated state is the one the UI should make stand out.</summary>
-    public static ManagerStatus DescribeManager(string installed, string latest, bool fromCache, bool noRelease)
+    /// outdated state is the one the UI should make stand out. With
+    /// `checkFailed`, `latest` is what an earlier check saw: it can still
+    /// show an update, but not that none exists.</summary>
+    public static ManagerStatus DescribeManager(string installed, string latest, bool fromCache, bool noRelease,
+        bool checkFailed = false)
     {
-        var freshness = fromCache ? " (cached)" : "";
+        var freshness = checkFailed ? " (from an earlier check)" : fromCache ? " (cached)" : "";
         if (string.IsNullOrEmpty(latest))
             return new(installed, latest, fromCache, noRelease, VersionState.Unknown, noRelease
                 ? $"Manager: v{installed} — no release published yet; click to open the releases page."
                 : $"Manager: installed v{installed}; update check failed — click to open the releases page.");
         var cmp = ModRegistry.CompareVersions(installed, latest);
+        if (cmp == 0 && checkFailed)
+            return new(installed, latest, fromCache, noRelease, VersionState.Unknown,
+                $"Manager: v{installed}; couldn't check GitHub for updates right now — click to open the releases page.");
         if (cmp == 0)
             return new(installed, latest, fromCache, noRelease, VersionState.UpToDate,
                 $"Manager: v{installed} ✓ up to date{freshness}");
