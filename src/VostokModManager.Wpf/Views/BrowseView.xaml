@@ -409,11 +409,13 @@
                             </TextBlock.Style>
                         </TextBlock>
 
+                        <!-- Tighter than the usual buttons so all three share a line in the
+                             default window, "Open in Mods" included. -->
                         <WrapPanel Margin="0,0,0,18">
-                            <Button Content="{Binding DetailActionText}" Style="{StaticResource Btn.Primary}" Margin="0,0,8,8"
-                                    MinWidth="110" Command="{Binding ActCommand}" IsEnabled="{Binding CanAct}" />
-                            <Button Content="Open page" Margin="0,0,8,8" Command="{Binding OpenPageCommand}" />
-                            <Button Content="Changelog" Margin="0,0,8,8" Command="{Binding ShowChangelogCommand}"
+                            <Button Content="{Binding DetailActionText}" Style="{StaticResource Btn.Primary}" Margin="0,0,6,8"
+                                    Padding="12,0" MinWidth="96" Command="{Binding ActCommand}" IsEnabled="{Binding CanAct}" />
+                            <Button Content="Open page" Margin="0,0,6,8" Padding="12,0" Command="{Binding OpenPageCommand}" />
+                            <Button Content="Changelog" Margin="0,0,0,8" Padding="12,0" Command="{Binding ShowChangelogCommand}"
                                     ToolTip="What changed in each version, from VostokMods" />
                         </WrapPanel>
 

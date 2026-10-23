@@ -64,11 +64,14 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 await Task.Delay(300);
                 target = Application.Current.Windows.OfType<Views.MessageWindow>().Last();
             }
-            else shell.Open(req.Page);
+            else shell.Open(req.Page.Split(':')[0]);
             // Browse loads its catalogue from VostokMods; let it (and its thumbnails) land.
-            if (shell.Selected.Page is BrowseViewModel { Loading: { } loading })
+            // `browse:<slug>` then selects that mod's card.
+            if (shell.Selected.Page is BrowseViewModel { Loading: { } loading } browse)
             {
                 try { await loading; } catch { /* the page shows the error */ }
+                var slug = req.Page.Contains(':') ? req.Page[(req.Page.IndexOf(':') + 1)..] : "";
+                if (slug.Length > 0 && browse.Cards.FirstOrDefault(c => c.Slug == slug) is { } card) browse.Selected = card;
                 await Task.Delay(4000);
             }
             await Task.Delay(800);
