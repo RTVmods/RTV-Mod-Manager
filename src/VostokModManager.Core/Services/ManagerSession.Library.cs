@@ -250,6 +250,19 @@ public sealed class LibraryModel
             e.Source.IsValid ? e.Source.Id : "—");
     }
 
+    /// <summary>What "Add from the library" offers: the newest version of
+    /// each mod no version of which is live (so not in the active profile),
+    /// sorted by name. A mod whose id is taken by a different live mod is
+    /// left out (installing it would replace that one), and so are the
+    /// manager's built-in mods.</summary>
+    public IReadOnlyList<LibraryRow> AddableRows()
+        => ModLineage.Group(_entries)
+            .Select(g => g[0])
+            .Where(e => !BuiltInMods.IsBuiltIn(e.ModId) && StateOf(e).State == LibraryLiveState.NotInstalled)
+            .OrderBy(NameOf, StringComparer.OrdinalIgnoreCase)
+            .Select(ToRow)
+            .ToList();
+
     // ── actions ───────────────────────────────────────────────────────
 
     /// <summary>The library files of the picked entries that are still

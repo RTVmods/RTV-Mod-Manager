@@ -425,6 +425,18 @@ public sealed partial class ModsViewModel : PageViewModel
         await DropAsync(dlg.FileNames);
     }
 
+    /// <summary>Set by the shell: the library picker, returning the
+    /// ticked library files (none when cancelled).</summary>
+    public Func<IReadOnlyList<string>>? LibraryPicker { get; set; }
+
+    [RelayCommand]
+    private async Task AddFromLibrary()
+    {
+        if (LibraryPicker == null) return;
+        var paths = LibraryPicker();
+        if (paths.Count > 0) await DropAsync(paths);
+    }
+
     /// <summary>Files dropped on the list or picked in Install mod….
     /// Mods install here; modpacks and mod lists go to the import.</summary>
     public async Task DropAsync(IEnumerable<string> paths)

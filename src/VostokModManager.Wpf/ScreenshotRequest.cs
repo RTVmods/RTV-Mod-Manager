@@ -37,6 +37,14 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 };
                 target.Show();
             }
+            else if (req.Page == "library-picker")
+            {
+                target = new Views.LibraryPickerWindow(new LibraryPickerViewModel(shell.Session))
+                {
+                    Width = 700, Height = 700,
+                };
+                target.Show();
+            }
             else shell.Open(req.Page);
             // Browse loads its catalogue from VostokMods; let it (and its thumbnails) land.
             if (shell.Selected.Page is BrowseViewModel { Loading: { } loading })

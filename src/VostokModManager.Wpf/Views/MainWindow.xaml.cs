@@ -39,6 +39,7 @@ public partial class MainWindow : Window
         mods.VersionsViewer = e => RevertWindow.ShowAsync(this, session, e);
         mods.DriftReviewer = items => DriftReviewWindow.Review(this, items, session.ActiveProfile?.Name ?? "");
         mods.MissingDepsUi = MissingDependenciesWindow.Resolver(() => this);
+        mods.LibraryPicker = () => LibraryPickerWindow.Pick(this, session);
     }
 
     protected override void OnClosing(CancelEventArgs e)

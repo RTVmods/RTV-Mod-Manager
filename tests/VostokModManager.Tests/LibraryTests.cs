@@ -52,6 +52,23 @@ public class LibraryTests
     }
 
     [Fact]
+    public void Add_from_the_library_offers_the_newest_version_of_each_mod_not_live()
+    {
+        using var sb = new Sandbox();
+        sb.AddMod("alpha", "1.0");
+        Archive(sb, "alpha", "1.1");    // another version of a live mod: already in the profile
+        Archive(sb, "gamma", "1.0");
+        Archive(sb, "gamma", "1.2");
+        Archive(sb, "beta", "2.0");
+        var session = Open(sb, new ScriptedPrompt());
+
+        var rows = session.OpenLibrary().AddableRows();
+
+        Assert.Equal(new[] { "beta 2.0", "gamma 1.2" }, rows.Select(r => r.Name + " " + r.Version));
+        Assert.All(rows, r => Assert.Equal(LibraryLiveState.NotInstalled, r.State));
+    }
+
+    [Fact]
     public void Filter_matches_every_word_and_sort_toggles_direction()
     {
         using var sb = new Sandbox();
