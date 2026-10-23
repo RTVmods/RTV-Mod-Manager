@@ -8,7 +8,7 @@
     <!-- Single version source — reflected at runtime by Settings → About,
          the update checks and the support package via
          Assembly.GetName().Version. -->
-    <Version>0.7.4</Version>
+    <Version>0.7.5</Version>
     <Description>Standalone mod manager for Road to Vostok</Description>
     <Authors>Joni</Authors>
     <Copyright>© Joni — distributed for the Road to Vostok modding community</Copyright>
