@@ -166,10 +166,21 @@
                     </Button>
                 </StackPanel>
                 <StackPanel>
+                    <!-- The label, and beside it the switcher as a real button: a lit
+                         edge and a larger label so it reads as the way to change it.
+                         It sits on this line, not beside the name, so a long profile
+                         name can't push it under the filter box. -->
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                        <Button Style="{StaticResource Btn.Quiet}" Content="Switch ▾" Margin="8,0,0,0" Padding="4,0" MinHeight="20" FontSize="12"
-                                Click="OnSwitchMenu" AutomationProperties.Name="Switch profile">
+                        <Button Margin="14,0,0,0" VerticalAlignment="Center" MinHeight="34" Padding="12,0" FontSize="15"
+                                Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeStrong}"
+                                Click="OnSwitchMenu" AutomationProperties.Name="Switch profile" ToolTip="Make another profile the active one">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource Icon.Profiles}" Style="{StaticResource IconPath}" Width="16" Height="16"
+                                      Stroke="{StaticResource B.Text}" VerticalAlignment="Center" />
+                                <TextBlock Text="Switch profile" Margin="9,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Text="▾" Margin="8,0,0,0" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource B.Text2}" />
+                            </StackPanel>
                             <Button.ContextMenu>
                                 <ContextMenu ItemsSource="{Binding ProfileChoices}">
                                     <ContextMenu.ItemContainerStyle>
@@ -183,7 +194,7 @@
                             </Button.ContextMenu>
                         </Button>
                     </StackPanel>
-                    <TextBlock Text="{Binding ProfileName}" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+                    <TextBlock Text="{Binding ProfileName}" Style="{StaticResource T.H1}" Margin="0,4,0,0" />
                 </StackPanel>
             </DockPanel>
 

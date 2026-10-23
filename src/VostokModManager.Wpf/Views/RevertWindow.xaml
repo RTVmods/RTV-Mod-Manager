@@ -6,7 +6,7 @@
         Width="760" Height="560" MinWidth="600" MinHeight="380"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
-        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
     </WindowChrome.WindowChrome>

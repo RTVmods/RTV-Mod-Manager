@@ -41,6 +41,8 @@
                         </DockPanel>
                         <CheckBox Content="Skip the Mod Loader's own window when I launch from the manager" IsChecked="{Binding SkipLoaderUi}" Margin="0,0,0,10" />
                         <CheckBox Content="Built-in save slots (the manager keeps the Save Slots mod on in every profile)" IsChecked="{Binding SaveSlotsBuiltIn}" />
+                        <CheckBox Content="Use the font picked in game with the Custom Fonts mod" IsChecked="{Binding FollowGameFont}" Margin="0,10,0,0" />
+                        <TextBlock Text="{Binding GameFontNote}" Style="{StaticResource T.Muted}" Margin="28,2,0,0" />
                     </StackPanel>
                 </Border>
 

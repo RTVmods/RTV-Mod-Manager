@@ -4,7 +4,7 @@
         Width="520" SizeToContent="Height" MaxHeight="760" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
-        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}"
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}"
         UseLayoutRounding="True">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="28" ResizeBorderThickness="0" GlassFrameThickness="0" />

@@ -412,6 +412,18 @@ public sealed partial class ShellViewModel : ObservableObject
         NewGameMenuText = EmptySlot > 0 ? $"New game in slot {EmptySlot}" : "";
     }
 
+    private string _gameFontSignature = "";
+
+    /// <summary>Follows the font picked in game with the Custom Fonts mod
+    /// (or goes back to Lora); re-read only when its inputs changed.</summary>
+    public void RefreshGameFont()
+    {
+        var signature = Session.GameFontSignature();
+        if (signature == _gameFontSignature) return;
+        _gameFontSignature = signature;
+        Services.GameFontTheme.Apply(Session.CurrentGameFont());
+    }
+
     private void OnSessionChanged()
     {
         // Events come on the UI thread (the session is UI-thread-affine).
@@ -423,6 +435,7 @@ public sealed partial class ShellViewModel : ObservableObject
         NavByKey("profiles")!.Count = Session.AllProfiles.Count == 0 ? "" : Session.AllProfiles.Count.ToString();
 
         RefreshLaunchTarget();
+        RefreshGameFont();
 
         Checks.Clear();
         var r = Session.GetLaunchReadiness();

@@ -20,7 +20,7 @@
         </Style>
         <!-- A card's name: reads as a title, opens the profile's mod list. -->
         <Style x:Key="NameButton" TargetType="Button">
-            <Setter Property="FontFamily" Value="{StaticResource Font.Lora}" />
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Lora}" />
             <Setter Property="FontSize" Value="19" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Foreground" Value="{StaticResource B.Text}" />

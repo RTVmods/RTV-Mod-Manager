@@ -14,8 +14,13 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => SyncMaximized();
         Loaded += (_, _) => SyncMaximized();
         DataContextChanged += (_, _) => Hook();
-        // Back from the game: show the slot it would continue now.
-        Activated += (_, _) => (DataContext as ViewModels.ShellViewModel)?.RefreshLaunchTarget();
+        // Back from the game: show the slot it would continue now, in the
+        // font it was set to.
+        Activated += (_, _) =>
+        {
+            Shell?.RefreshLaunchTarget();
+            Shell?.RefreshGameFont();
+        };
     }
 
     private ShellViewModel? Shell => DataContext as ShellViewModel;

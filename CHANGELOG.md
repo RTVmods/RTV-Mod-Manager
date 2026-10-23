@@ -4,6 +4,8 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 
 ## Unreleased
 
+- **The manager uses your game's font.** With the Custom Fonts mod on in the active profile, the manager's text switches to the font picked for the game in that mod's settings (Bender, Inter, JetBrains Mono, …), and follows a new pick when you come back from the game. The font is read from the mod you have installed; nothing is bundled. Lora stays the font otherwise, and **Settings → Use the font picked in game with the Custom Fonts mod** turns it off.
+- **The profile switcher stands out.** On the Mods page, **Switch profile ▾** is now a full button beside ACTIVE PROFILE instead of small text.
 - **Updating the manager shows its progress.** After **Install and relaunch**, a window stays up with a progress bar: looking up the release, downloading (megabytes so far of the total), unpacking, then restarting. The manager can't be used meanwhile, and if something fails the message opens over that window.
 
 ## 0.7.5 (2026-10-23)

@@ -157,6 +157,10 @@ public class Settings
     /// profile. Off removes it.</summary>
     public bool SaveSlotsBuiltIn { get; set; } = true;
 
+    /// <summary>When the Custom Fonts mod is on in the active profile, the
+    /// manager's text uses the font picked for the game in its settings.</summary>
+    public bool FollowGameFont { get; set; } = true;
+
     /// <summary>The one-time offer to turn off other save-slot mods in
     /// the saved profiles has been made.</summary>
     public bool SaveSlotsOtherModsAsked { get; set; }

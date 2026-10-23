@@ -7,7 +7,7 @@
         Width="1440" Height="920" MinWidth="980" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource B.Ground}"
-        FontFamily="{StaticResource Font.Lora}" FontSize="{StaticResource Size.Body}"
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}"
         Foreground="{StaticResource B.Text}"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True">
 

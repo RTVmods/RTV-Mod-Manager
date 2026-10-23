@@ -12,10 +12,11 @@ public sealed record SettingsValues(
     string ClaudePath,
     string GameSourcePath,
     bool SkipLoaderUi,
-    bool SaveSlotsBuiltIn)
+    bool SaveSlotsBuiltIn,
+    bool FollowGameFont = true)
 {
     public static SettingsValues From(Settings s)
-        => new(s.ModsDir, s.ClaudePath, s.GameSourcePath, s.SkipLoaderUi, s.SaveSlotsBuiltIn);
+        => new(s.ModsDir, s.ClaudePath, s.GameSourcePath, s.SkipLoaderUi, s.SaveSlotsBuiltIn, s.FollowGameFont);
 
     internal void WriteTo(Settings s)
     {
@@ -24,6 +25,7 @@ public sealed record SettingsValues(
         s.GameSourcePath = GameSourcePath;
         s.SkipLoaderUi = SkipLoaderUi;
         s.SaveSlotsBuiltIn = SaveSlotsBuiltIn;
+        s.FollowGameFont = FollowGameFont;
     }
 }
 
