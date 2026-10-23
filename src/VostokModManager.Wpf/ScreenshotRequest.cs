@@ -45,6 +45,13 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 };
                 target.Show();
             }
+            else if (req.Page.StartsWith("changelog:"))
+            {
+                // A VostokMods mod's changelog window, e.g. changelog:ammo-check.
+                var detail = await new VostokModManager.Api.VostokModsClient().GetModAsync(req.Page["changelog:".Length..]);
+                target = new Views.ChangelogWindow(detail.Name, ModCard.BuildChangelog(detail.Files));
+                target.Show();
+            }
             else if (req.Page == "manager-update")
             {
                 // The self-update's window, frozen mid-download.

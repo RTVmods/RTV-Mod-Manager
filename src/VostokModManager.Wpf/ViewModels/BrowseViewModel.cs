@@ -152,8 +152,28 @@ public sealed partial class ModCard : ObservableObject
     [ObservableProperty] private bool _detailLoading;
     [ObservableProperty] private string _stats = "";
 
+    /// <summary>Every version's changelog from VostokMods, newest first, as
+    /// Markdown under a heading per version; "" until the detail is read
+    /// or when no version has one.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ShowChangelogCommand))]
+    private string _changelog = "";
+
     [RelayCommand] private Task Act() => _owner.ActAsync(this);
     [RelayCommand] private void OpenPage() => BrowseViewModel.OpenUrl(Mod.PageUrl);
+
+    private bool HasChangelog() => Changelog.Length > 0;
+
+    [RelayCommand(CanExecute = nameof(HasChangelog))]
+    private void ShowChangelog() => Views.ChangelogWindow.Show(System.Windows.Application.Current?.MainWindow, Name, Changelog);
+
+    /// <summary>"## v1.2 · 23 Oct 2026" and its notes, for each version that has any.</summary>
+    internal static string BuildChangelog(IEnumerable<VmFile> files)
+        => string.Join("\n\n", files
+            .Where(f => !string.IsNullOrWhiteSpace(f.Changelog))
+            .Select(f => $"## v{f.Version}"
+                + (f.CreatedAt is { } at ? $" · {at.ToLocalTime():d MMM yyyy}" : "")
+                + "\n\n" + f.Changelog.Trim()));
 
     /// <summary>Starts the thumbnail download the first time the card is shown.</summary>
     public async void EnsureThumb()
@@ -176,6 +196,7 @@ public sealed partial class ModCard : ObservableObject
             if (d.LatestVersion.Length > 0) Version = d.LatestVersion;
             Description = MarkdownToText(d.Description);
             if (Description.Length == 0) Description = Summary;
+            Changelog = BuildChangelog(d.Files);
             Stats = string.Join(" · ", new[]
             {
                 d.Downloads == 1 ? "1 download" : $"{d.Downloads:N0} downloads",
