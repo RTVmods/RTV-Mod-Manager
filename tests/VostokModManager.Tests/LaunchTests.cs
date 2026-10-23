@@ -35,8 +35,18 @@ internal sealed class FakeGameProcess : IGameProcess
 internal sealed class FakeProcessSource : IGameProcessSource
 {
     public IGameProcess? Game { get; set; }
+    /// <summary>The process the game restarts into, listed once Game has exited.</summary>
+    public IGameProcess? Restarted { get; set; }
     public int Polls { get; private set; }
-    public IGameProcess? FindGame() { Polls++; return Game; }
+
+    // Like the real process table, an exited process is no longer listed.
+    public IGameProcess? FindGame()
+    {
+        Polls++;
+        return new[] { Game, Restarted }.FirstOrDefault(g => g != null && !Exited(g));
+    }
+
+    private static bool Exited(IGameProcess g) => g is FakeGameProcess f && f.Exit.Task.IsCompleted;
 }
 
 internal static class LaunchKit
@@ -191,7 +201,8 @@ public class LaunchTests
 
     [Theory]
     [InlineData(0, 120, GameExitKind.CleanExit)]
-    [InlineData(0, 20, GameExitKind.LikelyCrash)]   // a quick quit-out isn't a real session
+    [InlineData(0, 20, GameExitKind.ShortExit)]   // a quick quit-out: neither a real session nor a crash
+    [InlineData(3, 20, GameExitKind.LikelyCrash)]
     [InlineData(3, 600, GameExitKind.LikelyCrash)]
     public async Task Monitor_classifies_how_the_session_ended(int exitCode, double seconds, GameExitKind expected)
     {
@@ -210,6 +221,59 @@ public class LaunchTests
         Assert.Equal(expected == GameExitKind.CleanExit ? exit : null, clean);
         Assert.Equal(expected == GameExitKind.LikelyCrash ? exit : null, crash);
         Assert.True(game.Disposed);
+    }
+
+    [Fact]
+    public async Task Monitor_follows_the_mod_loaders_restart_into_the_second_pass()
+    {
+        // Pass 1 applies the mods and exits cleanly after a few seconds; the
+        // session is the pass-2 process that replaces it.
+        var t0 = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var now = t0;
+        var pass1 = new FakeGameProcess { ExitCode = 0 };
+        var pass2 = new FakeGameProcess { ExitCode = 0 };
+        var source = new FakeProcessSource { Game = pass1 };
+        var monitor = new GameSessionMonitor(source, () => now, (_, _) => Task.Delay(1));
+        GameExit? crash = null;
+        monitor.CrashDetected += e => crash = e;
+
+        var watch = monitor.WatchAsync();
+        await Task.Delay(20);
+        now = t0.AddSeconds(8);
+        pass1.Exit.SetResult();
+        source.Restarted = pass2;
+        await Task.Delay(20);
+        Assert.False(watch.IsCompleted);
+        Assert.True(pass1.Disposed);
+
+        now = t0.AddSeconds(900);
+        pass2.Exit.SetResult();
+        var exit = await watch;
+
+        Assert.Equal(GameExitKind.CleanExit, exit.Kind);
+        Assert.Equal(900, exit.SessionSeconds);
+        Assert.Null(crash);
+        Assert.True(pass2.Disposed);
+    }
+
+    [Fact]
+    public async Task A_launch_that_exits_cleanly_within_seconds_is_not_called_a_crash()
+    {
+        using var sb = new Sandbox();
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Default\"\n");
+        var (monitor, game, advance) = Monitor(exitCode: 0);
+        var prompt = new ScriptedPrompt();
+        var session = LaunchKit.Open(sb, prompt, new RecordingLauncher());
+        session.GameMonitor = monitor;
+
+        session.LaunchGame();
+        advance(8);
+        game.Exit.SetResult();
+        var exit = await session.GameWatchTask!;
+
+        Assert.Equal(GameExitKind.ShortExit, exit.Kind);
+        Assert.Empty(prompt.Asked);
+        Assert.False(CrashCheckpoint.Exists(CheckpointSlot.LastKnownGood));
     }
 
     [Fact]

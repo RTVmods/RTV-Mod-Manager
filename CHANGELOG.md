@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.4 (2026-10-23)
+
+- **No more "Possible crash detected" on every launch.** Since 0.7.2 the crash watch finds the game, but the Mod Loader restarts the game once while applying the mods, and the watch took that first, clean exit for a crash. It now follows the game into the restarted process and judges the session by how that one ends.
+- A game that exits normally (exit code 0) within a minute is no longer called a crash either; it just isn't counted as a known-good session.
+
 ## 0.7.3 (2026-10-23)
 
 - **Update checks work when GitHub's API says no.** GitHub allows 60 API requests an hour per connection; past that, the manager and the Mod Loader checks now read the latest release from GitHub's releases page instead, so a new version is still offered (and the manager can still update itself).

@@ -2,12 +2,16 @@
 //
 // Steam launches are fire-and-forget, so there is no Process handle: the
 // monitor polls for a process that looks like the game for up to a minute
-// after the launch, then waits for it to exit and classifies the session:
+// after the launch, then waits for it to exit. The Mod Loader applies the
+// mods in a first pass and restarts the game into a second one, so when
+// the process exits the monitor looks for a new one for a while and
+// follows it. When the last one exits it classifies the session:
 //
-//   • clean  — exit code 0 and at least 60 s of play. A quick quit-out
-//              under a minute is more likely "I just tested the launch"
-//              than a session worth anchoring as last-known-good.
-//   • crash  — a non-zero exit code, or a session under 60 s.
+//   • clean  — exit code 0 and at least 60 s of play.
+//   • short  — exit code 0 under a minute: more likely "I just tested the
+//              launch" than a session worth anchoring as last-known-good,
+//              but not a crash either.
+//   • crash  — a non-zero exit code.
 //
 // When no candidate process turns up the watch ends quietly: Steam runs
 // the game under various names and a missed crash beats a false alarm.
@@ -43,6 +47,9 @@ public enum GameExitKind
     /// <summary>The process went away before its state could be read.</summary>
     Lost,
     CleanExit,
+    /// <summary>Exit code 0 under CleanSessionMinimum: nothing to restore,
+    /// nothing to promote.</summary>
+    ShortExit,
     LikelyCrash,
 }
 
@@ -110,6 +117,14 @@ public sealed class GameSessionMonitor
     /// <summary>A zero exit code counts as clean only after this long.</summary>
     public TimeSpan CleanSessionMinimum { get; init; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>How long after the game exits to look for the process it
+    /// restarted into (the Mod Loader's second pass).</summary>
+    public TimeSpan RestartGrace { get; init; } = TimeSpan.FromSeconds(20);
+
+    /// <summary>Restarts followed in one session, so a game that keeps
+    /// relaunching can't hold the watch forever.</summary>
+    public int MaxRestarts { get; init; } = 3;
+
     /// <summary>Raised when a watched session ends with a likely crash.
     /// Raised on the thread that awaited WatchAsync's continuation (the
     /// UI thread when it was started there).</summary>
@@ -134,31 +149,30 @@ public sealed class GameSessionMonitor
     public async Task<GameExit> WatchAsync(CancellationToken ct = default)
     {
         var launchTime = _utcNow();
-        IGameProcess? game = null;
-        var elapsed = TimeSpan.Zero;
-        while (elapsed < FindTimeout && !ct.IsCancellationRequested)
-        {
-            game = _source.FindGame();
-            if (game != null) break;
-            try { await _delay(PollInterval, ct); }
-            catch (OperationCanceledException) { break; }
-            elapsed += PollInterval;
-        }
+        var game = await FindGameAsync(FindTimeout, ct);
         if (game == null) return new GameExit(GameExitKind.NotFound);
 
         GameExit exit;
         try
         {
-            await game.WaitForExitAsync(ct);
+            int exitCode;
+            var restarts = 0;
+            while (true)
+            {
+                await game.WaitForExitAsync(ct);
+                exitCode = game.ExitCode;
+                if (restarts >= MaxRestarts) break;
+                var next = await FindGameAsync(RestartGrace, ct);
+                if (next == null) break;
+                game.Dispose();
+                game = next;
+                restarts++;
+            }
             var sessionSec = (_utcNow() - launchTime).TotalSeconds;
-            var exitCode = game.ExitCode;
-            // Clean: exit code 0 AND long enough to be a real play.
-            // Everything else (non-zero code, or under a minute) is a
-            // likely crash.
-            var cleanExit = exitCode == 0 && sessionSec >= CleanSessionMinimum.TotalSeconds;
-            exit = new GameExit(
-                cleanExit ? GameExitKind.CleanExit : GameExitKind.LikelyCrash,
-                exitCode, sessionSec);
+            var kind = exitCode != 0 ? GameExitKind.LikelyCrash
+                : sessionSec >= CleanSessionMinimum.TotalSeconds ? GameExitKind.CleanExit
+                : GameExitKind.ShortExit;
+            exit = new GameExit(kind, exitCode, sessionSec);
         }
         catch
         {
@@ -172,7 +186,23 @@ public sealed class GameSessionMonitor
         }
 
         if (exit.Kind == GameExitKind.CleanExit) CleanExit?.Invoke(exit);
-        else CrashDetected?.Invoke(exit);
+        else if (exit.Kind == GameExitKind.LikelyCrash) CrashDetected?.Invoke(exit);
         return exit;
+    }
+
+    /// <summary>Polls for the game's process for up to `within`; null
+    /// when none turns up or the watch is cancelled.</summary>
+    private async Task<IGameProcess?> FindGameAsync(TimeSpan within, CancellationToken ct)
+    {
+        var elapsed = TimeSpan.Zero;
+        while (elapsed < within && !ct.IsCancellationRequested)
+        {
+            var game = _source.FindGame();
+            if (game != null) return game;
+            try { await _delay(PollInterval, ct); }
+            catch (OperationCanceledException) { break; }
+            elapsed += PollInterval;
+        }
+        return null;
     }
 }
