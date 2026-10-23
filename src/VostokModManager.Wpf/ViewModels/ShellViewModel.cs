@@ -195,6 +195,15 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private void PrimaryLaunch()
     {
+        // The game changes slots behind the manager's back (a new run, the
+        // slot panel in its menu), so decide what to continue from the slot
+        // files as they are now, not from when the panel last refreshed.
+        var shown = ContinueSlot;
+        RefreshLaunchTarget();
+        if (ContinueSlot != shown && ContinueSlot > 0
+            && !Session.Prompt.Confirm("Continue which save?",
+                $"The saves changed since this panel was drawn. The save to continue is now {NextLaunchText}.\n\nContinue it?"))
+            return;
         if (ContinueSlot > 0) Session.LaunchSlot(ContinueSlot);
         else Session.LaunchGame();
     }
@@ -241,6 +250,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 return;
             }
             WatchModsFolder();
+            WatchSaveSlots();
             if (result.Has(StartupStep.OfferProfileMigration) || result.Has(StartupStep.OfferFirstRunBackup))
             {
                 if (ShowSetupAsync != null)
@@ -307,22 +317,70 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    private FileSystemWatcher? _slotWatcher;
+    private DispatcherTimer? _slotDebounce;
+
+    /// <summary>The game's save-slot folder (MultiSaveSlots): the Save
+    /// Slots mod rewrites state.cfg (which slot is active) and each slot's
+    /// _meta.cfg as the game is played, the in-game slot panel included.
+    /// Following those changes keeps CONTINUE and the Saves page on the
+    /// slot the game would actually continue.</summary>
+    public void WatchSaveSlots()
+    {
+        _slotWatcher?.Dispose();
+        _slotWatcher = null;
+        var root = Session.SaveSlotsRoot;
+        if (!Directory.Exists(root)) return;
+        _slotDebounce ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _slotDebounce.Tick -= OnSlotsSettled;
+        _slotDebounce.Tick += OnSlotsSettled;
+        try
+        {
+            _slotWatcher = new FileSystemWatcher(root)
+            {
+                Filter = "*.cfg",
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+                IncludeSubdirectories = true,
+            };
+            FileSystemEventHandler kick = (_, _) => Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                _slotDebounce.Stop();
+                _slotDebounce.Start();
+            });
+            _slotWatcher.Created += kick;
+            _slotWatcher.Deleted += kick;
+            _slotWatcher.Changed += kick;
+            _slotWatcher.Renamed += (s, e) => kick(s, e);
+            _slotWatcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            _slotWatcher = null;  // the panel still refreshes before each launch
+        }
+    }
+
+    private void OnSlotsSettled(object? sender, EventArgs e)
+    {
+        _slotDebounce?.Stop();
+        RefreshLaunchTarget();
+        NavByKey("saves")?.Page.Reload();
+    }
+
     public void Shutdown()
     {
         Session.StopWatchingGame();
         _watcher?.Dispose();
+        _slotWatcher?.Dispose();
     }
 
-    private void OnSessionChanged()
+    /// <summary>Reads the save slots as they are on disk now and decides
+    /// what CONTINUE does: the slot the game last had active when it
+    /// belongs to the active profile (or to none), else that profile's most
+    /// recent save; and which slot "New game" would use. Called on every
+    /// session change, when the game's slot files change, and right before
+    /// a launch.</summary>
+    public void RefreshLaunchTarget()
     {
-        // Events come on the UI thread (the session is UI-thread-affine).
-        ProfileName = Session.ActiveProfile?.Name ?? "No profile yet";
-        var ver = MmlInstall.DetectInstalledVersion(Session.ModsDir);
-        LoaderVersion = string.IsNullOrEmpty(ver) ? "Mod Loader not found" : $"Mod Loader {ver}";
-
-        NavByKey("mods")!.Count = Session.CountMods().Total.ToString();
-        NavByKey("profiles")!.Count = Session.AllProfiles.Count == 0 ? "" : Session.AllProfiles.Count.ToString();
-
         try
         {
             var saves = Session.GetSavesView();
@@ -349,6 +407,19 @@ public sealed partial class ShellViewModel : ObservableObject
         PrimaryLaunchText = ContinueSlot > 0 ? "CONTINUE" : "LAUNCH";
         PrimaryLaunchName = ContinueSlot > 0 ? $"Continue slot {ContinueSlot}" : "Launch the game";
         NewGameMenuText = EmptySlot > 0 ? $"New game in slot {EmptySlot}" : "";
+    }
+
+    private void OnSessionChanged()
+    {
+        // Events come on the UI thread (the session is UI-thread-affine).
+        ProfileName = Session.ActiveProfile?.Name ?? "No profile yet";
+        var ver = MmlInstall.DetectInstalledVersion(Session.ModsDir);
+        LoaderVersion = string.IsNullOrEmpty(ver) ? "Mod Loader not found" : $"Mod Loader {ver}";
+
+        NavByKey("mods")!.Count = Session.CountMods().Total.ToString();
+        NavByKey("profiles")!.Count = Session.AllProfiles.Count == 0 ? "" : Session.AllProfiles.Count.ToString();
+
+        RefreshLaunchTarget();
 
         Checks.Clear();
         var r = Session.GetLaunchReadiness();

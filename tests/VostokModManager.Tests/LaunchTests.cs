@@ -228,6 +228,26 @@ public class LaunchTests
     }
 
     [Fact]
+    public async Task Any_end_of_a_watched_session_tells_the_front_end_to_refresh()
+    {
+        // The game moves its save slots on while it runs; even when the watch
+        // can't classify the exit (no process found), the launch panel must
+        // re-read them instead of continuing a slot from before the session.
+        using var sb = new Sandbox();
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Default\"\n");
+        var session = LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher(), activeProfile: "Default");
+        session.Refresh();
+        var changed = 0;
+        session.Changed += () => changed++;
+
+        Assert.True(session.LaunchGame());
+        var exit = await session.GameWatchTask!;
+
+        Assert.Equal(GameExitKind.NotFound, exit.Kind);
+        Assert.True(changed > 0);
+    }
+
+    [Fact]
     public async Task A_crash_after_launch_offers_the_restore_and_rolls_the_cfg_back()
     {
         using var sb = new Sandbox();

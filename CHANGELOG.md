@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **CONTINUE launches the save the panel shows.** The launch panel no longer goes stale when the game moves its save slots on (a new run, a slot switch in game): it follows the save-slot folder, refreshes when the manager window comes back to the front and when the game exits, and CONTINUE re-reads the slots when pressed. If the save to continue changed since the panel was drawn, it asks before launching.
+- The crash watch finds the game's process (`RTV.exe`), so a crash after a launch from the manager offers the checkpoint restore again.
+
 ## 0.7.1 (2026-10-22)
 
 - **CONTINUE only continues a save made with the active profile's mods.** The launch panel picks the last-played save when it belongs to the active profile (tied to it, or to no profile), else that profile's most recent save. When none does, the button reads **LAUNCH** and the panel says "No save for this profile"; a save tied to another profile is no longer loaded against the wrong mods.

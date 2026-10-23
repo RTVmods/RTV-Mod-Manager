@@ -154,6 +154,9 @@ public sealed partial class ManagerSession
         cts.Dispose();
         if (cancelled) return exit;  // the app closed / a newer launch took over
         HandleGameExit(exit);
+        // The game moved its save slots on (active slot, a new run): whatever
+        // the exit, what the launch panel offers to continue has changed.
+        RaiseChanged();
         return exit;
     }
 

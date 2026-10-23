@@ -49,9 +49,10 @@ public enum GameExitKind
 /// <summary>How a watched session ended.</summary>
 public sealed record GameExit(GameExitKind Kind, int ExitCode = -1, double SessionSeconds = 0);
 
-/// <summary>The real process table. Matches a process whose name starts
-/// with "RoadToVostok", or contains "vostok" but not "Manager" (so the
-/// manager itself never counts); Godot exports vary by build target.</summary>
+/// <summary>The real process table. Matches the game's own exe, RTV.exe
+/// (the Steam build's name; SaveSlots.GameRunning looks for it too), a
+/// process whose name starts with "RoadToVostok", or one that contains
+/// "vostok" but not "Manager" (so the manager itself never counts).</summary>
 public sealed class SystemGameProcessSource : IGameProcessSource
 {
     public IGameProcess? FindGame()
@@ -61,7 +62,8 @@ public sealed class SystemGameProcessSource : IGameProcessSource
             foreach (var p in Process.GetProcesses())
             {
                 var n = p.ProcessName ?? "";
-                if (n.StartsWith("RoadToVostok", StringComparison.OrdinalIgnoreCase)
+                if (string.Equals(n, "RTV", StringComparison.OrdinalIgnoreCase)
+                    || n.StartsWith("RoadToVostok", StringComparison.OrdinalIgnoreCase)
                     || (n.IndexOf("vostok", StringComparison.OrdinalIgnoreCase) >= 0
                         && !n.Contains("Manager", StringComparison.OrdinalIgnoreCase)))
                     return new SystemGameProcess(p);
