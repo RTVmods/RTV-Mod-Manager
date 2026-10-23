@@ -24,7 +24,7 @@ public class UpdatesTests
         s.UpdateNet.GetMod = _ => throw new InvalidOperationException("network: GetMod");
         s.UpdateNet.ListAllMods = () => throw new InvalidOperationException("network: ListAllMods");
         s.UpdateNet.FetchManagerRelease = () => throw new InvalidOperationException("network: manager");
-        s.UpdateNet.DownloadManagerAsset = (_, _) => throw new InvalidOperationException("network: manager asset");
+        s.UpdateNet.DownloadManagerAsset = (_, _, _) => throw new InvalidOperationException("network: manager asset");
         s.UpdateNet.FetchMmlRelease = () => throw new InvalidOperationException("network: mml");
         s.UpdateNet.DownloadMmlAsset = (_, _, _) => throw new InvalidOperationException("network: mml asset");
         s.UpdateNet.StartSwapScript = _ => throw new InvalidOperationException("never start swap.bat in tests");

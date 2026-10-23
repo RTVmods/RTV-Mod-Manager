@@ -165,18 +165,40 @@ public class ManagerReleaseChecker
     }
 
     /// <summary>Streams a release asset to `savePath`. Throws on a
-    /// non-2xx response.</summary>
+    /// non-2xx response. `progress` gets (bytes so far, total bytes); the
+    /// total is the response's Content-Length, else the asset's size, else
+    /// 0 when neither is known.</summary>
     public async Task DownloadAssetAsync(
-        ManagerReleaseAsset asset, string savePath, CancellationToken ct = default)
+        ManagerReleaseAsset asset, string savePath, CancellationToken ct = default,
+        IProgress<(long done, long total)>? progress = null)
     {
         using var resp = await _http.GetAsync(
             asset.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
         var dir = Path.GetDirectoryName(savePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var total = resp.Content.Headers.ContentLength ?? asset.Size;
+        progress?.Report((0, total));
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         await using var file = File.Create(savePath);
-        await stream.CopyToAsync(file, ct);
+        var buffer = new byte[81920];
+        long done = 0;
+        var lastReport = Environment.TickCount64;
+        int n;
+        while ((n = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            await file.WriteAsync(buffer.AsMemory(0, n), ct);
+            done += n;
+            // Often enough to look live, not so often that the UI thread
+            // repaints for every buffer.
+            var now = Environment.TickCount64;
+            if (progress != null && now - lastReport >= 80)
+            {
+                lastReport = now;
+                progress.Report((done, total));
+            }
+        }
+        progress?.Report((done, total > 0 ? total : done));
     }
 
     private static string Str(JsonElement obj, string name)

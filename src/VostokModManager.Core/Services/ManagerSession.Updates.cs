@@ -28,7 +28,8 @@ internal sealed class UpdateNetwork
     public Func<Task<List<VmModSummary>>>? ListAllMods;
 
     public Func<Task<(ManagerReleaseStatus Status, ManagerRelease? Release)>>? FetchManagerRelease;
-    public Func<ManagerReleaseAsset, string, Task>? DownloadManagerAsset;
+    /// <summary>(asset, savePath, progress).</summary>
+    public Func<ManagerReleaseAsset, string, IProgress<(long done, long total)>?, Task>? DownloadManagerAsset;
     public Func<Task<MmlRelease?>>? FetchMmlRelease;
 
     /// <summary>(tag, asset name, savePath).</summary>

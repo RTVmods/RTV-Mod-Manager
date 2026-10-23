@@ -228,6 +228,19 @@ public sealed record SelfUpdateAction(string? OpenUrl, bool MustExit)
 /// is true the swap script is running and waits for this process to
 /// exit; the front end must shut down now (Application.Exit in the
 /// WinForms build) so the script can copy the new .exe in place.</summary>
+/// <summary>Where a manager self-update is: the step, and during the
+/// download the bytes so far and in total (0 when not known).</summary>
+public sealed record ManagerUpdateProgress(string Step, long Done = 0, long Total = 0)
+{
+    /// <summary>0..1 while the size is known; null for a step without one.</summary>
+    public double? Fraction => Total > 0 ? Math.Clamp((double)Done / Total, 0, 1) : null;
+}
+
+/// <summary>The front end's progress window: runs `update` with a progress
+/// sink it shows, and hands back its result.</summary>
+public delegate Task<ManagerUpdateResult> ManagerUpdateRunner(
+    Func<IProgress<ManagerUpdateProgress>, Task<ManagerUpdateResult>> update);
+
 public sealed record ManagerUpdateResult(bool MustExit, string ScriptPath, string Message)
 {
     public static ManagerUpdateResult Aborted(string message) => new(false, "", message);

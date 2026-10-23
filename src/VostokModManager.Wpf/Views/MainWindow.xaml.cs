@@ -29,6 +29,7 @@ public partial class MainWindow : Window
             w.ShowDialog();
             return Task.CompletedTask;
         };
+        Shell.ManagerUpdateUi = ManagerUpdateWindow.Runner(() => this, Shell.Session);
 
         // The Mods page's full windows (conflicts, dependencies, earlier
         // versions, drift review, the missing-dependency resolver).

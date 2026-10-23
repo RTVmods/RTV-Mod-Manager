@@ -219,8 +219,11 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private void Undo() => Session.RestoreCheckpoint();
 
+    /// <summary>Set by the window: shows the self-update's progress.</summary>
+    public ManagerUpdateRunner? ManagerUpdateUi { get; set; }
+
     [RelayCommand]
-    private async Task ManagerUpdateClick() => Act(await Session.HandleManagerClickAsync());
+    private async Task ManagerUpdateClick() => Act(await Session.HandleManagerClickAsync(ManagerUpdateUi));
 
     [RelayCommand]
     private async Task LoaderUpdateClick() => Act(await Session.HandleMmlClickAsync());

@@ -50,10 +50,13 @@ public partial class MessageWindow : Window
             b.Click += (_, _) => { w.Result = index; w.DialogResult = true; };
             w.Buttons.Children.Add(b);
         }
-        w.PreviewKeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape) { w.Result = cancel; w.DialogResult = false; }
-        };
+        // A window without buttons is a progress view, shown modeless: Esc
+        // must not close it (and DialogResult would throw there).
+        if (buttons.Count > 0)
+            w.PreviewKeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Escape) { w.Result = cancel; w.DialogResult = false; }
+            };
         return w;
     }
 }

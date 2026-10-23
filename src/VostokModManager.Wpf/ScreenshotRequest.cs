@@ -45,6 +45,18 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 };
                 target.Show();
             }
+            else if (req.Page == "manager-update")
+            {
+                // The self-update's window, frozen mid-download.
+                var never = new TaskCompletionSource<VostokModManager.Services.ManagerUpdateResult>();
+                _ = Views.ManagerUpdateWindow.Runner(() => window, shell.Session)(p =>
+                {
+                    p.Report(new VostokModManager.Services.ManagerUpdateProgress("Downloading v0.7.5…", 29_000_000, 72_951_757));
+                    return never.Task;
+                });
+                await Task.Delay(300);
+                target = Application.Current.Windows.OfType<Views.MessageWindow>().Last();
+            }
             else shell.Open(req.Page);
             // Browse loads its catalogue from VostokMods; let it (and its thumbnails) land.
             if (shell.Selected.Page is BrowseViewModel { Loading: { } loading })

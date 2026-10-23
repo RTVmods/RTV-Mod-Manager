@@ -31,10 +31,11 @@ public sealed partial class ManagerSession
     private Task<(ManagerReleaseStatus Status, ManagerRelease? Release)> FetchManagerReleaseAsync()
         => UpdateNet.FetchManagerRelease != null ? UpdateNet.FetchManagerRelease() : ManagerReleases.FetchLatestAsync();
 
-    private Task DownloadManagerAssetAsync(ManagerReleaseAsset asset, string savePath)
+    private Task DownloadManagerAssetAsync(ManagerReleaseAsset asset, string savePath,
+        IProgress<(long done, long total)>? progress)
         => UpdateNet.DownloadManagerAsset != null
-            ? UpdateNet.DownloadManagerAsset(asset, savePath)
-            : ManagerReleases.DownloadAssetAsync(asset, savePath);
+            ? UpdateNet.DownloadManagerAsset(asset, savePath, progress)
+            : ManagerReleases.DownloadAssetAsync(asset, savePath, progress: progress);
 
     // ── mod loader ────────────────────────────────────────────────────
 
@@ -324,8 +325,10 @@ public sealed partial class ManagerSession
     /// <summary>A click on the Manager line. When an update is available,
     /// offers to install it (download, swap the .exe, relaunch) or open
     /// the releases page; otherwise returns the releases page. When the
-    /// result says MustExit, the front end must exit right away.</summary>
-    public async Task<SelfUpdateAction> HandleManagerClickAsync()
+    /// result says MustExit, the front end must exit right away. With a
+    /// `runner`, the install runs inside it so the front end can show its
+    /// progress.</summary>
+    public async Task<SelfUpdateAction> HandleManagerClickAsync(ManagerUpdateRunner? runner = null)
     {
         var installed = ManagerInstalledVersion();
         var latest = Settings.ManagerReleaseVersion;
@@ -340,7 +343,9 @@ public sealed partial class ManagerSession
             new[] { "Install and relaunch", "Open the releases page" });
         if (choice == 1) return SelfUpdateAction.Open(ManagerReleaseChecker.ReleasesUrl);
         if (choice != 0) return SelfUpdateAction.None;
-        var result = await AutoUpdateManagerAsync();
+        var result = runner != null
+            ? await runner(AutoUpdateManagerAsync)
+            : await AutoUpdateManagerAsync();
         return result.MustExit ? new SelfUpdateAction(null, true) : SelfUpdateAction.None;
     }
 
@@ -369,7 +374,7 @@ public sealed partial class ManagerSession
     ///      is released), starts it and deletes itself;
     ///   4. start the script. The result then says MustExit: the front
     ///      end exits so the file handles on the .exe drop.</summary>
-    public async Task<ManagerUpdateResult> AutoUpdateManagerAsync()
+    public async Task<ManagerUpdateResult> AutoUpdateManagerAsync(IProgress<ManagerUpdateProgress>? progress = null)
     {
         var currentExe = CurrentManagerExe();
         if (string.IsNullOrEmpty(currentExe) || !File.Exists(currentExe))
@@ -383,6 +388,7 @@ public sealed partial class ManagerSession
         // Looked up again rather than taken from the cache: the cache
         // holds only the version, not the files.
         Say(StatusArea.Manager, "Manager: looking up the latest release …");
+        progress?.Report(new ManagerUpdateProgress("Looking up the latest release…"));
         var (status, release) = await FetchManagerReleaseAsync();
         var exeName = Path.GetFileName(currentExe);
         var asset = release?.AssetFor(exeName);
@@ -404,9 +410,12 @@ public sealed partial class ManagerSession
         var downloadPath = Path.Combine(tempDir, "download.bin");
 
         Say(StatusArea.Manager, "Manager: downloading update …");
+        var step = $"Downloading v{release.Version}…";
+        progress?.Report(new ManagerUpdateProgress(step, 0, asset.Size));
         try
         {
-            await DownloadManagerAssetAsync(asset, downloadPath);
+            await DownloadManagerAssetAsync(asset, downloadPath, progress == null ? null
+                : new InlineProgress<(long done, long total)>(p => progress.Report(new ManagerUpdateProgress(step, p.done, p.total))));
         }
         catch (Exception ex)
         {
@@ -416,7 +425,8 @@ public sealed partial class ManagerSession
         }
 
         // Locate the new .exe in whatever the upload looks like.
-        var newExe = FindUpdateExe(downloadPath, tempDir, currentExe);
+        progress?.Report(new ManagerUpdateProgress("Unpacking the update…"));
+        var newExe = await Task.Run(() => FindUpdateExe(downloadPath, tempDir, currentExe));
         if (string.IsNullOrEmpty(newExe))
         {
             var msg = "Downloaded the update, but couldn't find a .exe inside the package. Open the "
@@ -445,6 +455,7 @@ public sealed partial class ManagerSession
         }
         // Hand over to the script: the app must exit now so the copy
         // can replace the .exe.
+        progress?.Report(new ManagerUpdateProgress($"Restarting into v{release.Version}…"));
         return new ManagerUpdateResult(true, batPath, $"Updating to v{release.Version}; the manager will restart.");
     }
 

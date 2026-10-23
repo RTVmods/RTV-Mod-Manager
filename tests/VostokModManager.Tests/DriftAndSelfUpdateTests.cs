@@ -206,8 +206,9 @@ public class DriftAndSelfUpdateTests
         var asset = new ManagerReleaseAsset { Name = "VostokModManagerAI.zip", DownloadUrl = "x" };
         s.UpdateNet.FetchManagerRelease = () => Task.FromResult<(ManagerReleaseStatus, ManagerRelease?)>(
             (ManagerReleaseStatus.Found, new ManagerRelease { Version = "99.0.0", Assets = new[] { asset } }));
-        s.UpdateNet.DownloadManagerAsset = (_, path) =>
+        s.UpdateNet.DownloadManagerAsset = (_, path, progress) =>
         {
+            progress?.Report((50, 100));
             using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
             foreach (var name in new[] { "tools/other.exe", "bin/VostokModManagerAI.exe" })
                 using (var w = new StreamWriter(zip.CreateEntry(name).Open())) w.Write("MZ new");
@@ -215,9 +216,14 @@ public class DriftAndSelfUpdateTests
         };
         string? started = null;
         s.UpdateNet.StartSwapScript = bat => started = bat;
+        var steps = new List<ManagerUpdateProgress>();
 
-        var r = await s.AutoUpdateManagerAsync();
+        var r = await s.AutoUpdateManagerAsync(new InlineProgress<ManagerUpdateProgress>(steps.Add));
 
+        // Every step is reported, the download with its share done.
+        Assert.Contains(steps, p => p.Step == "Downloading v99.0.0…" && p.Fraction == 0.5);
+        Assert.Contains(steps, p => p.Step == "Unpacking the update…");
+        Assert.Equal("Restarting into v99.0.0…", steps[^1].Step);
         Assert.True(r.MustExit);
         Assert.Equal(r.ScriptPath, started);
         var newExe = Path.Combine(Path.GetDirectoryName(r.ScriptPath)!, "extracted", "bin", "VostokModManagerAI.exe");

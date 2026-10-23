@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Updating the manager shows its progress.** After **Install and relaunch**, a window stays up with a progress bar: looking up the release, downloading (megabytes so far of the total), unpacking, then restarting. The manager can't be used meanwhile, and if something fails the message opens over that window.
+
 ## 0.7.5 (2026-10-23)
 
 - **Install mod ▾ → Add from the library…** lists the mods your library holds that the active profile doesn't have, at their newest version, with the profiles that use each. Tick some and **Add** installs them into the profile (offering any missing dependencies, like any install). Older versions stay on the Library page.
