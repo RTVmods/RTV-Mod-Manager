@@ -9,6 +9,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 - **The profile switcher stands out.** On the Mods page, **Switch profile ▾** is now a full button beside ACTIVE PROFILE instead of small text.
 - **Updating the manager shows its progress.** After **Install and relaunch**, a window stays up with a progress bar: looking up the release, downloading (megabytes so far of the total), unpacking, then restarting. The manager can't be used meanwhile, and if something fails the message opens over that window.
 - **The launch panel explains the Mod Loader's first pass.** After a mod change, a launch from the manager can show no game for up to a minute while the loader sets the mods up, then the game closes and reopens on its own. That looked like the game not starting. The panel now says what is happening under the launch button: the game is starting, the mods are set up and the game is reopening, the game reopened, and finally that it closed. If no game appears within a minute, it says so and suggests checking for a Steam window behind the manager.
+- **Support packages are a few MB instead of several GB.** The package no longer carries the mod archives. A new `mods.json` lists every mod in the mods folder, enabled or not, with its version, file, size, SHA-256 checksum, load order and VostokMods page, which says exactly which build of each mod was installed. **Tools → Support package → Include the mod files** puts the old importable profile bundle back for the rare case a mod author asks for the files.
 
 ## 0.7.5 (2026-10-23)
 

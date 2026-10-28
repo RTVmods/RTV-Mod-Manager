@@ -2,33 +2,42 @@
 // diagnose a user's problem into one shareable .vmzlog file:
 //
 //   <profile>__support__<UTC-stamp>.vmzlog   (a plain zip)
-//   ├── profile.vmprofile      ← full archive-backed bundle of the active
-//   │                            profile (profile.json + mods/*.vmz),
-//   │                            directly Import-able in the Profiles Manager
-//   ├── profile.json           ← loose metadata copy (read without opening
-//   │                            the nested .vmprofile)
+//   ├── mods.json              ← every mod in the mods folder (enabled or
+//   │                            not): id, version, file, size, SHA-256,
+//   │                            load order and VostokMods source
+//   ├── profile.json           ← the active profile's mod list
 //   ├── logs/                  ← the entire %APPDATA%\Road to Vostok\logs\
 //   │                            directory (godot.log + rotated logs)
 //   ├── extra-logs/            ← (optional) root-level *.log files from the
 //   │                            game user dir (modloader_filescope.log, …)
 //   ├── mod_config.cfg         ← the in-game loader's enabled/priority state
-//   └── support-info.json      ← manager version, edition, MML version,
-//                                counts, timestamp
+//   ├── support-info.json      ← manager version, edition, MML version,
+//   │                            counts, timestamp
+//   └── profile.vmprofile      ← (opt-in) the active profile with its mod
+//                                archives, directly Import-able in the
+//                                Profiles Manager
+//
+// The mod archives stay out by default. A big modlist is gigabytes of
+// them (a 108-mod profile made a 2.4 GB package) and diagnosing a log
+// never needed them: the checksums in mods.json tell exactly which build
+// of each mod was installed, and a mismatch against the VostokMods file
+// shows a repacked or locally edited mod.
 //
 // All zip entries use FORWARD-SLASH paths (mirrors ModPacker /
 // ModProfile.ExportToZipUsingLibrary) so the file opens cleanly in any
 // tool and the inner .vmprofile is accepted by the Godot-side loader.
 //
-// The inner .vmprofile is built to a TEMP file straight from the live
-// entries — we deliberately do NOT call SaveWithBundles, because that
-// would overwrite the user's saved profile folder under ProfilesDir.
-// Instead we ingest each live archive into the Library (idempotent) and
-// then reuse ModProfile.ExportToZipUsingLibrary, exactly like a normal
-// profile export, so the bundle is byte-identical to one the user would
-// get from Profiles → Export.
+// When the mod files are asked for, the inner .vmprofile is built to a
+// TEMP file straight from the live entries — we deliberately do NOT call
+// SaveWithBundles, because that would overwrite the user's saved profile
+// folder under ProfilesDir. Instead we ingest each live archive into the
+// Library (idempotent) and then reuse ModProfile.ExportToZipUsingLibrary,
+// exactly like a normal profile export, so the bundle is byte-identical
+// to one the user would get from Profiles → Export.
 
 using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -79,13 +88,45 @@ public static class SupportPackage
         public string OutputPath  { get; init; } = "";
         public long   BytesWritten { get; set; }
         public int    LogFileCount { get; set; }
+        /// <summary>Mods in the active profile (or snapshot).</summary>
         public int    ModCount     { get; set; }
+        /// <summary>Rows in mods.json: every mod in the mods folder.</summary>
+        public int    ListedModCount { get; set; }
+        /// <summary>The mod archives went in (profile.vmprofile).</summary>
+        public bool   ModFilesIncluded { get; set; }
         public List<string> Warnings { get; } = new();
     }
+
+    /// <summary>One row of mods.json. `File` is the path under the mods
+    /// folder with forward slashes ("Disabled/alpha-1.0.vmz").
+    /// `SizeBytes` and `Sha256` (lower-case hex) are null for a folder
+    /// mod or an unreadable archive. `Source` is "vostokmods:&lt;slug&gt;",
+    /// or "" when the mod is not linked.</summary>
+    public sealed record ModListRow(
+        string Id,
+        string Name,
+        string Version,
+        string File,
+        bool Enabled,
+        int Priority,
+        bool IsFolder,
+        long? SizeBytes,
+        string? Sha256,
+        string Source,
+        string PageUrl,
+        bool InActiveProfile,
+        bool BuiltIn);
 
     private static readonly JsonSerializerOptions _opts = new()
     {
         WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+    };
+
+    private static readonly JsonSerializerOptions _rowOpts = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
@@ -96,6 +137,10 @@ public static class SupportPackage
     /// built via ModProfile.FromRegistry in that case, but this method
     /// also tolerates null by snapshotting all live entries.
     ///
+    /// <paramref name="includeModFiles"/> adds profile.vmprofile with
+    /// the profile's mod archives; without it the package holds only
+    /// the mod list with checksums.
+    ///
     /// <paramref name="progress"/> is invoked as (message, percent 0-100)
     /// on the calling thread; the dialog marshals it to the UI.</summary>
     public static Result Build(
@@ -104,7 +149,8 @@ public static class SupportPackage
         string modsDir,
         string outputPath,
         bool includeRootLogs,
-        Action<string, int>? progress = null)
+        Action<string, int>? progress = null,
+        bool includeModFiles = false)
     {
         var entries = liveEntries?.ToList() ?? new List<ModEntry>();
         var profile = activeProfile
@@ -122,44 +168,65 @@ public static class SupportPackage
         if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
         if (File.Exists(outputPath)) File.Delete(outputPath);
 
-        // ── 1. Ingest live archives into the Library so the bundle
-        //       export can resolve every (mod_id, version). Idempotent.
-        Report("Indexing mods into the library…", 5);
-        foreach (var e in entries)
-        {
-            if (e.IsArchive && File.Exists(e.Path))
-            {
-                try { ModLibrary.Add(modsDir, e.Path); }
-                catch { /* best-effort — export simply marks it no-bundle */ }
-            }
-        }
+        // ── 1. The mod list with a checksum per archive (5–45 %).
+        var rows = ListMods(profile, entries, modsDir, result.Warnings,
+            (msg, done, total) => Report(msg, 5 + (total == 0 ? 40 : 40 * done / total)));
+        result.ListedModCount = rows.Count;
 
-        // ── 2. Build the inner .vmprofile to a temp file, reusing the
-        //       exact same export path a normal profile export takes.
         var tempVmprofile = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(),
             "vmm_support_" + Guid.NewGuid().ToString("N") + ".vmprofile");
         try
         {
-            Report("Bundling active profile…", 25);
-            try
+            // ── 2. (opt-in) the profile with its mod archives.
+            if (includeModFiles)
             {
-                profile.ExportToZipUsingLibrary(tempVmprofile, modsDir);
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Profile bundle failed: {ex.Message}");
+                // Ingest live archives into the Library so the bundle
+                // export can resolve every (mod_id, version). Idempotent.
+                Report("Indexing mods into the library…", 46);
+                foreach (var e in entries)
+                {
+                    if (e.IsArchive && File.Exists(e.Path))
+                    {
+                        try { ModLibrary.Add(modsDir, e.Path); }
+                        catch { /* best-effort — export simply marks it no-bundle */ }
+                    }
+                }
+                Report("Bundling the mod files…", 50);
+                try
+                {
+                    profile.ExportToZipUsingLibrary(tempVmprofile, modsDir);
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"Profile bundle failed: {ex.Message}");
+                }
             }
 
             // ── 3. Assemble the .vmzlog.
-            Report("Writing support package…", 50);
+            Report("Writing support package…", 60);
             using (var zip = ZipFile.Open(outputPath, ZipArchiveMode.Create))
             {
-                // 3a. inner .vmprofile
-                if (File.Exists(tempVmprofile))
-                    AddFile(zip, tempVmprofile, "profile.vmprofile", result.Warnings);
+                // 3a. mods.json
+                try
+                {
+                    var listEntry = zip.CreateEntry("mods.json", CompressionLevel.Optimal);
+                    using var es = listEntry.Open();
+                    using var sw = new StreamWriter(es);
+                    sw.Write(JsonSerializer.Serialize(rows, _rowOpts));
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"mods.json: {ex.Message}");
+                }
 
-                // 3b. loose profile.json metadata at the root
+                // 3b. (opt-in) inner .vmprofile. Archives are already
+                // compressed: storing them saves minutes of deflate.
+                if (includeModFiles && File.Exists(tempVmprofile))
+                    result.ModFilesIncluded = AddFile(zip, tempVmprofile, "profile.vmprofile",
+                        result.Warnings, CompressionLevel.NoCompression);
+
+                // 3c. loose profile.json metadata at the root
                 try
                 {
                     var jsonEntry = zip.CreateEntry("profile.json", CompressionLevel.Optimal);
@@ -172,7 +239,7 @@ public static class SupportPackage
                     result.Warnings.Add($"profile.json: {ex.Message}");
                 }
 
-                // 3c. whole Godot logs directory
+                // 3d. whole Godot logs directory
                 Report("Collecting Godot logs…", 70);
                 if (Directory.Exists(GodotLogsDir))
                 {
@@ -196,7 +263,7 @@ public static class SupportPackage
                         "Godot logs directory not found: " + GodotLogsDir);
                 }
 
-                // 3d. (optional) root-level *.log mod logs
+                // 3e. (optional) root-level *.log mod logs
                 if (includeRootLogs && Directory.Exists(GameUserDir))
                 {
                     string[] rootLogs;
@@ -209,7 +276,7 @@ public static class SupportPackage
                     }
                 }
 
-                // 3e. mod_config.cfg (cheap, high diagnostic value)
+                // 3f. mod_config.cfg (cheap, high diagnostic value)
                 Report("Adding loader state…", 85);
                 var cfg = ModConfig.DefaultPath;
                 if (!string.IsNullOrEmpty(cfg) && File.Exists(cfg))
@@ -217,10 +284,10 @@ public static class SupportPackage
                 else
                     result.Warnings.Add("mod_config.cfg not found.");
 
-                // 3f. support-info.json
+                // 3g. support-info.json
                 try
                 {
-                    var info = BuildInfo(profile, entries, modsDir, result.LogFileCount);
+                    var info = BuildInfo(profile, entries, modsDir, result.LogFileCount, result.ModFilesIncluded);
                     var infoEntry = zip.CreateEntry("support-info.json", CompressionLevel.Optimal);
                     using var es = infoEntry.Open();
                     using var sw = new StreamWriter(es);
@@ -243,17 +310,98 @@ public static class SupportPackage
         return result;
     }
 
+    /// <summary>The mods.json rows: every live entry, enabled or not, in
+    /// load order. Each archive is hashed with a streaming SHA-256, so a
+    /// texture pack of several hundred MB never sits in memory.
+    /// `progress` gets (message, mods done, mods total).</summary>
+    public static List<ModListRow> ListMods(
+        ModProfile? profile, IEnumerable<ModEntry> entries, string modsDir,
+        List<string>? warnings = null, Action<string, int, int>? progress = null)
+    {
+        var list = entries.ToList();
+        var inProfile = new HashSet<string>(
+            (profile?.Mods ?? new List<ProfileMod>())
+                .Where(m => !string.IsNullOrEmpty(m.ModId))
+                .Select(m => m.ModId + "@" + m.Version),
+            StringComparer.OrdinalIgnoreCase);
+
+        var rows = new List<ModListRow>(list.Count);
+        for (var i = 0; i < list.Count; i++)
+        {
+            var e = list[i];
+            var file = RelativeToMods(modsDir, e.Path);
+            progress?.Invoke($"Checksumming mods… {i + 1}/{list.Count}", i, list.Count);
+
+            long? size = null;
+            string? sha = null;
+            if (e.IsArchive)
+            {
+                try
+                {
+                    using var fs = new FileStream(e.Path, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete, 1 << 16);
+                    size = fs.Length;
+                    sha = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
+                }
+                catch (Exception ex)
+                {
+                    warnings?.Add($"mods.json: couldn't checksum {file}: {ex.Message}");
+                }
+            }
+
+            rows.Add(new ModListRow(
+                Id: e.ModId,
+                Name: e.DisplayName,
+                Version: e.Version,
+                File: file,
+                Enabled: e.IsEnabled,
+                Priority: e.Priority,
+                IsFolder: !e.IsArchive,
+                SizeBytes: size,
+                Sha256: sha,
+                Source: e.Source.Key,
+                PageUrl: e.Source.PageUrl,
+                InActiveProfile: inProfile.Contains(e.ModId + "@" + e.Version),
+                BuiltIn: BuiltInMods.IsBuiltIn(e.ModId)));
+        }
+        progress?.Invoke($"Checksummed {list.Count} mod(s).", list.Count, list.Count);
+
+        return rows
+            .OrderByDescending(r => r.Enabled)
+            .ThenBy(r => r.Priority)
+            .ThenBy(r => r.File, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>`path` under the mods folder with forward slashes, or the
+    /// bare file name when it lies elsewhere.</summary>
+    private static string RelativeToMods(string modsDir, string path)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(modsDir))
+            {
+                var rel = System.IO.Path.GetRelativePath(modsDir, path);
+                if (!rel.StartsWith("..") && !System.IO.Path.IsPathRooted(rel))
+                    return rel.Replace('\\', '/');
+            }
+        }
+        catch { /* fall through */ }
+        return System.IO.Path.GetFileName(path);
+    }
+
     /// <summary>Copies one on-disk file into the zip under
     /// <paramref name="entryPath"/> (forward-slash). Reads via a
     /// share-all stream so a log the running game still holds open can
     /// still be copied. Returns true on success; records a warning and
     /// returns false on failure (e.g. exclusive lock).</summary>
     private static bool AddFile(
-        ZipArchive zip, string sourcePath, string entryPath, List<string> warnings)
+        ZipArchive zip, string sourcePath, string entryPath, List<string> warnings,
+        CompressionLevel level = CompressionLevel.Optimal)
     {
         try
         {
-            var entry = zip.CreateEntry(entryPath, CompressionLevel.Optimal);
+            var entry = zip.CreateEntry(entryPath, level);
             using var es = entry.Open();
             // FileShare.ReadWrite so a live godot.log doesn't block us.
             using var rs = new FileStream(
@@ -270,7 +418,7 @@ public static class SupportPackage
     }
 
     private static object BuildInfo(
-        ModProfile profile, List<ModEntry> entries, string modsDir, int logFileCount)
+        ModProfile profile, List<ModEntry> entries, string modsDir, int logFileCount, bool modFilesIncluded)
     {
         var asmVer = Assembly.GetExecutingAssembly().GetName().Version
                    ?? new Version(0, 0, 0);
@@ -293,6 +441,7 @@ public static class SupportPackage
             modCount          = profile.Mods.Count,
             enabledCount      = profile.Mods.Count(m => m.IsEnabled),
             liveModCount      = entries.Count,
+            modFilesIncluded,
             mmlVersion        = string.IsNullOrEmpty(mml) ? "(not detected)" : mml,
             gameUserDir       = GameUserDir,
             logFileCount,

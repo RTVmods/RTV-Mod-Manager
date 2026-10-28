@@ -303,7 +303,9 @@
                 <Border Style="{StaticResource Panel.Notice}" Margin="0,0,0,16">
                     <TextBlock Text="{Binding SupportSummary}" Style="{StaticResource T.Mono}" />
                 </Border>
-                <CheckBox Content="Include the loader's own logs next to mod_config.cfg" IsChecked="{Binding IncludeRootLogs}" Margin="0,0,0,18" />
+                <CheckBox Content="Include the loader's own logs next to mod_config.cfg" IsChecked="{Binding IncludeRootLogs}" Margin="0,0,0,10" />
+                <CheckBox Content="Include the mod files (large: often several GB)" IsChecked="{Binding IncludeModFiles}" Margin="0,0,0,18"
+                          ToolTip="Only when a mod author asks for the exact files. The mod list with checksums is always included." />
                 <StackPanel Orientation="Horizontal">
                     <Button Style="{StaticResource Btn.Primary}" Content="Build support package…" Command="{Binding BuildSupportPackageCommand}" />
                     <TextBlock Text="{Binding SupportProgress}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="14,0,0,0" />

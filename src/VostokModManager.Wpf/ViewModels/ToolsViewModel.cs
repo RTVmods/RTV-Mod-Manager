@@ -115,6 +115,9 @@ public sealed partial class ToolsViewModel : PageViewModel
 
     [ObservableProperty] private string _supportSummary = "";
     [ObservableProperty] private bool _includeRootLogs = true;
+    /// <summary>Bundle the mod archives too. Off by default: a big
+    /// modlist makes a package of several GB.</summary>
+    [ObservableProperty] private bool _includeModFiles;
     [ObservableProperty] private string _supportProgress = "";
     [ObservableProperty] private int _supportPercent;
 
@@ -134,7 +137,7 @@ public sealed partial class ToolsViewModel : PageViewModel
             SupportProgress = p.Message;
             SupportPercent = p.Percent;
         });
-        var outcome = await Session.BuildSupportPackageAsync(dlg.FileName, IncludeRootLogs, progress);
+        var outcome = await Session.BuildSupportPackageAsync(dlg.FileName, IncludeRootLogs, progress, IncludeModFiles);
         if (outcome?.RevealRequested == true)
         {
             try { Process.Start("explorer.exe", $"/select,\"{outcome.Result.OutputPath}\""); } catch { }

@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text.Json;
 using VostokModManager.Domain;
 using VostokModManager.Services;
 
@@ -60,6 +62,88 @@ public class SupportPackageTests
         Assert.All(progress.Reports, r => Assert.InRange(r.Percent, 0, 100));
         using var zip = ZipFile.OpenRead(outPath);
         Assert.Contains(zip.Entries, e => e.FullName.StartsWith("logs/"));
+    }
+
+    private static string Sha256Of(string path)
+        => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+
+    private static JsonElement ReadJson(ZipArchive zip, string name)
+    {
+        using var s = zip.GetEntry(name)!.Open();
+        return JsonDocument.Parse(s).RootElement.Clone();
+    }
+
+    [Fact]
+    public async Task By_default_the_package_lists_every_mod_with_its_checksum_and_leaves_the_files_out()
+    {
+        using var sb = new Sandbox();
+        var alpha = sb.AddMod("alpha", "1.0", name: "Alpha Mod");
+        var beta = sb.AddMod("beta", "2.1", inDisabledFolder: true);
+        var session = RefreshTests.OpenWithProfile(sb, new ScriptedPrompt { ConfirmAnswer = false });
+        session.Refresh();
+        var outPath = Path.Combine(sb.Root, "out", "support.vmzlog");
+
+        var outcome = await session.BuildSupportPackageAsync(outPath);
+
+        Assert.NotNull(outcome);
+        Assert.False(outcome!.Result.ModFilesIncluded);
+        Assert.Equal(2, outcome.Result.ListedModCount);
+        using var zip = ZipFile.OpenRead(outPath);
+        Assert.Null(zip.GetEntry("profile.vmprofile"));
+        Assert.NotNull(zip.GetEntry("profile.json"));
+
+        var rows = ReadJson(zip, "mods.json").EnumerateArray().ToList();
+        Assert.Equal(2, rows.Count);
+        var a = rows.Single(r => r.GetProperty("id").GetString() == "alpha");
+        Assert.Equal("Alpha Mod", a.GetProperty("name").GetString());
+        Assert.Equal("1.0", a.GetProperty("version").GetString());
+        Assert.Equal("alpha-1.0.vmz", a.GetProperty("file").GetString());
+        Assert.True(a.GetProperty("enabled").GetBoolean());
+        Assert.Equal(new FileInfo(alpha).Length, a.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(Sha256Of(alpha), a.GetProperty("sha256").GetString());
+        var b = rows.Single(r => r.GetProperty("id").GetString() == "beta");
+        Assert.Equal("Disabled/beta-2.1.vmz", b.GetProperty("file").GetString());
+        Assert.False(b.GetProperty("enabled").GetBoolean());
+        Assert.Equal(Sha256Of(beta), b.GetProperty("sha256").GetString());
+        Assert.Equal("alpha", rows[0].GetProperty("id").GetString());  // enabled mods first
+
+        Assert.False(ReadJson(zip, "support-info.json").GetProperty("modFilesIncluded").GetBoolean());
+        Assert.Contains(outcome.ReportLines, l => l.StartsWith("Mods listed: 2") && !l.Contains("Mod files bundled"));
+    }
+
+    [Fact]
+    public async Task Ticking_the_mod_files_adds_the_importable_profile_bundle()
+    {
+        using var sb = new Sandbox();
+        sb.AddMod("alpha", "1.0");
+        var session = RefreshTests.OpenWithProfile(sb, new ScriptedPrompt { ConfirmAnswer = false });
+        session.Refresh();
+        var outPath = Path.Combine(sb.Root, "out", "support.vmzlog");
+
+        var outcome = await session.BuildSupportPackageAsync(outPath, includeModFiles: true);
+
+        Assert.NotNull(outcome);
+        Assert.True(outcome!.Result.ModFilesIncluded);
+        using var zip = ZipFile.OpenRead(outPath);
+        var bundle = zip.GetEntry("profile.vmprofile");
+        Assert.NotNull(bundle);
+        using (var inner = new ZipArchive(bundle!.Open()))
+            Assert.Contains(inner.Entries, e => e.FullName.StartsWith("mods/") && e.FullName.EndsWith(".vmz"));
+        Assert.NotNull(zip.GetEntry("mods.json"));
+        Assert.True(ReadJson(zip, "support-info.json").GetProperty("modFilesIncluded").GetBoolean());
+    }
+
+    [Fact]
+    public void The_summary_says_the_mod_files_are_opt_in()
+    {
+        using var sb = new Sandbox();
+        var session = RefreshTests.OpenWithProfile(sb, new ScriptedPrompt());
+        session.Refresh();
+
+        var text = session.GetSupportPackageSummary().Text;
+
+        Assert.Contains("mods.json", text);
+        Assert.Contains("only when ticked below", text);
     }
 
     [Fact]
