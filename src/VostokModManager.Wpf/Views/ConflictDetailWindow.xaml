@@ -49,87 +49,15 @@
 
             <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
                 <StackPanel>
-                    <!-- ── hook collision: per-method view ──────────────── -->
-                    <StackPanel Visibility="{Binding IsHook, Converter={StaticResource VisibleWhen}}">
-                        <Border Style="{StaticResource Panel.Warning}" Margin="0,0,0,16"
-                                Visibility="{Binding LegendIsWarning, Converter={StaticResource VisibleWhen}}">
-                            <TextBlock Text="{Binding Legend}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
-                                       Foreground="{StaticResource B.AmberText}" />
-                        </Border>
-                        <Border Style="{StaticResource Panel.Notice}" Margin="0,0,0,16"
-                                Visibility="{Binding LegendIsWarning, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}">
-                            <TextBlock Text="{Binding Legend}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
-                                       Foreground="{StaticResource B.Text2}" />
-                        </Border>
+                    <!-- what happens in game -->
+                    <Border Style="{StaticResource Panel.Notice}" Margin="0,0,0,16"
+                            Visibility="{Binding HasExplanation, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Text="{Binding Explanation}" Style="{StaticResource T.Body}" FontSize="13.5" LineHeight="20"
+                                   TextWrapping="Wrap" Foreground="{StaticResource B.Text2}" />
+                    </Border>
 
-                        <TextBlock Text="HOOKED METHODS" Style="{StaticResource T.Label}" Margin="0,0,0,4" />
-                        <Border Style="{StaticResource Head.Line}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="240" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="190" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="METHOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="MODS HOOKING IT" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" Text="STATUS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
-                        <ItemsControl ItemsSource="{Binding Methods}" Focusable="False">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:HookMethodItem}">
-                                    <Border Style="{StaticResource Row.Line}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="240" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="190" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Method}" Style="{StaticResource CellMono}"
-                                                       Foreground="{Binding MethodBrushKey, Converter={StaticResource ResourceKey}}" />
-                                            <TextBlock Grid.Column="1" Text="{Binding ModsText}" Style="{StaticResource Cell}"
-                                                       Foreground="{StaticResource B.Text2}" />
-                                            <TextBlock Grid.Column="2" Text="{Binding StatusText}" Style="{StaticResource Cell}"
-                                                       Foreground="{Binding StatusBrushKey, Converter={StaticResource ResourceKey}}" />
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-
-                        <TextBlock Text="RUNTIME" Style="{StaticResource T.Label}" Margin="0,26,0,2" />
-                        <TextBlock Text="{Binding RuntimeNote}" Style="{StaticResource T.Body}" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,8" />
-                        <Border Style="{StaticResource Head.Line}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="240" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="METHOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="MODS THAT HOOKED IT · LOAD ORDER, LAST WINS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
-                        <ItemsControl ItemsSource="{Binding RuntimeRows}" Focusable="False">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type svc:RuntimeHookRow}">
-                                    <Border Style="{StaticResource Row.Line}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="240" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Method}" Style="{StaticResource CellMono}" />
-                                            <TextBlock Grid.Column="1" Text="{Binding ModsText}" Style="{StaticResource Cell}"
-                                                       Foreground="{StaticResource B.Text2}" />
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-
-                    <!-- ── every other type: each mod's conflicting value ── -->
-                    <StackPanel Visibility="{Binding IsHook, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}">
+                    <!-- each mod and its part in the conflict -->
+                    <StackPanel>
                         <Border Style="{StaticResource Head.Line}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -137,7 +65,7 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="CONFLICTING VALUE" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="ITS PART" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding Values}" Focusable="False">

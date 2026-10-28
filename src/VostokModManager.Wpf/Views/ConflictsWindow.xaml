@@ -20,8 +20,10 @@
     <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
         <DockPanel Margin="28,24,28,22">
             <TextBlock DockPanel.Dock="Top" Text="CONFLICTS" Style="{StaticResource T.Label}" />
-            <TextBlock DockPanel.Dock="Top" Text="What the enabled mods fight over" Style="{StaticResource T.H2}" Margin="0,4,0,6" />
-            <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
+            <TextBlock DockPanel.Dock="Top" Text="Where the enabled mods get in each other's way" Style="{StaticResource T.H2}" Margin="0,4,0,6" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Style="{StaticResource T.Muted}" Margin="0,0,0,4" />
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text4}" Margin="0,0,0,12" TextWrapping="Wrap"
+                       Text="Mods that hook or extend the same game script work together: the Mod Loader runs all of them. Only what is listed here makes one mod's change disappear." />
 
             <Border DockPanel.Dock="Top" Style="{StaticResource Panel.Notice}" Margin="0,0,0,14"
                     Visibility="{Binding HasFocus, Converter={StaticResource VisibleWhen}}">
@@ -44,7 +46,7 @@
                 <StackPanel Orientation="Horizontal">
                     <Button Style="{StaticResource Btn.Quiet}" Content="Scan again" Command="{Binding RescanCommand}"
                             ToolTip="Re-read the mods folder and detect conflicts again." />
-                    <TextBlock Text="Double-click a conflict for the per-method / per-file detail." Style="{StaticResource T.Muted}"
+                    <TextBlock Text="Double-click a conflict to see what happens in game and each mod's part in it." Style="{StaticResource T.Muted}"
                                Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" Margin="12,0,0,0" />
                 </StackPanel>
             </DockPanel>

@@ -494,7 +494,7 @@ public class ModsTests
     public void Update_state_and_conflicts_are_reported_per_row()
     {
         using var sb = new Sandbox();
-        const string hook = "[hooks]\n\"res://Scripts/AI.gd\"=\"_physics_process\"";
+        const string hook = "[autoload]\nBus=\"res://shared/bus.gd\"";  // same autoload name: a real clash
         sb.AddMod("old", "1.0", extraManifest: "[updates]\nsource=\"vostokmods:old\"\n" + hook);
         sb.AddMod("same", "2.0", extraManifest: "[updates]\nsource=\"vostokmods:same\"\n" + hook);
         sb.AddMod("dev", "3.1", extraManifest: "[updates]\nsource=\"vostokmods:dev\"");

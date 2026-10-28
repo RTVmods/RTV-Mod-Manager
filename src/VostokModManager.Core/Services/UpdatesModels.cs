@@ -159,32 +159,17 @@ public sealed record ConflictView(
     public IReadOnlyList<string> ModIds => Conflict.ModIds;
 }
 
-/// <summary>A method hooked on the conflict's script, with the mods
-/// hooking it. Two or more mods on one method is a real collision.</summary>
-public sealed record HookMethodRow(string Method, IReadOnlyList<string> ModNames)
-{
-    public bool IsCollision => ModNames.Count >= 2;
-    public string StatusText => IsCollision ? $"⚠ COLLISION ({ModNames.Count} mods)" : "ok — coexists";
-}
-
-/// <summary>A method the last play session's log shows several mods
-/// hooking, in load order (last wins).</summary>
-public sealed record RuntimeHookRow(string Method, string ModsText);
-
-/// <summary>A mod and its conflicting value (file path, autoload name, …).</summary>
+/// <summary>A mod and its part in a conflict (file path, autoload name,
+/// the hook it claims, how it overrides the method, …).</summary>
 public sealed record ConflictValueRow(string ModName, string Value);
 
-/// <summary>Everything the conflict detail view shows. Hook collisions
-/// fill Methods + the runtime section; every other type fills Values.</summary>
+/// <summary>Everything the conflict detail view shows: what happens in
+/// game, then each mod's part in it.</summary>
 public sealed record ConflictDetail(
     string Title,
     string Subtitle,
     IReadOnlyList<string> ModNames,
-    bool IsHook,
-    string Legend,
-    IReadOnlyList<HookMethodRow> Methods,
-    string RuntimeNote,
-    IReadOnlyList<RuntimeHookRow> RuntimeRows,
+    string Explanation,
     IReadOnlyList<ConflictValueRow> Values);
 
 // ── drift ─────────────────────────────────────────────────────────────

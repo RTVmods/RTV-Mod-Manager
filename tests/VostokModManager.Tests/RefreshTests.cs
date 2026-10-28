@@ -80,7 +80,7 @@ public class RefreshTests
     public void Conflicts_are_scoped_to_the_active_profile_plus_locked_mods()
     {
         using var sb = new Sandbox();
-        const string hook = "[hooks]\n\"res://Scripts/AI.gd\"=\"_physics_process\"";
+        const string hook = "[autoload]\nBus=\"res://shared/bus.gd\"";  // same autoload name: a real clash
         sb.AddMod("alpha", "1.0", extraManifest: hook);
         sb.AddMod("beta", "1.0", extraManifest: hook);
         var session = OpenWithProfile(sb, new ScriptedPrompt(),

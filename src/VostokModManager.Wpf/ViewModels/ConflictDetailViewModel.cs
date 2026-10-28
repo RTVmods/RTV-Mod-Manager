@@ -3,23 +3,8 @@ using VostokModManager.Services;
 
 namespace VostokModManager.Wpf.ViewModels;
 
-/// <summary>A hooked method as the detail table shows it.</summary>
-public sealed class HookMethodItem
-{
-    public HookMethodItem(HookMethodRow row) => Row = row;
-    public HookMethodRow Row { get; }
-    public string Method => Row.Method;
-    public string ModsText => string.Join(", ", Row.ModNames);
-    public string StatusText => Row.StatusText;
-    public bool IsCollision => Row.IsCollision;
-    public string MethodBrushKey => Row.IsCollision ? "B.AmberText" : "B.Text";
-    public string StatusBrushKey => Row.IsCollision ? "B.SalmonText" : "B.Green";
-}
-
-/// <summary>The conflict detail: for a hook collision the per-method
-/// truth (only a method hooked by 2+ mods really clashes) and what the
-/// last play session's log confirmed; for every other type each mod's
-/// conflicting value.</summary>
+/// <summary>The conflict detail: what happens in game, then each mod's
+/// part in it.</summary>
 public sealed class ConflictDetailViewModel
 {
     public ConflictDetailViewModel(ConflictDetail detail, ConflictDetector.Conflict conflict)
@@ -27,8 +12,6 @@ public sealed class ConflictDetailViewModel
         Detail = detail;
         Kind = "CONFLICT · " + conflict.Type.Replace('_', ' ').ToUpperInvariant();
         Severity = ManagerSession.SeverityOf(conflict.Type);
-        Methods = detail.Methods.Select(m => new HookMethodItem(m)).ToList();
-        CollisionCount = Methods.Count(m => m.IsCollision);
     }
 
     public ConflictDetail Detail { get; }
@@ -43,12 +26,7 @@ public sealed class ConflictDetailViewModel
 
     public string Title => Detail.Title;
     public string Subtitle => Detail.Subtitle;
-    public bool IsHook => Detail.IsHook;
-    public string Legend => Detail.Legend;
-    public bool LegendIsWarning => CollisionCount > 0;
-    public int CollisionCount { get; }
-    public IReadOnlyList<HookMethodItem> Methods { get; }
-    public string RuntimeNote => Detail.RuntimeNote;
-    public IReadOnlyList<RuntimeHookRow> RuntimeRows => Detail.RuntimeRows;
+    public string Explanation => Detail.Explanation;
+    public bool HasExplanation => !string.IsNullOrEmpty(Detail.Explanation);
     public IReadOnlyList<ConflictValueRow> Values => Detail.Values;
 }

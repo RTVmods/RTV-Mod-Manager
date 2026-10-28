@@ -4,6 +4,9 @@
 //   - class_name Foo
 //   - super() / super.method()  per function
 //   - take_over_path("res://...")
+//   - Mod Loader hook names in string literals ("ai-loot",
+//     "controller-crouch-post"), wherever they appear: hook("…"),
+//     hook_many({"…": …}) or a constant
 //
 // Mirrors the regex set from the v0.2 GDScript implementation. Function
 // tracking is line-based and naive — "the next func line starts a new
@@ -40,6 +43,12 @@ public static class GDScriptAnalyzer
     private static readonly Regex _reTakeover = new(
         @"take_over_path\s*\(\s*""([^""]+)""\s*\)",
         RegexOptions.Compiled);
+    // A whole string literal shaped like a Mod Loader hook name:
+    // "<script stem>-<method>" plus an optional -pre / -post / -callback.
+    // Which stems are real game scripts is decided by the caller.
+    private static readonly Regex _reHookName = new(
+        @"[""']([a-z][a-z0-9_]*-[a-z0-9_]+(?:-(?:pre|post|callback))?)[""']",
+        RegexOptions.Compiled);
 
     public class FunctionInfo
     {
@@ -54,6 +63,26 @@ public static class GDScriptAnalyzer
         public string ClassName { get; set; } = "";
         public Dictionary<string, FunctionInfo> Functions { get; set; } = new();
         public List<string> TakeOverPaths { get; set; } = new();
+        /// <summary>String literals shaped like hook names, in order of
+        /// first appearance.</summary>
+        public List<string> HookNames { get; set; } = new();
+    }
+
+    /// <summary>True for a hook name with no -pre / -post / -callback
+    /// suffix: the loader's single-owner "replace" slot.</summary>
+    public static bool IsReplaceHook(string hookName)
+        => hookName.Count(c => c == '-') == 1;
+
+    /// <summary>The script stem of a hook name ("ai" for "ai-loot-post").</summary>
+    public static string HookStem(string hookName)
+        => hookName.Substring(0, hookName.IndexOf('-'));
+
+    /// <summary>The method of a hook name ("loot" for "ai-loot-post").</summary>
+    public static string HookMethod(string hookName)
+    {
+        var rest = hookName.Substring(hookName.IndexOf('-') + 1);
+        var dash = rest.IndexOf('-');
+        return dash < 0 ? rest : rest.Substring(0, dash);
     }
 
     public static Analysis Analyze(string source)
@@ -116,6 +145,13 @@ public static class GDScriptAnalyzer
                 var p = tm.Groups[1].Value;
                 if (!result.TakeOverPaths.Contains(p))
                     result.TakeOverPaths.Add(p);
+            }
+
+            foreach (Match hm in _reHookName.Matches(code))
+            {
+                var name = hm.Groups[1].Value;
+                if (!result.HookNames.Contains(name))
+                    result.HookNames.Add(name);
             }
         }
         return result;

@@ -1,7 +1,7 @@
 // How conflicts are presented: their severity tier, a plain-English
 // description, which mod currently wins and why, the conflicts a given
-// mod is part of, and the detail view (per-method hook breakdown with
-// the last play session's runtime evidence).
+// mod is part of, and the detail view (what happens in game and each
+// mod's part in it).
 
 using System.Collections;
 using VostokModManager.Domain;
@@ -54,11 +54,11 @@ public sealed partial class ManagerSession
             ConflictDetector.TYPE_AUTOLOAD_COLLISION
                 => ($"Both register autoload `{key}`", "autoload collision · last to load wins"),
             ConflictDetector.TYPE_HOOK_COLLISION
-                => ($"Two mods hook `{key}`", "hook collision · last to load wins the chain"),
-            ConflictDetector.TYPE_SCRIPT_EXTEND_COLLISION
-                => ($"Both extend `{key}`", "script_extend collision · last applies"),
+                => ($"Two mods replace `{key}`", "replace-hook collision · only the first to register runs"),
+            ConflictDetector.TYPE_OVERRIDE_COLLISION
+                => ($"Overrides of `{key}` cut each other off", "override collision · only the last applied runs"),
             ConflictDetector.TYPE_TAKE_OVER_COLLISION
-                => ($"Two mods take_over `{key}`", "take-over collision · only one applies"),
+                => ($"A mod replaces `{key}` outright", "full take-over · other mods' hooks and extends on it are lost"),
             ConflictDetector.TYPE_DUPLICATE_MOD_ID
                 => ($"Two .vmz files share mod_id `{key}`",
                     "duplicate mod_id · loader picks one, ignores the rest"),
@@ -71,8 +71,8 @@ public sealed partial class ManagerSession
                 => ($"Load-order constraint on `{key}`",
                     "dependency order · raise dependent's priority above its dependency"),
             ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT
-                => ($"Super-chain constraint on `{key}`",
-                    "super_chain · replacer must load before chainer"),
+                => ($"Order matters for `{key}`",
+                    "override order · the override that skips super must be applied first"),
             _ => (c.Type, c.Key),
         };
     }
@@ -94,8 +94,11 @@ public sealed partial class ManagerSession
 
     /// <summary>Which mod currently "wins" a conflict given the live
     /// load order. Per type:
-    ///   - file_overlap / autoload / hook / script_extend / take_over →
-    ///     the highest priority (loads last → final write wins);
+    ///   - file_overlap / autoload / override_collision → the highest
+    ///     priority (loads last → final write wins);
+    ///   - hook_collision → the earliest-loading mod (the loader keeps the
+    ///     first registration of a replace hook);
+    ///   - take_over_collision → the mod that replaces the script;
     ///   - class_name → no winner, the project refuses to load;
     ///   - super_chain_constraint / dependency_order → the late-loading
     ///     side, whose behaviour the player ends up seeing;
@@ -125,6 +128,20 @@ public sealed partial class ManagerSession
                 return new($"{picked} (loader picks first)", WinnerTone.Muted,
                     "Two .vmz files share the same mod_id; the in-game loader picks the "
                     + "alphabetically-first filename and silently ignores the rest.");
+
+            case ConflictDetector.TYPE_HOOK_COLLISION:
+                var first = c.ModIds.Select(id => Registry.FindById(id)).FirstOrDefault(e => e != null);
+                return first == null
+                    ? new("—", WinnerTone.Muted, "Couldn't resolve any involved mod against the registry.")
+                    : new(EntryLabel(first), WinnerTone.Winner,
+                        "Loads first, so it registers the replace hook first. The loader rejects the "
+                        + "other mods' registration, and their replacement never runs.");
+
+            case ConflictDetector.TYPE_TAKE_OVER_COLLISION:
+                var replacer = Registry.FindById(c.ModIds[0]);
+                return new(replacer == null ? c.ModIds[0] : EntryLabel(replacer), WinnerTone.Winner,
+                    "Its script replaces the game script without extending it, so what the other mods "
+                    + "hooked or chained onto that script is gone.");
 
             case ConflictDetector.TYPE_DEPENDENCY_ORDER:
             case ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT:
@@ -302,18 +319,10 @@ public sealed partial class ManagerSession
 
     // ── detail ────────────────────────────────────────────────────────
 
-    /// <summary>The conflict detail view. The list flags a hook
-    /// collision at the FILE level, but the loader chains hooks per
-    /// METHOD: two mods hooking different methods of one script coexist,
-    /// only the same path::method clashes. This derives the per-method
-    /// truth from Details["values"] (each mod's method list, parallel
-    /// to ModIds) and, when a godot.log exists, adds the hook clashes
-    /// the last play session confirmed. Other types list each mod's
-    /// conflicting value.</summary>
+    /// <summary>The conflict detail view: what happens in game, then each
+    /// mod's part in it (Details["values"], parallel to ModIds, or the
+    /// conflict key).</summary>
     public ConflictDetail GetConflictDetail(ConflictDetector.Conflict c)
-        => GetConflictDetail(c, GodotLogAnalyzer.LatestLoaderLog);
-
-    internal ConflictDetail GetConflictDetail(ConflictDetector.Conflict c, Func<string> findLog)
     {
         var (title, subtitle) = DescribeConflict(c);
         string Name(string id)
@@ -324,93 +333,45 @@ public sealed partial class ManagerSession
         var modNames = c.ModIds.Select(Name).ToList();
         subtitle = subtitle + "   ·   mods: " + string.Join(", ", modNames);
         var values = ConflictValues(c);
-
-        if (c.Type != ConflictDetector.TYPE_HOOK_COLLISION)
-        {
-            var rows = new List<ConflictValueRow>();
-            for (int i = 0; i < c.ModIds.Count; i++)
-            {
-                var val = i < values.Count && !string.IsNullOrEmpty(values[i]) ? values[i] : c.Key;
-                rows.Add(new ConflictValueRow(Name(c.ModIds[i]), val));
-            }
-            if (c.ModIds.Count == 0) rows.Add(new ConflictValueRow(c.Key, ""));
-            return new ConflictDetail(title, subtitle, modNames, false, "",
-                Array.Empty<HookMethodRow>(), "", Array.Empty<RuntimeHookRow>(), rows);
-        }
-
-        // method → mods hooking it, from the manifest method lists.
-        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var rows = new List<ConflictValueRow>();
         for (int i = 0; i < c.ModIds.Count; i++)
         {
-            var modId = c.ModIds[i];
-            // Prefer the captured value; fall back to the live manifest.
-            var raw = i < values.Count ? values[i] : "";
-            if (string.IsNullOrEmpty(raw))
-            {
-                var e = Registry.FindById(modId);
-                if (e != null && e.Hooks.TryGetValue(c.Key, out var hv)) raw = hv;
-            }
-            foreach (var m in raw.Split(','))
-            {
-                var method = m.Trim();
-                if (method.Length == 0) continue;
-                if (!map.TryGetValue(method, out var mods)) map[method] = mods = new();
-                if (!mods.Contains(modId)) mods.Add(modId);
-            }
+            var val = i < values.Count && !string.IsNullOrEmpty(values[i]) ? values[i] : c.Key;
+            rows.Add(new ConflictValueRow(Name(c.ModIds[i]), val));
         }
-        var methods = map
-            .OrderByDescending(k => k.Value.Count)
-            .ThenBy(k => k.Key, StringComparer.Ordinal)
-            .Select(kv => new HookMethodRow(kv.Key, kv.Value.Select(Name).ToList()))
-            .ToList();
-        var realCollisions = methods.Count(m => m.IsCollision);
-        var legend = realCollisions > 0
-            ? $"{realCollisions} method(s) are hooked by more than one mod — those are the real "
-              + "collisions (the rest only overlap at the file level and coexist via MML's hook chain)."
-            : "These mods hook the same script but on DIFFERENT methods — they coexist via MML's hook "
-              + "chain. No method is hooked by more than one mod.";
-
-        // Runtime correlation (best-effort; only when a log exists).
-        var note = "Runtime (last play session)";
-        var runtime = new List<RuntimeHookRow>();
-        try
-        {
-            var logPath = findLog();
-            if (string.IsNullOrEmpty(logPath))
-            {
-                note = "Runtime (last play session) — no godot.log found";
-                runtime.Add(new("(no log)", "Launch the game once to capture runtime hook data."));
-            }
-            else
-            {
-                var a = GodotLogAnalyzer.Analyze(logPath);
-                var clashes = a.HookClashes
-                    .Where(h => string.Equals(h.VanillaPath, c.Key, StringComparison.Ordinal))
-                    .ToList();
-                if (a.HooksNotLogged)
-                {
-                    note = "Runtime (last play session) — hooks were not logged";
-                    runtime.Add(new("(not logged)", GodotLogAnalyzer.HooksNotLoggedHint));
-                }
-                else if (clashes.Count == 0)
-                {
-                    note = "Runtime (last play session) — no multi-mod hook on this script in the last log";
-                    runtime.Add(new("(none)", "No method on this script was hooked by 2+ mods at runtime."));
-                }
-                else
-                {
-                    foreach (var h in clashes)
-                        runtime.Add(new(h.Method, string.Join("  →  ", h.Mods)));
-                }
-            }
-        }
-        catch
-        {
-            note = "Runtime (last play session) — could not read the log";
-        }
-        return new ConflictDetail(title, subtitle, modNames, true, legend, methods, note, runtime,
-            Array.Empty<ConflictValueRow>());
+        if (c.ModIds.Count == 0) rows.Add(new ConflictValueRow(c.Key, ""));
+        return new ConflictDetail(title, subtitle, modNames, ExplainConflict(c), rows);
     }
+
+    /// <summary>What the conflict does in game, in plain words.</summary>
+    public static string ExplainConflict(ConflictDetector.Conflict c) => c.Type switch
+    {
+        ConflictDetector.TYPE_HOOK_COLLISION =>
+            "A replace hook swaps out a game method, and the Mod Loader allows one per method. "
+            + "The first mod to register keeps it; the other registration is rejected, so that "
+            + "mod's replacement never runs. Hooks that run before or after a method are not "
+            + "affected: any number of mods can share those.",
+        ConflictDetector.TYPE_OVERRIDE_COLLISION =>
+            "Both mods install their own version of this method over the game script. An override "
+            + "that doesn't call super ends the chain, so whatever was applied before it never runs. "
+            + "Ask the mod authors to call super, or keep only one of the mods.",
+        ConflictDetector.TYPE_TAKE_OVER_COLLISION =>
+            "One mod swaps the game script for a script that doesn't extend it. Everything other "
+            + "mods hooked or chained onto that script is thrown away for objects created after "
+            + "the swap.",
+        ConflictDetector.TYPE_SUPER_CHAIN_CONSTRAINT =>
+            "Both mods override this method; one calls super and one doesn't. They work together "
+            + "only when the one that skips super is applied first. Its patch is applied while the "
+            + "game runs, so the order can't be checked here.",
+        ConflictDetector.TYPE_FILE_OVERLAP =>
+            "Both mods ship a file at the same path. The game sees only the copy from the mod "
+            + "that loads last.",
+        ConflictDetector.TYPE_AUTOLOAD_COLLISION =>
+            "Both mods register an autoload with the same name. Only one of them is created.",
+        ConflictDetector.TYPE_CLASS_NAME_COLLISION =>
+            "Two scripts declare the same class_name. Godot refuses to load the project.",
+        _ => "",
+    };
 
     /// <summary>Per-mod manifest values parallel to ModIds, from
     /// Details["values"]; empty when absent.</summary>
