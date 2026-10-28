@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.6 (2026-10-29)
 
 - **You can see the manager getting ready.** While it reads your mods and checks VostokMods and GitHub for updates, the open page says so: the step under way, a progress bar (7 of 16 mods checked) and what it is doing. While the page has nothing to show yet, this fills the page; once Browse has the mods from VostokMods (now read straight after your mods, alongside the update checks), it moves to a band across the top until the checks finish.
 - **The manager uses your game's font.** With the Custom Fonts mod on in the active profile, the manager's text switches to the font picked for the game in that mod's settings (Bender, Inter, JetBrains Mono, …), and follows a new pick when you come back from the game. The font is read from the mod you have installed; nothing is bundled. Lora stays the font otherwise, and **Settings → Use the font picked in game with the Custom Fonts mod** turns it off.
