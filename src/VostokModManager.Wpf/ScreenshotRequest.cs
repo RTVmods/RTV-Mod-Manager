@@ -27,9 +27,17 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
         {
             window.Width = req.Width;
             window.Height = req.Height;
-            await shell.StartAsync();
+            // "startup" catches the window mid-startup with the page still
+            // empty; "startup-band" once the page has content but the update
+            // checks still run.
+            var start = shell.StartAsync();
+            if (req.Page == "startup") await Task.Delay(30);
+            else if (req.Page == "startup-band")
+                while (!start.IsCompleted && !shell.ShowStartupBand) await Task.Delay(50);
+            else await start;
             Window target = window;
-            if (req.Page == "setup")
+            if (req.Page.StartsWith("startup")) { }
+            else if (req.Page == "setup")
             {
                 target = new Views.SetupWindow(new SetupViewModel(shell.Session, SetupReason.FromSettings))
                 {
@@ -83,7 +91,7 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 if (slug.Length > 0 && browse.Cards.FirstOrDefault(c => c.Slug == slug) is { } card) browse.Selected = card;
                 await Task.Delay(4000);
             }
-            await Task.Delay(800);
+            await Task.Delay(req.Page == "startup" ? 60 : 800);
             target.UpdateLayout();
 
             var root = (FrameworkElement)target.Content;

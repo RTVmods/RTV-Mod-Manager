@@ -22,6 +22,11 @@ public abstract partial class PageViewModel : ObservableObject
 
     /// <summary>Called when the page is opened from the menu.</summary>
     public virtual void OnShown() { }
+
+    /// <summary>False while the page has nothing to show yet (Browse before
+    /// it has read VostokMods): the startup progress then fills the page
+    /// instead of sitting in a band above it.</summary>
+    [ObservableProperty] private bool _hasContent = true;
 }
 
 /// <summary>One entry in the side menu.</summary>
@@ -87,6 +92,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
         session.Changed += OnSessionChanged;
         session.Status += OnStatus;
+        foreach (var page in Nav.Append(SettingsNav).Select(n => n.Page)) page.PropertyChanged += OnPageChanged;
         Imports = new Wpf.Services.ImportFlow(session, () => Application.Current?.MainWindow);
         Mods.ImportRequested += async files =>
         {
@@ -125,6 +131,8 @@ public sealed partial class ShellViewModel : ObservableObject
         if (oldValue != null) oldValue.IsSelected = false;
         newValue.IsSelected = true;
         newValue.Page.OnShown();
+        OnPropertyChanged(nameof(ShowStartupPanel));
+        OnPropertyChanged(nameof(ShowStartupBand));
     }
 
     [RelayCommand]
@@ -179,11 +187,57 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _launchStatusText = "";
     [ObservableProperty] private bool _isBusy;
 
+    // ── startup progress ──
+    // While the startup work runs, the window says so in the open page:
+    // filling it while the page has nothing to show yet, then as a band
+    // across its top.
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowStartupPanel), nameof(ShowStartupBand))]
+    private bool _startupActive;
+
+    /// <summary>The step under way ("Checking your mods for updates").</summary>
+    [ObservableProperty] private string _startupTitle = "";
+    /// <summary>The latest line the step reported.</summary>
+    [ObservableProperty] private string _startupDetail = "";
+    /// <summary>0..1 when the step counts its work (7 of 16 mods).</summary>
+    [ObservableProperty] private double _startupFraction;
+    [ObservableProperty] private bool _startupIndeterminate = true;
+
+    public bool ShowStartupPanel => StartupActive && !Selected.Page.HasContent;
+    public bool ShowStartupBand => StartupActive && Selected.Page.HasContent;
+
+    private void BeginStep(string title)
+    {
+        StartupTitle = title;
+        StartupDetail = "";
+        StartupIndeterminate = true;
+        StartupFraction = 0;
+    }
+
+    private void OnPageChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PageViewModel.HasContent) && sender == Selected.Page)
+        {
+            OnPropertyChanged(nameof(ShowStartupPanel));
+            OnPropertyChanged(nameof(ShowStartupBand));
+        }
+    }
+
     private void OnStatus(StatusArea area, string text)
     {
         // Scans and checks narrate a lot; the title strip shows the latest.
         StatusText = text;
         if (area == StatusArea.Launch) LaunchStatusText = text;
+        if (!StartupActive) return;
+        StartupDetail = text;
+        // "… 7/16": a count the bar can show.
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"(\d+)\s*/\s*(\d+)\s*$");
+        if (m.Success && int.Parse(m.Groups[2].Value) is var total and > 0)
+        {
+            StartupIndeterminate = false;
+            StartupFraction = Math.Clamp(int.Parse(m.Groups[1].Value) / (double)total, 0, 1);
+        }
     }
 
     /// <summary>Plain launch: the game opens on its main menu.</summary>
@@ -248,8 +302,23 @@ public sealed partial class ShellViewModel : ObservableObject
     public async Task StartAsync()
     {
         IsBusy = true;
+        StartupActive = true;
+        BeginStep("Reading your mods");
+        // The first page is selected before anything is scanned and never
+        // got its "shown" call. Browse loads its catalogue on that call and
+        // reads the scan to say what you have, so it comes right after the
+        // scan, while the update checks run.
+        var shown = false;
+        void ShowFirstPage()
+        {
+            if (shown) return;
+            shown = true;
+            Selected.Page.OnShown();
+        }
         try
         {
+            // The scan runs on this thread: let the window draw the progress first.
+            await Dispatcher.Yield(DispatcherPriority.Background);
             var result = await Session.StartupAsync();
             if (!result.ModsFolderReadable)
             {
@@ -264,14 +333,21 @@ public sealed partial class ShellViewModel : ObservableObject
                     await ShowSetupAsync(Session.IsFirstRun ? SetupReason.FirstRun : SetupReason.AdoptProfiles);
                 Session.Refresh();
             }
-            if (result.Has(StartupStep.CheckUpdates)) await Session.CheckUpdatesAsync();
+            ShowFirstPage();
+            if (result.Has(StartupStep.CheckUpdates))
+            {
+                BeginStep("Checking your mods for updates on VostokMods");
+                await Session.CheckUpdatesAsync();
+            }
             if (result.Has(StartupStep.CheckMmlVersion))
             {
+                BeginStep("Checking for a new Mod Loader");
                 var mml = await Session.CheckMmlVersionAsync();
                 LoaderUpdate = mml.IsOutdated ? $"Update to {mml.Latest}" : "";
             }
             if (result.Has(StartupStep.CheckManagerUpdate))
             {
+                BeginStep("Checking for a new mod manager");
                 var mgr = await Session.CheckManagerUpdateAsync(forceFresh: true);
                 ManagerUpdate = mgr.IsOutdated ? $"Update to {mgr.Latest}" : "";
             }
@@ -284,10 +360,8 @@ public sealed partial class ShellViewModel : ObservableObject
         finally
         {
             IsBusy = false;
-            // The first page is selected before anything is scanned and never
-            // got its "shown" call; Browse loads its catalogue on that call,
-            // and reads the scan to say what you have.
-            Selected.Page.OnShown();
+            StartupActive = false;
+            ShowFirstPage();
         }
     }
 

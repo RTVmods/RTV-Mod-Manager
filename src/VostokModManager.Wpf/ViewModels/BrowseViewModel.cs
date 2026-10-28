@@ -337,6 +337,7 @@ public sealed partial class BrowseViewModel : PageViewModel
         _imports = imports;
         _openPage = openPage;
         _mods = mods;
+        HasContent = false;  // until the catalogue is read
         Tabs.Add(new BrowseTab("all", "All") { IsActive = true });
         TailTabs.Add(new BrowseTab("modpacks", "Modpacks"));
         TailTabs.Add(new BrowseTab("website", "Website"));
@@ -481,6 +482,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             _loaded = true;
             RefreshStates();
             Rebuild(keep);
+            HasContent = true;
 
             var packs = await packsTask;
             ModpackError = packs.Error != null ? packs.Header : "";
@@ -499,6 +501,7 @@ public sealed partial class BrowseViewModel : PageViewModel
         {
             IsLoading = false;
             LoadingText = "";
+            HasContent = true;  // the page shows what it got, or its error
             OnPropertyChanged(nameof(NothingFound));
         }
     }

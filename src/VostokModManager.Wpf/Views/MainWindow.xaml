@@ -242,7 +242,52 @@
             </Border>
 
             <!-- ── the open page ────────────────────────────────────── -->
-            <ContentControl Grid.Row="1" Grid.Column="1" Content="{Binding Selected.Page}" Focusable="False" />
+            <!-- ── the open page, and the startup progress ──────────────
+                 While the manager scans and checks for updates, the step under
+                 way shows across the top of the page; while the page has
+                 nothing to show yet (Browse before it has read VostokMods), it
+                 fills the page instead. -->
+            <Grid Grid.Row="1" Grid.Column="1">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="{StaticResource B.Rail}"
+                            BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1"
+                            Visibility="{Binding ShowStartupBand, Converter={StaticResource VisibleWhen}}">
+                        <Grid>
+                            <DockPanel Margin="32,10,32,12">
+                                <TextBlock DockPanel.Dock="Left" Text="GETTING READY" Style="{StaticResource T.Label}"
+                                           VerticalAlignment="Center" Margin="0,0,14,0" />
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding StartupTitle}" FontSize="15" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding StartupDetail}" Style="{StaticResource T.Muted}" VerticalAlignment="Center"
+                                           Margin="14,0,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            </DockPanel>
+                            <ProgressBar VerticalAlignment="Bottom" Height="2" Minimum="0" Maximum="1" BorderThickness="0"
+                                         Value="{Binding StartupFraction, Mode=OneWay}" IsIndeterminate="{Binding StartupIndeterminate}"
+                                         Background="Transparent" Foreground="{StaticResource B.Primary}" />
+                        </Grid>
+                    </Border>
+                    <ContentControl Content="{Binding Selected.Page}" Focusable="False" />
+                </DockPanel>
+
+                <Border Background="{StaticResource B.Ground}"
+                        Visibility="{Binding ShowStartupPanel, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="520" Margin="32,0,32,60">
+                        <Border Width="64" Height="64" BorderBrush="{StaticResource B.Edge}" BorderThickness="1" HorizontalAlignment="Center">
+                            <c:Emblem Margin="10" />
+                        </Border>
+                        <TextBlock Text="GETTING READY" Style="{StaticResource T.Label}" HorizontalAlignment="Center" Margin="0,22,0,6" />
+                        <TextBlock Text="{Binding StartupTitle}" Style="{StaticResource T.H2}" TextAlignment="Center" />
+                        <ProgressBar Height="3" Margin="0,22,0,0" Minimum="0" Maximum="1" BorderThickness="0"
+                                     Value="{Binding StartupFraction, Mode=OneWay}" IsIndeterminate="{Binding StartupIndeterminate}"
+                                     Background="{StaticResource B.Hairline}" Foreground="{StaticResource B.Primary}" />
+                        <TextBlock Text="{Binding StartupDetail}" Style="{StaticResource T.Muted}" TextAlignment="Center"
+                                   Margin="0,12,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                        <TextBlock Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text4}" TextAlignment="Center"
+                                   Margin="0,18,0,0" TextWrapping="Wrap"
+                                   Text="The manager reads your mods folder and asks VostokMods and GitHub what's new. You can use the menu on the left meanwhile." />
+                    </StackPanel>
+                </Border>
+            </Grid>
         </Grid>
     </Border>
 </Window>
