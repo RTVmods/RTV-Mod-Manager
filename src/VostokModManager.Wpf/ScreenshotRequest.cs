@@ -64,6 +64,15 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 await Task.Delay(300);
                 target = Application.Current.Windows.OfType<Views.MessageWindow>().Last();
             }
+            else if (req.Page.StartsWith("launching"))
+            {
+                // The launch panel mid-launch: `launching:<phase>` (Started by default).
+                var phase = req.Page.Contains(':')
+                    && Enum.TryParse<VostokModManager.Services.GameLaunchPhase>(req.Page[(req.Page.IndexOf(':') + 1)..], true, out var p)
+                    ? p : VostokModManager.Services.GameLaunchPhase.Started;
+                shell.Open("mods");
+                shell.LaunchStatusText = VostokModManager.Services.ManagerSession.LaunchPhaseText(phase);
+            }
             else shell.Open(req.Page.Split(':')[0]);
             // Browse loads its catalogue from VostokMods; let it (and its thumbnails) land.
             // `browse:<slug>` then selects that mod's card.

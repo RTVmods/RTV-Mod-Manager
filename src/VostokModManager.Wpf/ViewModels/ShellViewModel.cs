@@ -174,12 +174,16 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _loaderVersion = "";
     [ObservableProperty] private string _loaderUpdate = "";
     [ObservableProperty] private string _statusText = "";
+    /// <summary>How the last launch is going, under the launch button:
+    /// the loader's silent first pass, the restart, the end of the session.</summary>
+    [ObservableProperty] private string _launchStatusText = "";
     [ObservableProperty] private bool _isBusy;
 
     private void OnStatus(StatusArea area, string text)
     {
         // Scans and checks narrate a lot; the title strip shows the latest.
         StatusText = text;
+        if (area == StatusArea.Launch) LaunchStatusText = text;
     }
 
     /// <summary>Plain launch: the game opens on its main menu.</summary>

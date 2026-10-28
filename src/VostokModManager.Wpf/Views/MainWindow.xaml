@@ -230,6 +230,12 @@
                                     </Button.ContextMenu>
                                 </Button>
                             </Grid>
+                            <TextBlock Text="{Binding LaunchStatusText}" Style="{StaticResource T.Muted}" FontSize="12"
+                                       TextWrapping="Wrap" Margin="0,10,0,0" AutomationProperties.Name="Launch status">
+                                <TextBlock.Visibility>
+                                    <Binding Path="LaunchStatusText" Converter="{StaticResource EmptyToCollapsed}" />
+                                </TextBlock.Visibility>
+                            </TextBlock>
                         </StackPanel>
                     </Border>
                 </DockPanel>

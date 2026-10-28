@@ -16,6 +16,11 @@
 // When no candidate process turns up the watch ends quietly: Steam runs
 // the game under various names and a missed crash beats a false alarm.
 //
+// Along the way it reports launch phases (GameLaunchPhase) so the launch
+// panel can explain the loader's first pass: with the loader's launcher
+// skipped, that pass shows nothing for up to a minute and then closes the
+// game, which players read as "the game didn't start".
+//
 // Process access sits behind IGameProcessSource, and time behind a clock
 // and a delay function, so tests drive a whole session without a game.
 
@@ -51,6 +56,23 @@ public enum GameExitKind
     /// nothing to promote.</summary>
     ShortExit,
     LikelyCrash,
+}
+
+/// <summary>Where a launch is while the game starts, reported by
+/// GameSessionMonitor.WatchAsync as it happens.</summary>
+public enum GameLaunchPhase
+{
+    /// <summary>The game's process appeared. It may be the Mod Loader's
+    /// first pass, which sets the mods up and restarts the game.</summary>
+    Started,
+    /// <summary>The first process exited cleanly before it settled; the
+    /// monitor is waiting for the game to reopen (the loader's restart).</summary>
+    Restarting,
+    /// <summary>The game reopened after the loader's restart.</summary>
+    Restarted,
+    /// <summary>The first process stayed up past SettleAfter without a
+    /// restart: the mods were already set up and the game is running.</summary>
+    Running,
 }
 
 /// <summary>How a watched session ended.</summary>
@@ -125,6 +147,10 @@ public sealed class GameSessionMonitor
     /// relaunching can't hold the watch forever.</summary>
     public int MaxRestarts { get; init; } = 3;
 
+    /// <summary>A first process still running after this long is the game
+    /// itself, not the Mod Loader's first pass (about 40 s with 100+ mods).</summary>
+    public TimeSpan SettleAfter { get; init; } = TimeSpan.FromSeconds(120);
+
     /// <summary>Raised when a watched session ends with a likely crash.
     /// Raised on the thread that awaited WatchAsync's continuation (the
     /// UI thread when it was started there).</summary>
@@ -145,28 +171,36 @@ public sealed class GameSessionMonitor
 
     /// <summary>Watches one session from the moment of the launch.
     /// Never throws; cancellation ends the watch as NotFound / Lost
-    /// without raising an event.</summary>
-    public async Task<GameExit> WatchAsync(CancellationToken ct = default)
+    /// without raising an event. `onPhase` hears how the launch is going
+    /// (on the caller's context, like the rest of the watch).</summary>
+    public async Task<GameExit> WatchAsync(CancellationToken ct = default, Action<GameLaunchPhase>? onPhase = null)
     {
         var launchTime = _utcNow();
         var game = await FindGameAsync(FindTimeout, ct);
         if (game == null) return new GameExit(GameExitKind.NotFound);
+        Report(onPhase, GameLaunchPhase.Started);
 
         GameExit exit;
         try
         {
             int exitCode;
             var restarts = 0;
+            // Only the first process can be the loader's first pass.
+            var settled = !await ExitsBeforeSettlingAsync(game, ct);
+            if (settled) Report(onPhase, GameLaunchPhase.Running);
             while (true)
             {
                 await game.WaitForExitAsync(ct);
                 exitCode = game.ExitCode;
                 if (restarts >= MaxRestarts) break;
+                var reopening = !settled && restarts == 0 && exitCode == 0;
+                if (reopening) Report(onPhase, GameLaunchPhase.Restarting);
                 var next = await FindGameAsync(RestartGrace, ct);
                 if (next == null) break;
                 game.Dispose();
                 game = next;
                 restarts++;
+                if (reopening) Report(onPhase, GameLaunchPhase.Restarted);
             }
             var sessionSec = (_utcNow() - launchTime).TotalSeconds;
             var kind = exitCode != 0 ? GameExitKind.LikelyCrash
@@ -188,6 +222,25 @@ public sealed class GameSessionMonitor
         if (exit.Kind == GameExitKind.CleanExit) CleanExit?.Invoke(exit);
         else if (exit.Kind == GameExitKind.LikelyCrash) CrashDetected?.Invoke(exit);
         return exit;
+    }
+
+    /// <summary>True when the process exits within SettleAfter; false once
+    /// it has been running that long.</summary>
+    private async Task<bool> ExitsBeforeSettlingAsync(IGameProcess game, CancellationToken ct)
+    {
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var exited = game.WaitForExitAsync(stop.Token);
+        var timer = _delay(SettleAfter, stop.Token);
+        var first = await Task.WhenAny(exited, timer);
+        stop.Cancel();
+        ct.ThrowIfCancellationRequested();
+        return first == exited && exited.IsCompletedSuccessfully;
+    }
+
+    private static void Report(Action<GameLaunchPhase>? onPhase, GameLaunchPhase phase)
+    {
+        try { onPhase?.Invoke(phase); }
+        catch { /* a front-end problem must not end the watch */ }
     }
 
     /// <summary>Polls for the game's process for up to `within`; null

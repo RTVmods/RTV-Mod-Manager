@@ -377,4 +377,108 @@ public class LaunchTests
         Assert.Equal(GameExitKind.Lost, exit.Kind);
         Assert.Empty(prompt.Asked);
     }
+
+    // ── launch phases (the loader's silent first pass) ────────────────
+
+    /// <summary>A delay that never ends for the settle timer, so the first
+    /// process counts as unsettled until a test says otherwise.</summary>
+    private static Func<TimeSpan, CancellationToken, Task> PollOnly(TimeSpan settle)
+        => (t, ct) => t == settle ? Task.Delay(Timeout.Infinite, ct) : Task.Delay(1, ct);
+
+    [Fact]
+    public async Task A_two_pass_launch_reports_the_restart_as_it_happens()
+    {
+        var pass1 = new FakeGameProcess { ExitCode = 0 };
+        var pass2 = new FakeGameProcess { ExitCode = 0 };
+        var source = new FakeProcessSource { Game = pass1 };
+        var monitor = new GameSessionMonitor(source, delay: PollOnly(TimeSpan.FromSeconds(120)));
+        var phases = new List<GameLaunchPhase>();
+
+        var watch = monitor.WatchAsync(default, phases.Add);
+        await Task.Delay(20);
+        Assert.Equal(new[] { GameLaunchPhase.Started }, phases);
+
+        pass1.Exit.SetResult();
+        await Task.Delay(20);
+        Assert.Equal(GameLaunchPhase.Restarting, phases[^1]);
+
+        source.Restarted = pass2;
+        await Task.Delay(50);
+        Assert.Equal(new[] { GameLaunchPhase.Started, GameLaunchPhase.Restarting, GameLaunchPhase.Restarted }, phases);
+
+        pass2.Exit.SetResult();
+        await watch;
+        Assert.Equal(3, phases.Count);  // the player quitting is not another restart
+    }
+
+    [Fact]
+    public async Task A_game_that_stays_up_is_reported_running_and_its_quit_is_not_a_restart()
+    {
+        var (monitor, game, _) = Monitor(exitCode: 0);  // the settle timer elapses at once
+        var phases = new List<GameLaunchPhase>();
+
+        var watch = monitor.WatchAsync(default, phases.Add);
+        await Task.Delay(20);
+        game.Exit.SetResult();
+        await watch;
+
+        Assert.Equal(new[] { GameLaunchPhase.Started, GameLaunchPhase.Running }, phases);
+    }
+
+    [Fact]
+    public async Task The_launch_panel_hears_the_first_pass_and_the_reopen()
+    {
+        using var sb = new Sandbox();
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Default\"\n");
+        var pass1 = new FakeGameProcess { ExitCode = 0 };
+        var pass2 = new FakeGameProcess { ExitCode = 0 };
+        var source = new FakeProcessSource { Game = pass1 };
+        var session = LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher());
+        session.GameMonitor = new GameSessionMonitor(source, delay: PollOnly(TimeSpan.FromSeconds(120)));
+        var said = new List<string>();
+        session.Status += (a, m) => { if (a == StatusArea.Launch) said.Add(m); };
+
+        Assert.True(session.LaunchGame());
+        await Task.Delay(20);
+        pass1.Exit.SetResult();
+        source.Restarted = pass2;
+        await Task.Delay(50);
+        pass2.Exit.SetResult();
+        await session.GameWatchTask!;
+
+        Assert.Contains(said, m => m.StartsWith("Game starting.") && m.Contains("closes and reopens on its own"));
+        Assert.Contains("Mods set up. The game is reopening…", said);
+        Assert.Contains("Game reopened with the mods loaded.", said);
+        Assert.Equal("Game closed.", said[^1]);
+    }
+
+    [Fact]
+    public async Task A_launch_with_no_game_process_says_so_in_the_launch_panel()
+    {
+        using var sb = new Sandbox();
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Default\"\n");
+        var session = LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher());
+        var said = new List<string>();
+        session.Status += (a, m) => { if (a == StatusArea.Launch) said.Add(m); };
+
+        session.LaunchGame();
+        await session.GameWatchTask!;
+
+        Assert.StartsWith("The game didn't appear within a minute.", said[^1]);
+    }
+
+    [Fact]
+    public void A_failed_steam_launch_gets_no_watch()
+    {
+        using var sb = new Sandbox();
+        sb.WriteCfg("[settings]\n\nactive_profile=\"Default\"\n");
+        var session = LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher { LaunchSucceeds = false });
+        var said = new List<string>();
+        session.Status += (a, m) => { if (a == StatusArea.Launch) said.Add(m); };
+
+        Assert.False(session.LaunchGame());
+
+        Assert.Null(session.GameWatchTask);
+        Assert.Empty(said);  // no "didn't appear" after the launch already failed
+    }
 }

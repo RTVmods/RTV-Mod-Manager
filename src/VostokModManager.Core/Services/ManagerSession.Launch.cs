@@ -77,10 +77,6 @@ public sealed partial class ManagerSession
             ActiveProfile?.FolderPath ?? "");
         if (captured) RaiseChanged();  // the checkpoint row appears / ages
 
-        // Watch for a crash by polling for the game's process. Steam
-        // launches are fire-and-forget, so this is best-effort.
-        StartGameWatch();
-
         var appId = Launcher.FindAppId(ModsDir);
         if (appId <= 0)
         {
@@ -114,6 +110,13 @@ public sealed partial class ManagerSession
         _lastLaunchStatus = $"Launching Vostok via Steam (app id {appId})…"
             + (skipUi ? "  (mod loader launcher skipped)" : "");
         Say(StatusArea.Launch, _lastLaunchStatus);
+
+        // Watch for a crash by polling for the game's process, and tell the
+        // launch panel how the start is going. Steam launches are
+        // fire-and-forget, so this is best-effort. Only a launch Steam
+        // accepted gets a watch: a failed one would end in "the game didn't
+        // appear" a minute after its own error.
+        StartGameWatch();
         return true;
     }
 
@@ -148,17 +151,48 @@ public sealed partial class ManagerSession
     /// UI thread like every other session call.</summary>
     private async Task<GameExit> WatchGameSessionAsync(CancellationTokenSource cts)
     {
-        var exit = await GameMonitor.WatchAsync(cts.Token);
+        var exit = await GameMonitor.WatchAsync(cts.Token, phase =>
+        {
+            if (!cts.IsCancellationRequested) Say(StatusArea.Launch, LaunchPhaseText(phase));
+        });
         var cancelled = cts.IsCancellationRequested;
         if (ReferenceEquals(_gameWatch, cts)) _gameWatch = null;
         cts.Dispose();
         if (cancelled) return exit;  // the app closed / a newer launch took over
+        Say(StatusArea.Launch, LaunchEndText(exit));
         HandleGameExit(exit);
         // The game moved its save slots on (active slot, a new run): whatever
         // the exit, what the launch panel offers to continue has changed.
         RaiseChanged();
         return exit;
     }
+
+    /// <summary>What the launch panel says while the game starts. The
+    /// loader's first pass is the reason for most of it: with its launcher
+    /// skipped it shows nothing for up to a minute, then closes the game
+    /// and starts it again.</summary>
+    public static string LaunchPhaseText(GameLaunchPhase phase) => phase switch
+    {
+        GameLaunchPhase.Started =>
+            "Game starting. If the mods changed, the mod loader sets them up first: "
+            + "the game can take a minute to appear, then closes and reopens on its own. "
+            + "No need to launch again.",
+        GameLaunchPhase.Restarting => "Mods set up. The game is reopening…",
+        GameLaunchPhase.Restarted => "Game reopened with the mods loaded.",
+        GameLaunchPhase.Running => "Game running.",
+        _ => "",
+    };
+
+    /// <summary>What the launch panel says once a watched session ends.</summary>
+    internal static string LaunchEndText(GameExit exit) => exit.Kind switch
+    {
+        GameExitKind.NotFound =>
+            "The game didn't appear within a minute. If Steam opened a window, "
+            + "it may be behind this one.",
+        GameExitKind.CleanExit or GameExitKind.ShortExit => "Game closed.",
+        GameExitKind.LikelyCrash => $"Game exited with code {exit.ExitCode}.",
+        _ => "",
+    };
 
     /// <summary>A clean session promotes the last-launch checkpoint to
     /// last-known-good (the cfg state was validated by a real play); a

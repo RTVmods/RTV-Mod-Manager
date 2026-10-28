@@ -8,6 +8,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 - **Browse → Changelog.** Next to **Open page**, a mod's details now have a **Changelog** button: every version's notes from VostokMods, newest first, with their dates.
 - **The profile switcher stands out.** On the Mods page, **Switch profile ▾** is now a full button beside ACTIVE PROFILE instead of small text.
 - **Updating the manager shows its progress.** After **Install and relaunch**, a window stays up with a progress bar: looking up the release, downloading (megabytes so far of the total), unpacking, then restarting. The manager can't be used meanwhile, and if something fails the message opens over that window.
+- **The launch panel explains the Mod Loader's first pass.** After a mod change, a launch from the manager can show no game for up to a minute while the loader sets the mods up, then the game closes and reopens on its own. That looked like the game not starting. The panel now says what is happening under the launch button: the game is starting, the mods are set up and the game is reopening, the game reopened, and finally that it closed. If no game appears within a minute, it says so and suggests checking for a Steam window behind the manager.
 
 ## 0.7.5 (2026-10-23)
 
