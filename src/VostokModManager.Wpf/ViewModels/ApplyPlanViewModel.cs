@@ -93,7 +93,7 @@ public sealed partial class ApplyPlanViewModel : ObservableObject
     public string Title => $"Apply '{_plan.Profile.Name}'";
     public string Summary => _plan.Summary;
     public string Warning =>
-        "Mods in the live folder that aren't in this profile are taken out (their archives stay in the Library). "
+        "Mods in the live folder that aren't in this profile are taken out (they stay in My Mods). "
         + "Locked mods are left as they are.";
     public ObservableCollection<ApplyRowItem> Rows { get; } = new();
     public ObservableCollection<string> Log { get; } = new();

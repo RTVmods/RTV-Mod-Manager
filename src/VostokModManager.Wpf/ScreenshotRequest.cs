@@ -60,6 +60,13 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target = new Views.ChangelogWindow(detail.Name, ModCard.BuildChangelog(detail.Files));
                 target.Show();
             }
+            else if (req.Page == "library-open")
+            {
+                // My Mods with the first mods that keep several versions opened.
+                shell.Open("library");
+                if (shell.Selected.Page is LibraryViewModel lib)
+                    foreach (var m in lib.Mods.Where(m => m.Versions.Count > 1).Take(2)) m.IsExpanded = true;
+            }
             else if (req.Page == "manager-update")
             {
                 // The self-update's window, frozen mid-download.

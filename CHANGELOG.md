@@ -2,6 +2,13 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Clearer pages: Loadout, My Mods and Profiles each have one job.**
+  - **Loadout** (was Mods) is the active profile: the mods the game loads when you press Launch. Turn them on and off, set the load order, update them and check conflicts here.
+  - **My Mods** (was Library) lists every mod you have downloaded, one row each at its newest version, with whether it is in the loadout and which profiles use it. **Add to loadout** and **Remove from loadout** work from the row; open a mod to see every version kept and **Use this version** or **Delete** one. **Clean up old versions** stays at the bottom.
+  - **Profiles** is for managing profiles as a whole: switch, clone, compare, import and export. The active profile's mod list there is now read-only with an **Edit in Loadout** button, so the loadout has one place to edit; other profiles can still be edited there without switching.
+
 ## 0.7.6 (2026-10-29)
 
 - **You can see the manager getting ready.** While it reads your mods and checks VostokMods and GitHub for updates, the open page says so: the step under way, a progress bar (7 of 16 mods checked) and what it is doing. While the page has nothing to show yet, this fills the page; once Browse has the mods from VostokMods (now read straight after your mods, alongside the update checks), it moves to a band across the top until the checks finish.

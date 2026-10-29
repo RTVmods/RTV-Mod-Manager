@@ -1014,7 +1014,7 @@ public sealed partial class ManagerSession
             var libPath = ModLibrary.Find(ModsDir, e.ModId, e.Version);
             if (!string.IsNullOrEmpty(libPath)
                 && Prompt.Confirm("Delete from Library?",
-                    $"Also delete `{e.DisplayName}` v{e.Version} from the Library?\n\n"
+                    $"Also delete `{e.DisplayName}` v{e.Version} from My Mods?\n\n"
                     + "  • Removes the canonical .vmz copy from "
                     + $"{Path.GetFileName(ModLibrary.LibraryDir(ModsDir))}/ (Recycle Bin)\n"
                     + "  • Other profiles referencing this version won't be able to add "

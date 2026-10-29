@@ -164,7 +164,7 @@
                                             </ItemsControl>
                                         </StackPanel>
                                     </Border>
-                                    <TextBlock Text="Mods, load order and settings come across as they are. Every mod archive is also kept in the Library so switching profiles can put it back."
+                                    <TextBlock Text="Mods, load order and settings come across as they are. Every mod archive is also kept in My Mods so switching profiles can put it back."
                                                Style="{StaticResource T.Muted}" Margin="0,0,0,14" />
                                     <StackPanel Orientation="Horizontal">
                                         <Button Style="{StaticResource Btn.Primary}" Content="Use profiles" Command="{Binding AdoptProfilesCommand}" />

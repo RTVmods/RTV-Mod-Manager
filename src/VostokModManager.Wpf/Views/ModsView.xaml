@@ -171,7 +171,7 @@
                          It sits on this line, not beside the name, so a long profile
                          name can't push it under the filter box. -->
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                        <TextBlock Text="LOADOUT" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
                         <Button Margin="14,0,0,0" VerticalAlignment="Center" MinHeight="34" Padding="12,0" FontSize="15"
                                 Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeStrong}"
                                 Click="OnSwitchMenu" AutomationProperties.Name="Switch profile" ToolTip="Make another profile the active one">
@@ -195,6 +195,9 @@
                         </Button>
                     </StackPanel>
                     <TextBlock Text="{Binding ProfileName}" Style="{StaticResource T.H1}" Margin="0,4,0,0" />
+                    <TextBlock Text="The mods the game will load." ToolTip="The active profile: what the game loads when you press Launch. Every mod you have downloaded is under My Mods." TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                               Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text4}" Margin="0,2,0,0" />
+
                 </StackPanel>
             </DockPanel>
 

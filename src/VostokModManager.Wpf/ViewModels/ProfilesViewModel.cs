@@ -50,7 +50,7 @@ public sealed partial class ProfileCard : ObservableObject
         : string.Join(" · ", Summary.SaveSlots.Select(s => s.Occupied ? $"{s.Number} {s.Title}" : $"{s.Number} (empty)"));
     public bool HasSlots => Summary.SaveSlots.Count > 0;
 
-    public string MainLabel => IsActive ? "Open mods" : "Make active";
+    public string MainLabel => IsActive ? "Open loadout" : "Make active";
 
     /// <summary>True while this card's mod list is open in the side panel.</summary>
     [ObservableProperty] private bool _isOpen;
@@ -256,7 +256,19 @@ public sealed partial class ProfilesViewModel : PageViewModel
     [ObservableProperty] private double _cellsMinWidth;
     [ObservableProperty] private bool _canCompare;
 
-    [ObservableProperty] private ProfileCard? _detail;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DetailIsActive), nameof(DetailEditable))]
+    [NotifyCanExecuteChangedFor(nameof(RemoveSelectedModsCommand))]
+    private ProfileCard? _detail;
+
+    /// <summary>The side panel shows the active profile: that one is the
+    /// loadout, edited on the Loadout page, so here it is read-only (its
+    /// mods can still be copied to another profile).</summary>
+    public bool DetailIsActive => Detail?.IsActive == true;
+    public bool DetailEditable => Detail != null && !Detail.IsActive;
+
+    [RelayCommand] private void EditInLoadout() => OpenModsPage();
+
     [ObservableProperty] private string _detailQuery = "";
     [ObservableProperty] private string _detailSummary = "";
 
@@ -336,7 +348,7 @@ public sealed partial class ProfilesViewModel : PageViewModel
             0 => "No saved profiles yet. A profile is a named set of mods, versions and load order you can switch between.",
             _ => $"{summaries.Count} saved profile{(summaries.Count == 1 ? "" : "s")}"
                  + (active != null ? $" · '{active.Name}' is live in the mods folder" : " · none is active")
-                 + ". Switching swaps the mods folder from the Library; locked mods stay put.",
+                 + ". Switching swaps the mods folder from My Mods; locked mods stay put.",
         };
 
         var profiles = summaries.Select(s => s.Profile).ToList();
@@ -605,18 +617,21 @@ public sealed partial class ProfilesViewModel : PageViewModel
         }
         var on = profile.Mods.Count(m => m.IsEnabled);
         DetailSummary = $"{profile.Mods.Count} mods · {on} enabled"
-            + (Detail.IsActive ? "" : " · edits here change the profile only, not the live mods folder");
+            + (Detail.IsActive ? " · this is your loadout: change it on the Loadout page"
+                : " · edits here change the profile only, not the live mods folder");
         OnDetailSelectionChanged();
     }
 
     public void SetEnabled(ProfileModItem item, bool enabled)
-        => Session.SetProfileModEnabled(item.Profile, item.Mod, enabled);
+    {
+        if (DetailEditable) Session.SetProfileModEnabled(item.Profile, item.Mod, enabled);
+    }
 
     /// <summary>Saves a row's typed load order. False when it wasn't saved.</summary>
     public bool SetPriority(ProfileModItem item, int priority)
     {
         // A row a reload already replaced has a stale entry: ignore it.
-        if (!DetailMods.Contains(item)) return false;
+        if (!DetailMods.Contains(item) || !DetailEditable) return false;
         var name = item.Name;
         if (!Session.SetProfileModPriority(item.Profile, item.Mod, priority)) return false;
         Notice = $"'{name}' now loads at priority {priority} in '{item.Profile.Name}'.";
@@ -625,7 +640,7 @@ public sealed partial class ProfilesViewModel : PageViewModel
 
     public void RemoveFromProfile(ProfileModItem item)
     {
-        if (!Session.RemoveModsFromProfile(item.Profile, new[] { item.Mod })) return;
+        if (!DetailEditable || !Session.RemoveModsFromProfile(item.Profile, new[] { item.Mod })) return;
         Notice = $"Removed '{item.Name}' from '{item.Profile.Name}'.";
         Load();
     }
@@ -644,7 +659,7 @@ public sealed partial class ProfilesViewModel : PageViewModel
         CopySelectedLabel = n > 1 ? $"Copy {n} to profile…" : "Copy to profile…";
     }
 
-    private bool CanRemoveSelectedMods() => DetailSelectedCount > 0;
+    private bool CanRemoveSelectedMods() => DetailSelectedCount > 0 && DetailEditable;
 
     /// <summary>Removes every selected row from the open profile, after
     /// one confirmation.</summary>

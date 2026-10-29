@@ -102,9 +102,9 @@ public sealed partial class ManagerSession
                 Checked: !c.IsDevBuild))
             .ToList();
         var accepted = Prompt.Pick(
-            $"Newer versions in the Library — {target.Name}",
+            $"Newer versions in My Mods — {target.Name}",
             $"{candidates.Count} mod(s) in this profile are pinned to a version older than the newest one "
-            + "in the Library (usually because another profile updated them).\n"
+            + "in My Mods (usually because another profile updated them).\n"
             + "Tick the ones this profile should move to the newest version. Unticked mods keep the "
             + "profile's own version, so a profile can still run a mod at an older version on purpose.",
             items,

@@ -15,7 +15,7 @@
             <TextBlock DockPanel.Dock="Top" Text="ADD FROM THE LIBRARY" Style="{StaticResource T.Label}" />
             <TextBlock DockPanel.Dock="Top" Text="{Binding ProfileName}" Style="{StaticResource T.H2}" Margin="0,4,0,10" />
             <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" TextWrapping="Wrap" Margin="0,0,0,6"
-                       Text="Mods you have installed before, kept in the library. Each is offered at its newest version; the Library page has the older ones." />
+                       Text="Mods you have installed before, kept in the library. Each is offered at its newest version; My Mods has the older ones." />
 
             <!-- filter -->
             <Grid DockPanel.Dock="Top" Margin="0,8,0,10">

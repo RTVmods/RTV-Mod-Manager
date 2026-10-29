@@ -52,6 +52,34 @@ public class LibraryTests
     }
 
     [Fact]
+    public void My_mods_has_one_row_per_mod_with_its_versions_and_loadout_state()
+    {
+        using var sb = new Sandbox();
+        sb.AddMod("alpha", "1.0");
+        Archive(sb, "alpha", "1.0");
+        Archive(sb, "alpha", "1.1");
+        Archive(sb, "beta", "2.0");
+        var session = Open(sb, new ScriptedPrompt());
+
+        var lib = session.OpenLibrary();
+        var rows = lib.ModRows;
+
+        Assert.Equal(new[] { "alpha", "beta" }, rows.Select(r => r.Name));
+        var alpha = rows[0];
+        Assert.Equal(new[] { "1.1", "1.0" }, alpha.Versions.Select(v => v.Version));
+        Assert.True(alpha.InLoadout);
+        Assert.Equal("In the loadout · v1.0 (v1.1 kept)", alpha.StateText);  // an older version is the one playing
+        Assert.NotNull(alpha.Live);
+        Assert.Equal("2 versions", alpha.VersionsText);
+        Assert.False(rows[1].InLoadout);
+        Assert.Null(rows[1].Live);
+        Assert.StartsWith("2 mod(s), 1 in the loadout", lib.ModsHeaderText);
+
+        lib.Filter = "beta";
+        Assert.Equal("beta", Assert.Single(lib.ModRows).Name);
+    }
+
+    [Fact]
     public void Add_from_the_library_offers_the_newest_version_of_each_mod_not_live()
     {
         using var sb = new Sandbox();

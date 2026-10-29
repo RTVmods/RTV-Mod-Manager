@@ -56,6 +56,32 @@ public sealed record LibraryRow(
     string SizeText,
     string SourceText);
 
+/// <summary>One mod on the My Mods page: every version the library keeps
+/// of it (newest first), whether and how it is in the loadout (the
+/// active profile, live in the mods folder), and the profiles using it.</summary>
+public sealed record LibraryModRow(
+    string Name,
+    string ModId,
+    IReadOnlyList<LibraryRow> Versions,
+    LibraryLiveState State,
+    string StateText,
+    ModEntry? Live,  // the live copy, when the mod is in the loadout
+    IReadOnlyList<string> Profiles,
+    string ProfilesText,
+    long SizeBytes,
+    string SizeText,
+    string SourceText)
+{
+    public LibraryRow Newest => Versions[0];
+
+    /// <summary>Some version of this mod is in the loadout.</summary>
+    public bool InLoadout => State is LibraryLiveState.LiveEnabled or LibraryLiveState.LiveDisabled
+        or LibraryLiveState.OtherVersionLive;
+
+    /// <summary>"3 versions" / "1 version".</summary>
+    public string VersionsText => Versions.Count == 1 ? "1 version" : $"{Versions.Count} versions";
+}
+
 /// <summary>What "Clean up old versions" would delete, and how much
 /// space it frees.</summary>
 public sealed record LibraryCleanupPlan(IReadOnlyList<ModLibrary.Entry> Entries, long Bytes)
@@ -248,6 +274,69 @@ public sealed class LibraryModel
             ProfilesFor(e), ProfilesText(e),
             e.SizeBytes, FormatSize(e.SizeBytes),
             e.Source.IsValid ? e.Source.Id : "—");
+    }
+
+    /// <summary>The My Mods page: one row per mod (a lineage: the same mod
+    /// across renames), its versions newest first, for every mod with a
+    /// version the filter lets through, in the current sort order.</summary>
+    public IReadOnlyList<LibraryModRow> ModRows
+    {
+        get
+        {
+            var rows = ModLineage.Group(_entries)
+                .Where(g => g.Any(MatchesFilter))
+                .Select(ToModRow);
+            rows = SortColumn switch
+            {
+                LibrarySortColumn.State => rows.OrderBy(r => r.InLoadout ? 0 : 1).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+                LibrarySortColumn.Profiles => rows.OrderByDescending(r => r.Profiles.Count).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+                LibrarySortColumn.Size => rows.OrderBy(r => r.SizeBytes),
+                _ => rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase),
+            };
+            var list = rows.ToList();
+            if (!SortAscending) list.Reverse();
+            return list;
+        }
+    }
+
+    /// <summary>The My Mods header: how many mods, how many in the loadout.</summary>
+    public string ModsHeaderText
+    {
+        get
+        {
+            var groups = ModLineage.Group(_entries).Select(ToModRow).ToList();
+            var shown = groups.Count(g => g.Versions.Any(v => MatchesFilter(v.Entry)));
+            var shownNote = shown == groups.Count ? "" : $"  ·  {shown} shown";
+            var header = $"{groups.Count} mod(s), {groups.Count(g => g.InLoadout)} in the loadout{shownNote}  ·  "
+                + $"{_entries.Count} version(s) kept, {FormatSize(TotalBytes)}";
+            return Notice.Length > 0 ? Notice + "  ·  " + header : header;
+        }
+    }
+
+    private LibraryModRow ToModRow(List<ModLibrary.Entry> group)
+    {
+        var versions = group.Select(ToRow).ToList();
+        var newest = group[0];
+        var live = _session.Registry.FindById(newest.ModId);
+        var (state, text) = (LibraryLiveState.NotInstalled, "Not in the loadout");
+        if (live != null)
+        {
+            if (!group.Any(e => ModLineage.Same(live.Source, live.DisplayName, e.Source, e.DisplayName)))
+                (state, text) = (LibraryLiveState.OtherModSameId, "Another mod with this id is in the loadout");
+            else if (ModRegistry.CompareVersions(live.Version, newest.Version) == 0)
+                (state, text) = live.IsEnabled
+                    ? (LibraryLiveState.LiveEnabled, $"In the loadout · v{live.Version}")
+                    : (LibraryLiveState.LiveDisabled, $"In the loadout, turned off · v{live.Version}");
+            else
+                (state, text) = (LibraryLiveState.OtherVersionLive,
+                    $"In the loadout · v{live.Version}" + (live.IsEnabled ? "" : ", turned off")
+                    + (ModRegistry.CompareVersions(live.Version, newest.Version) < 0 ? $" (v{newest.Version} kept)" : ""));
+        }
+        var size = group.Sum(e => e.SizeBytes);
+        return new LibraryModRow(NameOf(newest), newest.ModId, versions, state, text,
+            state is LibraryLiveState.NotInstalled or LibraryLiveState.OtherModSameId ? null : live,
+            ProfilesFor(newest), ProfilesText(newest), size, FormatSize(size),
+            group.FirstOrDefault(e => e.Source.IsValid)?.Source.Id ?? "—");
     }
 
     /// <summary>What "Add from the library" offers: the newest version of

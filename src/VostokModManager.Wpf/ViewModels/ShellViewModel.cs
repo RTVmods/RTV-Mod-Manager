@@ -70,10 +70,10 @@ public sealed partial class ShellViewModel : ObservableObject
         Nav = new ObservableCollection<NavItem>
         {
             new("browse", "Browse VostokMods", "Icon.Browse", new BrowseViewModel(session, () => Imports, Open, Mods)),
-            new("mods", "Mods", "Icon.Mods", Mods),
+            new("mods", "Loadout", "Icon.Mods", Mods),
+            new("library", "My Mods", "Icon.Library", new LibraryViewModel(session)),
             new("profiles", "Profiles", "Icon.Profiles", new ProfilesViewModel(session)),
             new("saves", "Saves", "Icon.Saves", new SavesViewModel(session)),
-            new("library", "Library", "Icon.Library", new LibraryViewModel(session)),
             new("tools", "Tools", "Icon.Tools", new ToolsViewModel(session)),
         };
         SettingsNav = new("settings", "Settings", "Icon.Settings", new SettingsViewModel(session, this));

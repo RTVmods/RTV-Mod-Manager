@@ -120,7 +120,7 @@ public sealed partial class ModCard : ObservableObject
     private string _actionText = "Install";
 
     /// <summary>The details panel's button: "Open" says where it goes there.</summary>
-    public string DetailActionText => State == BrowseCardState.Installed ? "Open in Mods" : ActionText;
+    public string DetailActionText => State == BrowseCardState.Installed ? "Open in Loadout" : ActionText;
     /// <summary>The state line, or the progress while busy, or the last error.</summary>
     [ObservableProperty] private string _line = "";
     [ObservableProperty]
@@ -940,7 +940,7 @@ public sealed partial class BrowseViewModel : PageViewModel
 
     private async Task AddFromLibraryAsync(ModCard card, ModLibrary.Entry copy, IReadOnlyList<ModProfile> targets)
     {
-        card.Progress = "Adding from the Library…";
+        card.Progress = "Adding from My Mods…";
         var entries = new List<ModLibrary.Entry> { WithSource(copy, ModSource.ForSlug(card.Slug)) };
         if (IntoActive(targets))
         {
