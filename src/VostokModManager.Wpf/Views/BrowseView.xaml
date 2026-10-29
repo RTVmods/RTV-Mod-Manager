@@ -232,7 +232,21 @@
                                 IsEnabled="{Binding IsBusy, Converter={StaticResource EqualsParam}, ConverterParameter=False}" />
                     </StackPanel>
                     <StackPanel Margin="20,14,0,14" VerticalAlignment="Center">
-                        <TextBlock Text="FEATURED MODPACK" Style="{StaticResource T.Label}" />
+                        <!-- the label, and arrows to step through the other packs -->
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="FEATURED MODPACK" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center"
+                                        Visibility="{Binding DataContext.CanCycleFeatured, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource VisibleWhen}}">
+                                <Button Style="{StaticResource Btn.Quiet}" Content="‹" FontSize="16" Padding="6,0" MinHeight="22"
+                                        Command="{Binding DataContext.PreviousFeaturedCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        AutomationProperties.Name="Previous modpack" ToolTip="Previous modpack" />
+                                <TextBlock Text="{Binding DataContext.FeaturedPosition, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                           FontSize="12" Foreground="{StaticResource B.Text3}" VerticalAlignment="Center" Margin="4,0" />
+                                <Button Style="{StaticResource Btn.Quiet}" Content="›" FontSize="16" Padding="6,0" MinHeight="22"
+                                        Command="{Binding DataContext.NextFeaturedCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        AutomationProperties.Name="Next modpack" ToolTip="Next modpack" />
+                            </StackPanel>
+                        </StackPanel>
                         <TextBlock Text="{Binding Name}" FontSize="22" FontWeight="Medium" TextTrimming="CharacterEllipsis" Margin="0,3,0,4"
                                    ToolTip="{Binding Name}" />
                         <TextBlock Text="{Binding HaveLine}" Style="{StaticResource T.Muted}" />

@@ -4,6 +4,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 
 ## Unreleased
 
+- **The featured modpack takes turns.** Browse's banner shows the next modpack each time the manager starts instead of always the same one, and **‹ ›** beside FEATURED MODPACK steps through all of them ("2 of 7").
 - **Clearer pages: Loadout, My Mods and Profiles each have one job.**
   - **Loadout** (was Mods) is the active profile: the mods the game loads when you press Launch. Turn them on and off, set the load order, update them and check conflicts here.
   - **My Mods** (was Library) lists every mod you have downloaded, one row each at its newest version, with whether it is in the loadout and which profiles use it. **Add to loadout** and **Remove from loadout** work from the row; open a mod to see every version kept and **Use this version** or **Delete** one. **Clean up old versions** stays at the bottom.

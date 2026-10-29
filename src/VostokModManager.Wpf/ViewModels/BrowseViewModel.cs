@@ -489,13 +489,8 @@ public sealed partial class BrowseViewModel : PageViewModel
             Modpacks.Clear();
             foreach (var p in packs.Packs) Modpacks.Add(new ModpackCard(this, p));
             TailTabs[0].Count = packs.Packs.Count > 0 ? packs.Packs.Count.ToString() : "";
-            Featured = Modpacks.FirstOrDefault();
             FillModpacks();
-            if (Featured != null)
-            {
-                Featured.EnsureThumb();
-                await CountFeaturedAsync();
-            }
+            await ShowFeaturedAsync(NextFeaturedIndex(), remember: true);
         }
         finally
         {
@@ -1013,6 +1008,62 @@ public sealed partial class BrowseViewModel : PageViewModel
     }
 
     // ── modpacks ──────────────────────────────────────────────────────
+
+    /// <summary>The packs the banner takes turns with: those that list mods,
+    /// in a fixed order so "the next one" means the same thing each start.</summary>
+    private List<ModpackCard> FeaturedPool
+    {
+        get
+        {
+            var ordered = Modpacks.OrderBy(p => p.Slug, StringComparer.OrdinalIgnoreCase).ToList();
+            var withMods = ordered.Where(p => p.Pack.ModCount != 0).ToList();
+            return withMods.Count > 0 ? withMods : ordered;
+        }
+    }
+
+    /// <summary>"2 of 7" beside the banner's arrows.</summary>
+    [ObservableProperty] private string _featuredPosition = "";
+    [ObservableProperty] private bool _canCycleFeatured;
+
+    /// <summary>The pack after the one featured last time (the first when
+    /// that one is gone), so each start shows another.</summary>
+    private int NextFeaturedIndex()
+    {
+        var pool = FeaturedPool;
+        var last = pool.FindIndex(p => string.Equals(p.Slug, Session.Settings.LastFeaturedModpack, StringComparison.OrdinalIgnoreCase));
+        return pool.Count == 0 ? -1 : (last + 1) % pool.Count;
+    }
+
+    private async Task ShowFeaturedAsync(int index, bool remember)
+    {
+        var pool = FeaturedPool;
+        if (index < 0 || pool.Count == 0)
+        {
+            Featured = Modpacks.FirstOrDefault();
+            FeaturedPosition = "";
+            CanCycleFeatured = false;
+        }
+        else
+        {
+            index = ((index % pool.Count) + pool.Count) % pool.Count;
+            Featured = pool[index];
+            FeaturedPosition = $"{index + 1} of {pool.Count}";
+            CanCycleFeatured = pool.Count > 1;
+            if (remember)
+            {
+                Session.Settings.LastFeaturedModpack = Featured.Slug;
+                try { Session.Settings.Save(); } catch { /* only the rotation is lost */ }
+            }
+        }
+        if (Featured == null) return;
+        Featured.EnsureThumb();
+        await CountFeaturedAsync();
+    }
+
+    private int FeaturedIndex => Featured == null ? -1 : FeaturedPool.IndexOf(Featured);
+
+    [RelayCommand] private Task NextFeatured() => ShowFeaturedAsync(FeaturedIndex + 1, remember: true);
+    [RelayCommand] private Task PreviousFeatured() => ShowFeaturedAsync(FeaturedIndex - 1, remember: true);
 
     /// <summary>How much of the featured pack the active profile has.</summary>
     private async Task CountFeaturedAsync()

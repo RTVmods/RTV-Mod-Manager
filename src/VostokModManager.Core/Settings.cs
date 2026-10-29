@@ -43,6 +43,10 @@ public class Settings
     /// version check. We re-poll once per 24h, same TTL as MML.</summary>
     public string ManagerReleaseCheckedAt { get; set; } = "";
 
+    /// <summary>The modpack Browse featured last; the next start features
+    /// the one after it.</summary>
+    public string LastFeaturedModpack { get; set; } = "";
+
     [JsonIgnore]
     public bool IsManagerCacheFresh
     {
