@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.7 (2026-10-30)
 
 - **The featured modpack takes turns.** Browse's banner shows the next modpack each time the manager starts instead of always the same one, and **‹ ›** beside FEATURED MODPACK steps through all of them ("2 of 7").
 - **Clearer pages: Loadout, My Mods and Profiles each have one job.**
