@@ -134,14 +134,39 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                         <!-- Each line opens its releases page, or offers the update when there is one. -->
-                        <StackPanel Orientation="Horizontal">
-                            <Button Style="{StaticResource Btn.Quiet}" Content="{Binding ManagerVersion}" FontSize="12" Padding="0" MinHeight="18"
-                                    Foreground="{StaticResource B.Text4}" Command="{Binding ManagerUpdateClickCommand}"
-                                    ToolTip="The manager's releases on GitHub" />
-                            <Button Style="{StaticResource Btn.Link}" Content="{Binding ManagerUpdate}" FontSize="12" Padding="8,0,0,0"
-                                    Foreground="{StaticResource B.AmberText}" Command="{Binding ManagerUpdateClickCommand}"
-                                    Visibility="{Binding ManagerUpdate, Converter={StaticResource VisibleWhen}}" />
-                        </StackPanel>
+                        <!-- A new manager: an amber button that blinks until it is used, above the version line. -->
+                        <Button Command="{Binding ManagerUpdateClickCommand}" HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                                MinHeight="36" FontSize="14" Padding="12,0" ToolTip="A new version of the mod manager is out. Click to see it and install it."
+                                AutomationProperties.Name="{Binding ManagerUpdate}"
+                                Visibility="{Binding ManagerUpdate, Converter={StaticResource VisibleWhen}}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource Btn.Chip.Amber}">
+                                    <Setter Property="BorderBrush" Value="{StaticResource B.Amber}" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsVisible" Value="True">
+                                            <Trigger.EnterActions>
+                                                <BeginStoryboard x:Name="Blink">
+                                                    <Storyboard RepeatBehavior="Forever">
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.3"
+                                                                         Duration="0:0:0.6" AutoReverse="True" BeginTime="0:0:0.4" />
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </Trigger.EnterActions>
+                                            <Trigger.ExitActions>
+                                                <StopStoryboard BeginStoryboardName="Blink" />
+                                            </Trigger.ExitActions>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock>
+                                <Run Text="↑ " /><Run Text="{Binding ManagerUpdate, Mode=OneWay}" />
+                            </TextBlock>
+                        </Button>
+                        <Button Style="{StaticResource Btn.Quiet}" Content="{Binding ManagerVersion}" FontSize="12" Padding="0" MinHeight="18"
+                                HorizontalAlignment="Left" Foreground="{StaticResource B.Text4}" Command="{Binding ManagerUpdateClickCommand}"
+                                ToolTip="The manager's releases on GitHub" />
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                             <Button Style="{StaticResource Btn.Quiet}" Content="{Binding LoaderVersion}" FontSize="12" Padding="0" MinHeight="18"
                                     Foreground="{StaticResource B.Text4}" Command="{Binding LoaderUpdateClickCommand}"

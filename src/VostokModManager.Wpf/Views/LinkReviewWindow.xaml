@@ -1,0 +1,92 @@
+<Window x:Class="VostokModManager.Wpf.Views.LinkReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Title="Not linked to VostokMods"
+        Width="900" Height="620" MinWidth="680" MinHeight="380"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="NOT LINKED TO VOSTOKMODS" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Text="A linked mod is checked for updates and can be updated from the manager. Linking only records the mod's VostokMods page; the mod files are not changed." />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Style="{StaticResource T.Muted}" Foreground="{StaticResource B.Text2}"
+                       TextWrapping="Wrap" Margin="0,0,0,16" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Close" MinWidth="96" Margin="0,0,8,0" Click="OnClose" />
+                    <Button Style="{StaticResource Btn.Primary}" Content="{Binding LinkAllText}" MinWidth="140"
+                            Command="{Binding LinkAllCommand}" IsDefault="True"
+                            Visibility="{Binding MatchCount, Converter={StaticResource VisibleWhen}}" />
+                </StackPanel>
+                <ProgressBar Height="3" Width="160" IsIndeterminate="True" HorizontalAlignment="Left" VerticalAlignment="Center"
+                             Visibility="{Binding IsBusy, Converter={StaticResource VisibleWhen}}" />
+            </DockPanel>
+
+            <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Height="30">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="230" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="VOSTOKMODS PAGE WITH THE SAME NAME" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <ItemsControl ItemsSource="{Binding Rows}" Focusable="False" AutomationProperties.Name="Mods not linked to VostokMods">
+                <ItemsControl.Template>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                            <ItemsPresenter />
+                        </ScrollViewer>
+                    </ControlTemplate>
+                </ItemsControl.Template>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:LinkReviewRow}">
+                        <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="230" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                                    <TextBlock Text="{Binding Name}" FontSize="14" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="{StaticResource B.Text4}" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,14,0">
+                                    <Button Style="{StaticResource Btn.Link}" Content="{Binding MatchName}" Padding="0" FontSize="14"
+                                            Foreground="{StaticResource B.Text}" HorizontalAlignment="Left" ToolTip="{Binding MatchUrl}"
+                                            Command="{Binding DataContext.OpenMatchCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Visibility="{Binding HasMatch, Converter={StaticResource VisibleWhen}}" />
+                                    <TextBlock Text="{Binding MatchUrl}" FontSize="12" Foreground="{StaticResource B.Text4}" TextTrimming="CharacterEllipsis"
+                                               Visibility="{Binding HasMatch, Converter={StaticResource VisibleWhen}}" />
+                                    <TextBlock Text="No page with this name" FontSize="13" Foreground="{StaticResource B.Text4}"
+                                               Visibility="{Binding HasMatch, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Content="Link" MinHeight="30" FontSize="13" Padding="14,0" Margin="0,0,10,0"
+                                            Command="{Binding DataContext.LinkOneCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" ToolTip="Link this mod to the page beside it"
+                                            Visibility="{Binding HasMatch, Converter={StaticResource VisibleWhen}}" />
+                                    <Button Style="{StaticResource Btn.Link}" Content="Link by hand…"
+                                            Command="{Binding DataContext.LinkByHandCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" ToolTip="Paste the mod's VostokMods page or its slug" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DockPanel>
+    </Border>
+</Window>

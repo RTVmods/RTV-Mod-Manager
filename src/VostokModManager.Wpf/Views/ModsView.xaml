@@ -213,6 +213,27 @@
 
             <!-- status chips (one row replaces the old status lines) -->
             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                <!-- the one white button on the row: the manual check users look for -->
+                <Button Style="{StaticResource Btn.Primary}" Margin="0,0,8,8" MinHeight="32" Padding="14,0" FontSize="13"
+                        Command="{Binding RefreshAllCommand}" AutomationProperties.Name="Check mod updates"
+                        ToolTip="Check VostokMods for new versions of your mods now (also rescans the mods folder and conflicts).">
+                    <StackPanel Orientation="Horizontal">
+                        <Path Data="{StaticResource Icon.Refresh}" Style="{StaticResource IconPath}" Width="15" Height="15" VerticalAlignment="Center"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                        <TextBlock Margin="8,0,0,0" VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Check mod updates" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding RefreshAllCommand.IsRunning}" Value="True">
+                                            <Setter Property="Text" Value="Checking…" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Button>
                 <Button Style="{StaticResource Btn.Chip.Amber}" Margin="0,0,8,8" Command="{Binding UpdateAllCommand}"
                         ToolTip="{Binding UpdatesSummary}"
                         Visibility="{Binding UpdateCount, Converter={StaticResource VisibleWhen}}">
@@ -226,16 +247,15 @@
                         <Run Text="⇄ " /><Run Text="{Binding ConflictCount, Mode=OneWay}" /><Run Text=" conflicts · Review" />
                     </TextBlock>
                 </Button>
-                <Button Style="{StaticResource Btn.Chip}" Margin="0,0,8,8" Command="{Binding LinkAllCommand}"
+                <Button Style="{StaticResource Btn.Chip}" Margin="0,0,8,8" Command="{Binding ShowUnlinkedCommand}"
+                        ToolTip="See which mods aren't linked, and link them so the manager can check them for updates."
                         Visibility="{Binding UnlinkedCount, Converter={StaticResource VisibleWhen}}">
                     <TextBlock>
-                        <Run Text="{Binding UnlinkedCount, Mode=OneWay}" /><Run Text=" not linked to VostokMods · Link" />
+                        <Run Text="{Binding UnlinkedCount, Mode=OneWay}" /><Run Text=" not linked to VostokMods · Review" />
                     </TextBlock>
                 </Button>
                 <Button Style="{StaticResource Btn.Chip}" Margin="0,0,8,8" Command="{Binding SyncDriftCommand}" Content="{Binding DriftText}"
                         Visibility="{Binding DriftText, Converter={StaticResource VisibleWhen}}" />
-                <Button Style="{StaticResource Btn.Quiet}" Margin="0,0,8,8" Content="Refresh" Command="{Binding RefreshAllCommand}"
-                        ToolTip="Rescan the mods folder, re-detect conflicts and check VostokMods for updates now." />
                 <TextBlock Text="{Binding InstallProgress}" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="4,0,0,8" />
             </WrapPanel>
 

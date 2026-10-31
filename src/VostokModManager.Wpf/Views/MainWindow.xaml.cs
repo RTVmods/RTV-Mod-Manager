@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         Shell.ManagerUpdateUi = ManagerUpdateWindow.Runner(() => this, Shell.Session);
 
         // The Mods page's full windows (conflicts, dependencies, earlier
-        // versions, drift review, the missing-dependency resolver).
+        // versions, drift review, the missing-dependency resolver, the link review).
         var session = Shell.Session;
         var mods = Shell.Mods;
         mods.ConflictsViewer = focus => ConflictsWindow.Show(this, session, focus);
@@ -46,6 +46,7 @@ public partial class MainWindow : Window
         mods.DriftReviewer = items => DriftReviewWindow.Review(this, items, session.ActiveProfile?.Name ?? "");
         mods.MissingDepsUi = MissingDependenciesWindow.Resolver(() => this);
         mods.LibraryPicker = () => LibraryPickerWindow.Pick(this, session);
+        mods.UnlinkedViewer = () => LinkReviewWindow.Show(this, session);
     }
 
     protected override void OnClosing(CancelEventArgs e)

@@ -53,6 +53,20 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 };
                 target.Show();
             }
+            else if (req.Page == "unlinked")
+            {
+                // The "not linked to VostokMods" review, matches looked up.
+                var vm = new LinkReviewViewModel(shell.Session);
+                target = new Views.LinkReviewWindow(vm) { Width = 900, Height = 620 };
+                target.Show();
+                await vm.LoadAsync();
+            }
+            else if (req.Page == "manager-blink")
+            {
+                // The Loadout page with a manager update on offer.
+                shell.Open("mods");
+                shell.ManagerUpdate = "Update to 0.7.8";
+            }
             else if (req.Page.StartsWith("changelog:"))
             {
                 // A VostokMods mod's changelog window, e.g. changelog:ammo-check.

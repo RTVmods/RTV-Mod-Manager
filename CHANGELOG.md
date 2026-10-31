@@ -2,6 +2,12 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **A new manager version is hard to miss.** When an update is out, a full-width amber **↑ Update to …** button blinks above the version lines at the bottom left until you use it. Click it to see the release and install it.
+- **Check mod updates.** The Loadout page's **Refresh** is now a white **Check mod updates** button at the front of the status row. It reads **Checking…** while it runs.
+- **See which mods aren't linked.** **N not linked to VostokMods · Review** now opens a window listing each mod the manager can't check for updates, with the VostokMods page of the same name where there is one. **Link** one, **Link the N matches** at once, or **Link by hand…** with the page's URL. Only the link is recorded; the mod files are not changed.
+
 ## 0.7.7 (2026-10-30)
 
 - **The featured modpack takes turns.** Browse's banner shows the next modpack each time the manager starts instead of always the same one, and **‹ ›** beside FEATURED MODPACK steps through all of them ("2 of 7").

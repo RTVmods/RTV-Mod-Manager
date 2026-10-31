@@ -98,6 +98,38 @@ public class LinksAndDependenciesTests
     }
 
     [Fact]
+    public async Task Link_review_lists_every_unlinked_mod_and_links_the_picked_matches()
+    {
+        using var sb = new Sandbox();
+        sb.AddMod("alpha", "1.0", name: "Alpha Mod");
+        sb.AddMod("beta", "1.0", name: "Something Else");
+        sb.AddMod("delta", "2.0", name: "Delta");
+        var prompt = new ScriptedPrompt();
+        var s = Open(sb, prompt);
+        s.UpdateNet.ListAllMods = () => Task.FromResult(new List<VmModSummary>
+        {
+            new() { Id = "uuid-1", Slug = "alpha-mod", Name = "Alpha mod" },
+            new() { Id = "uuid-4", Slug = "delta", Name = "" },
+        });
+
+        // Without the listing every mod is there, none matched.
+        Assert.All(s.ReviewUnlinked(null), c => Assert.Null(c.Slug));
+
+        var review = s.ReviewUnlinked(await s.FetchLinkListingAsync());
+        // Matches first, then by name; a page with no name shows its slug.
+        Assert.Equal(new[] { "Alpha Mod", "Delta", "Something Else" }, review.Select(c => c.Name));
+        Assert.Equal(new[] { "Alpha mod", "delta", null }, review.Select(c => c.PageName));
+        Assert.Equal("delta", s.VmSlugById["uuid-4"]);
+
+        // Linking one match (or an unmatched mod) asks nothing and leaves the rest.
+        Assert.Equal(1, await s.LinkMatchesAsync(new[] { review[0], review[2] }));
+        Assert.Empty(prompt.Asked);
+        Assert.Equal("vostokmods:alpha-mod", s.Registry.FindById("alpha")!.Source.Key);
+        Assert.False(s.Registry.FindById("delta")!.Source.IsValid);
+        Assert.Equal(new[] { "Delta", "Something Else" }, s.ReviewUnlinked(null).Select(c => c.Name));
+    }
+
+    [Fact]
     public async Task Auto_link_declined_records_nothing()
     {
         using var sb = new Sandbox();

@@ -198,4 +198,60 @@ public sealed partial class ManagerSession
         await CheckUpdatesAsync(forceFresh: true);
         return matches.Count;
     }
+
+    /// <summary>The VostokMods mod list for a link review; the window keeps
+    /// it so re-reviewing after a link doesn't fetch it again.</summary>
+    public async Task<List<VmModSummary>> FetchLinkListingAsync()
+    {
+        var listing = await FetchModListingAsync();
+        foreach (var m in listing)
+            if (m.Id.Length > 0) VmSlugById[m.Id] = m.Slug;
+        return listing;
+    }
+
+    /// <summary>Every unlinked mod (built-ins left out, as the Mods page
+    /// counts them) with the VostokMods page of the same name when the
+    /// listing has exactly one. Without a listing no mod has a match.</summary>
+    public List<LinkCandidate> ReviewUnlinked(IReadOnlyList<VmModSummary>? listing)
+    {
+        var unlinked = UnlinkedMods().Where(e => !IsBuiltInActive(e.ModId)).ToList();
+        var matches = listing == null
+            ? new Dictionary<ModEntry, string>()
+            : ModLinker.Match(unlinked, listing.Select(m => (m.Slug, m.Name)));
+        return unlinked
+            .Select(e =>
+            {
+                var slug = matches.GetValueOrDefault(e);
+                var page = slug == null ? null
+                    : listing!.FirstOrDefault(m => string.Equals(m.Slug, slug, StringComparison.OrdinalIgnoreCase))?.Name is { Length: > 0 } n ? n : slug;
+                return new LinkCandidate(e, slug, page);
+            })
+            .OrderBy(c => c.Slug == null)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Links each mod to the page it was matched to, as Link all's
+    /// confirm does, then rescans and re-checks updates. Returns how many
+    /// were linked.</summary>
+    public async Task<int> LinkMatchesAsync(IReadOnlyCollection<LinkCandidate> picked)
+    {
+        var linkable = picked.Where(c => c.Slug != null).ToList();
+        if (linkable.Count == 0) return 0;
+        foreach (var c in linkable)
+            Config.SetModSource(c.Entry.ModId, c.Entry.Version, ModSource.ForSlug(c.Slug!));
+        if (!SaveModConfigSafely()) return 0;
+
+        Refresh();
+        Say(StatusArea.Mods, $"Linked {linkable.Count} mod" + (linkable.Count == 1 ? "" : "s") + " to VostokMods.");
+        await CheckUpdatesAsync(forceFresh: true);
+        return linkable.Count;
+    }
+}
+
+/// <summary>An unlinked mod in the link review: `Slug` and `PageName` are
+/// the VostokMods page with the same name, or null when there is none.</summary>
+public sealed record LinkCandidate(ModEntry Entry, string? Slug, string? PageName)
+{
+    public string Name => string.IsNullOrEmpty(Entry.DisplayName) ? Entry.ModId : Entry.DisplayName;
 }

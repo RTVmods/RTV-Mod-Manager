@@ -536,6 +536,15 @@ public sealed partial class ModsViewModel : PageViewModel
         finally { Busy = false; }
     }
 
+    /// <summary>The "not linked" chip: the review window when the shell has
+    /// set one, else the old match-and-confirm.</summary>
+    [RelayCommand]
+    private async Task ShowUnlinked()
+    {
+        if (UnlinkedViewer != null) UnlinkedViewer();
+        else await LinkAll();
+    }
+
     [RelayCommand]
     private async Task LinkAll()
     {
@@ -562,6 +571,7 @@ public sealed partial class ModsViewModel : PageViewModel
     public Func<ModEntry, Task>? DependencyEditor { get; set; }
     public Func<ModEntry, Task>? VersionsViewer { get; set; }
     public Func<IReadOnlyList<DriftItem>, bool>? DriftReviewer { get; set; }
+    public Action? UnlinkedViewer { get; set; }
 
     [RelayCommand]
     private void ShowConflicts(ModItem? item)
