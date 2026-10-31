@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.9 (2026-11-01)
 
 - **Sort the mods in Browse.** A sort menu at the right end of the tab row offers the same orders as the VostokMods site: Trending, Downloads, Followers, Views, Newest and Last updated (the default). It applies to All and to each category, works with search, and is remembered. Trending is VostokMods' own ranking, read when you pick it.
 - **Prompt buttons stay on one row.** A question whose buttons are too wide for the box (the manager-update question, with a wider game font) now makes the box wider instead of wrapping its buttons onto a second line.
