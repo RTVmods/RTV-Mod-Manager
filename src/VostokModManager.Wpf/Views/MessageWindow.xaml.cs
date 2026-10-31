@@ -13,6 +13,8 @@ public partial class MessageWindow : Window
     /// <summary>Index of the button that closed the window; -1 for Esc / close.</summary>
     public int Result { get; private set; } = -1;
 
+    private const double MaxWidthForButtons = 900;
+
     public MessageWindow() => InitializeComponent();
 
     public static MessageWindow Create(Window? owner, string title, string message, PromptKind kind,
@@ -50,6 +52,11 @@ public partial class MessageWindow : Window
             b.Click += (_, _) => { w.Result = index; w.DialogResult = true; };
             w.Buttons.Children.Add(b);
         }
+        // Widen the window so the buttons sit on one row (the message wraps
+        // to the new width); past the cap they wrap.
+        w.Buttons.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var needed = w.Buttons.DesiredSize.Width + 28 + 28 + 2;
+        if (needed > w.Width) w.Width = Math.Min(Math.Ceiling(needed), MaxWidthForButtons);
         // A window without buttons is a progress view, shown modeless: Esc
         // must not close it (and DialogResult would throw there).
         if (buttons.Count > 0)

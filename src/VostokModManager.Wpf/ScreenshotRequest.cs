@@ -70,6 +70,17 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target = new Views.ImportTargetWindow(vm);
                 target.Show();
             }
+            else if (req.Page == "prompt-update")
+            {
+                // The manager-update question: three buttons on one row.
+                target = Views.MessageWindow.Create(window, "Update mod manager",
+                    "A newer version of the mod manager is available (installed v0.7.7, latest v0.7.8).\n\n"
+                    + "Install it now to download the new build, swap the .exe in place and relaunch "
+                    + "automatically, or just open the releases page in your browser.",
+                    VostokModManager.Services.PromptKind.Question,
+                    new[] { "Cancel", "Open the releases page", "Install and relaunch" }, primary: 2, cancel: 0);
+                target.Show();
+            }
             else if (req.Page == "manager-blink")
             {
                 // The Loadout page with a manager update on offer.

@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Prompt buttons stay on one row.** A question whose buttons are too wide for the box (the manager-update question, with a wider game font) now makes the box wider instead of wrapping its buttons onto a second line.
+
 ## 0.7.8 (2026-11-01)
 
 - **Installing a modpack shows what's missing first.** **Install the N missing** (and any modpack or mod-list import) opens a window that lists each mod your loadout is missing from the pack, with its version and how it would be installed (downloaded, from My Mods, already on disk, or not on VostokMods and can't be installed). Below the list are three full-width choices, each saying what it does: **Add to** the active profile, **New profile**, or **Another profile…**. This replaces the cramped "Where should it go?" box.
