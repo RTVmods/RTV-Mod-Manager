@@ -1,0 +1,119 @@
+<Window x:Class="VostokModManager.Wpf.Views.ImportTargetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VostokModManager.Wpf.ViewModels"
+        Title="{Binding PackName}"
+        Width="800" Height="840" MinWidth="620" MinHeight="600"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <!-- A destination: title and what it does, the whole card is the button. -->
+        <Style x:Key="TargetCard" TargetType="Button" BasedOn="{StaticResource Btn.Outline}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="20,14" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+        <Style x:Key="TargetCard.Primary" TargetType="Button" BasedOn="{StaticResource Btn.Primary}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="20,14" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="FontWeight" Value="Normal" />
+        </Style>
+    </Window.Resources>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="32,26,32,24">
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Kind}" Style="{StaticResource T.Label}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding PackName}" Style="{StaticResource T.H2}" Margin="0,4,0,4" TextWrapping="Wrap" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Style="{StaticResource T.Muted}" Margin="0,0,0,20"
+                       Visibility="{Binding Summary, Converter={StaticResource VisibleWhen}}" />
+
+            <!-- where it goes -->
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,22,0,0">
+                <TextBlock Text="WHERE SHOULD IT GO?" Style="{StaticResource T.Label}" Margin="0,0,0,10" />
+                <Button Style="{StaticResource TargetCard.Primary}" Click="OnAdd" IsDefault="True" AutomationProperties.Name="{Binding AddTitle}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="→" FontSize="18" VerticalAlignment="Center" Margin="16,0,0,0" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding AddTitle}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding AddDetail}" FontSize="13" Opacity="0.72" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+                <Button Style="{StaticResource TargetCard}" Click="OnNew" AutomationProperties.Name="{Binding NewTitle}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="→" FontSize="18" VerticalAlignment="Center" Margin="16,0,0,0" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding NewTitle}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding NewDetail}" FontSize="13" Foreground="{StaticResource B.Text3}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+                <Button Style="{StaticResource TargetCard}" Click="OnOther" AutomationProperties.Name="Another profile"
+                        Visibility="{Binding HasOthers, Converter={StaticResource VisibleWhen}}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="→" FontSize="18" VerticalAlignment="Center" Margin="16,0,0,0" />
+                        <StackPanel>
+                            <TextBlock Text="Another profile…" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding OtherDetail}" FontSize="13" Foreground="{StaticResource B.Text3}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                </Button>
+                <Button Content="Cancel" MinWidth="110" HorizontalAlignment="Right" Margin="0,8,0,0" Click="OnCancel" />
+            </StackPanel>
+
+            <!-- what the active profile doesn't have -->
+            <TextBlock DockPanel.Dock="Top" Text="{Binding MissingHeader}" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding NothingMissing}" Style="{StaticResource T.Muted}" Margin="0,6,0,0"
+                       Visibility="{Binding HasMissing, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+            <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,1,0,1"
+                    Visibility="{Binding HasMissing, Converter={StaticResource VisibleWhen}}">
+                <ItemsControl ItemsSource="{Binding Missing}" Focusable="False" AutomationProperties.Name="Missing mods">
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                                <ItemsPresenter />
+                            </ScrollViewer>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ImportMissingRow}">
+                            <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,9">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Version}" FontSize="13" Foreground="{StaticResource B.Text3}" Margin="10,0,0,0"
+                                                       VerticalAlignment="Center" Visibility="{Binding Version, Converter={StaticResource VisibleWhen}}" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Via}" FontSize="12" Foreground="{StaticResource B.Text4}"
+                                                   Visibility="{Binding Via, Converter={StaticResource VisibleWhen}}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding How}" FontSize="13" VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding CantInstall}" Value="True">
+                                                        <Setter Property="Foreground" Value="{StaticResource B.SalmonText}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+        </DockPanel>
+    </Border>
+</Window>

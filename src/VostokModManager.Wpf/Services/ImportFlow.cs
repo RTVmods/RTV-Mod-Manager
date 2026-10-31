@@ -28,21 +28,24 @@ public sealed class ImportFlow
         var import = path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
             ? _session.LoadModListFile(path)
             : _session.LoadModpackFile(path);
-        if (import != null) await RunAsync(import, Path.GetDirectoryName(path));
+        if (import != null)
+            await RunAsync(import, Path.GetDirectoryName(path), isModpack: !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>A VostokMods modpack by slug.</summary>
     public async Task RunModpackAsync(string slug)
     {
         var import = await _session.LoadModpackAsync(slug);
-        if (import != null) await RunAsync(import, null);
+        if (import != null) await RunAsync(import, null, isModpack: true);
     }
 
-    public async Task RunAsync(ModListImport import, string? companionDir)
+    public async Task RunAsync(ModListImport import, string? companionDir, bool isModpack = true)
     {
         var options = _session.GetImportTargetOptions(import.Name);
         if (options == null) return;
-        var choice = AskTarget(options);
+        // What the active profile is missing, shown before asking where it goes.
+        var preview = _session.BuildImportPlan(import, companionDir);
+        var choice = AskTarget(new ImportTargetViewModel(options, preview, isModpack));
         if (choice == null) return;
         if (!_session.SelectImportTarget(choice, import)) return;
 
@@ -59,19 +62,13 @@ public sealed class ImportFlow
         }
     }
 
-    private ImportTargetChoice? AskTarget(ImportTargetOptions o)
+    private ImportTargetChoice? AskTarget(ImportTargetViewModel vm)
     {
-        var options = new List<string>
-        {
-            $"Add to '{o.Active.Name}'",
-            $"New profile '{o.SuggestedNewName}'",
-        };
-        if (o.Others.Count > 0) options.Add("Another profile…");
-        var pick = _session.Prompt.Choose("Where should it go?",
-            $"'{(string.IsNullOrEmpty(o.PackName) ? "This list" : o.PackName)}' can join the active profile, "
-            + "start a new profile of its own, or go into another saved profile (which then becomes active).",
-            options);
-        switch (pick)
+        var o = vm.Options;
+        var w = new ImportTargetWindow(vm);
+        PromptOwner.Attach(w, _owner());
+        using (PromptOwner.Use(_session, w)) w.ShowDialog();
+        switch (w.Choice)
         {
             case 0: return new ImportTargetChoice(ImportTarget.ActiveProfile);
             case 1:

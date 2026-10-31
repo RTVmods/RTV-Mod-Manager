@@ -61,6 +61,15 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target.Show();
                 await vm.LoadAsync();
             }
+            else if (req.Page.StartsWith("import-target:"))
+            {
+                // A VostokMods modpack's "where should it go", e.g. import-target:jonis-redacted-modpack.
+                var import = await shell.Session.LoadModpackAsync(req.Page["import-target:".Length..]);
+                var options = shell.Session.GetImportTargetOptions(import!.Name)!;
+                var vm = new ImportTargetViewModel(options, shell.Session.BuildImportPlan(import), isModpack: true);
+                target = new Views.ImportTargetWindow(vm);
+                target.Show();
+            }
             else if (req.Page == "manager-blink")
             {
                 // The Loadout page with a manager update on offer.
