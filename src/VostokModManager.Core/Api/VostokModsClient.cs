@@ -78,6 +78,7 @@ public record VmModSummary
     public string LatestGameVersion { get; init; } = "";
     public int Downloads { get; init; }
     public int Views { get; init; }
+    public int Followers { get; init; }
     public DateTime? CreatedAt { get; init; }
     public DateTime? UpdatedAt { get; init; }
     /// <summary>False when the newest version has not been cleared for
@@ -271,15 +272,16 @@ public class VostokModsClient
     }
 
     /// <summary>Every mod on the host, fetched in the largest pages the
-    /// listing allows.</summary>
-    public async Task<List<VmModSummary>> ListAllModsAsync(CancellationToken ct = default)
+    /// listing allows. `sort` is the host's order ("trending",
+    /// "downloads", …); none is last updated first.</summary>
+    public async Task<List<VmModSummary>> ListAllModsAsync(string? sort = null, CancellationToken ct = default)
     {
         var all = new List<VmModSummary>();
         // A guard against a listing that never reports its last page.
         const int maxPages = 100;
         for (var page = 1; page <= maxPages; page++)
         {
-            var p = await ListModsAsync(page, limit: MaxPageSize, ct: ct);
+            var p = await ListModsAsync(page, sort: sort, limit: MaxPageSize, ct: ct);
             all.AddRange(p.Items);
             if (!p.HasMore || p.Items.Count == 0) break;
         }
@@ -760,6 +762,7 @@ public class VostokModsClient
             LatestGameVersion = gameVersion,
             Downloads = Int(row, "downloadsCount"),
             Views = Int(row, "viewsCount"),
+            Followers = Int(row, "followersCount"),
             CreatedAt = Date(row, "createdAt"),
             UpdatedAt = Date(row, "updatedAt"),
             HasDownloadableFile = downloadable,

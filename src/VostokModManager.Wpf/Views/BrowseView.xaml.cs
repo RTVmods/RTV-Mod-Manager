@@ -68,6 +68,15 @@ public partial class BrowseView : UserControl
 
     private void OnMoreClosed(object sender, RoutedEventArgs e) => _vm?.ResyncTabs();
 
+    private void OnSortClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.DataContext = DataContext;
+        menu.PlacementTarget = button;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
     // ── the Website tab ───────────────────────────────────────────────
 
     private async Task StartWebAsync()

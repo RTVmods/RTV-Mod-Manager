@@ -341,6 +341,10 @@ public sealed partial class BrowseViewModel : PageViewModel
         Tabs.Add(new BrowseTab("all", "All") { IsActive = true });
         TailTabs.Add(new BrowseTab("modpacks", "Modpacks"));
         TailTabs.Add(new BrowseTab("website", "Website"));
+        foreach (var (key, label) in SortChoices) Sorts.Add(new BrowseTab(key, label));
+        var saved = Session.Settings.BrowseSort;
+        _sortKey = Sorts.Any(s => s.Key == saved) ? saved : "updated";
+        foreach (var s in Sorts) s.IsActive = s.Key == _sortKey;
     }
 
     // ── state the view binds to ───────────────────────────────────────
@@ -455,6 +459,9 @@ public sealed partial class BrowseViewModel : PageViewModel
             var taxTask = Session.Vm.ListTaxonomiesAsync();
             var packsTask = Session.ListModpacksAsync();
             var libTask = ReadLibraryAsync();
+            // A refresh re-reads the trending ranking along with the listing.
+            _trendingRank = null;
+            var trendTask = SortKey == "trending" ? LoadTrendingAsync() : Task.CompletedTask;
 
             List<VmModSummary> mods;
             try
@@ -479,6 +486,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             catch { BuildCategoryTabs(new List<VmTaxonomy>()); }  // no categories: All still works
 
             _library = await libTask;
+            await trendTask;
             _loaded = true;
             RefreshStates();
             Rebuild(keep);
@@ -599,6 +607,61 @@ public sealed partial class BrowseViewModel : PageViewModel
         Fill();
     }
 
+    // ── sort order (the site's own choices) ───────────────────────────
+
+    private static readonly (string Key, string Label)[] SortChoices =
+    {
+        ("trending", "Trending"), ("downloads", "Downloads"), ("followers", "Followers"),
+        ("views", "Views"), ("newest", "Newest"), ("updated", "Last updated"),
+    };
+
+    /// <summary>The sort menu's entries; the active one is ticked.</summary>
+    public ObservableCollection<BrowseTab> Sorts { get; } = new();
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SortLabel))]
+    private string _sortKey;
+
+    public string SortLabel => Sorts.FirstOrDefault(s => s.Key == SortKey)?.Label ?? "Last updated";
+
+    /// <summary>Trending is VostokMods' own ranking: slug → place, read
+    /// the first time it is picked.</summary>
+    private Dictionary<string, int>? _trendingRank;
+
+    [RelayCommand]
+    private async Task SetSort(string key)
+    {
+        SortKey = key;
+        foreach (var s in Sorts) s.IsActive = s.Key == key;
+        Session.Settings.BrowseSort = key;
+        try { Session.Settings.Save(); } catch { /* only the choice is lost */ }
+        if (key == "trending" && _trendingRank == null) await LoadTrendingAsync();
+        Rebuild();
+    }
+
+    private async Task LoadTrendingAsync()
+    {
+        try
+        {
+            var ranked = await Session.Vm.ListAllModsAsync("trending");
+            var rank = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < ranked.Count; i++) rank.TryAdd(ranked[i].Slug, i);
+            _trendingRank = rank;
+        }
+        catch { /* keep the listing's order */ }
+    }
+
+    /// <summary>The listing arrives last updated first; the others sort
+    /// on the card's numbers (ties keep that order).</summary>
+    private IEnumerable<ModCard> Sorted(IEnumerable<ModCard> src) => SortKey switch
+    {
+        "trending" when _trendingRank != null => src.OrderBy(c => _trendingRank.GetValueOrDefault(c.Slug, int.MaxValue)),
+        "downloads" => src.OrderByDescending(c => c.Mod.Downloads),
+        "followers" => src.OrderByDescending(c => c.Mod.Followers),
+        "views" => src.OrderByDescending(c => c.Mod.Views),
+        "newest" => src.OrderByDescending(c => c.Mod.CreatedAt ?? DateTime.MinValue),
+        _ => src,
+    };
+
     private void Rebuild(string? keepSlug = null)
     {
         keepSlug ??= Selected?.Slug;
@@ -615,7 +678,7 @@ public sealed partial class BrowseViewModel : PageViewModel
                                  || c.Mod.Summary.Contains(q, StringComparison.OrdinalIgnoreCase)
                                  || c.Author.Contains(q, StringComparison.OrdinalIgnoreCase)
                                  || c.Slug.Contains(q, StringComparison.OrdinalIgnoreCase));
-        _filtered = src.ToList();
+        _filtered = Sorted(src).ToList();
         _shown = PageSize;
         // Keep the selected card on screen when it is still in the list.
         var keepIndex = keepSlug == null ? -1 : _filtered.FindIndex(c => c.Slug == keepSlug);

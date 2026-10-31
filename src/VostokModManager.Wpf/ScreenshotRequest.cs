@@ -129,7 +129,9 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
             {
                 try { await loading; } catch { /* the page shows the error */ }
                 var slug = req.Page.Contains(':') ? req.Page[(req.Page.IndexOf(':') + 1)..] : "";
-                if (slug.Length > 0 && browse.Cards.FirstOrDefault(c => c.Slug == slug) is { } card) browse.Selected = card;
+                // `browse:sort=<key>` sorts instead (trending, downloads, …).
+                if (slug.StartsWith("sort=")) await browse.SetSortCommand.ExecuteAsync(slug[5..]);
+                else if (slug.Length > 0 && browse.Cards.FirstOrDefault(c => c.Slug == slug) is { } card) browse.Selected = card;
                 await Task.Delay(4000);
             }
             await Task.Delay(req.Page == "startup" ? 60 : 800);

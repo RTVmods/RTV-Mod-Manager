@@ -257,6 +257,37 @@
             <!-- tabs: All, categories, More, Modpacks, Website -->
             <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1">
                 <DockPanel>
+                    <!-- the site's sort orders, for the mod tabs -->
+                    <Button DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,6" Padding="12,0" MinHeight="34"
+                            Click="OnSortClick" AutomationProperties.Name="Sort mods" ToolTip="Sort the mods"
+                            Visibility="{Binding IsModsTab, Converter={StaticResource VisibleWhen}}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Outline}">
+                                <Setter Property="Background" Value="{StaticResource B.Fill}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource B.EdgeSoft}" />
+                                <Setter Property="FontSize" Value="14" />
+                            </Style>
+                        </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.Sort}" Style="{StaticResource IconPath}" Width="15" Height="15"
+                                  Stroke="{StaticResource B.Text2}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding SortLabel}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            <TextBlock Text="▾" FontSize="12" Foreground="{StaticResource B.Text3}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button.ContextMenu>
+                            <ContextMenu ItemsSource="{Binding Sorts}">
+                                <ContextMenu.ItemContainerStyle>
+                                    <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                        <Setter Property="Header" Value="{Binding Label}" />
+                                        <Setter Property="IsChecked" Value="{Binding IsActive, Mode=OneWay}" />
+                                        <Setter Property="Command"
+                                                Value="{Binding DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <Setter Property="CommandParameter" Value="{Binding Key}" />
+                                    </Style>
+                                </ContextMenu.ItemContainerStyle>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                     <WrapPanel>
                         <ItemsControl ItemsSource="{Binding Tabs}" ItemTemplate="{StaticResource TabTemplate}" Focusable="False">
                             <ItemsControl.ItemsPanel>

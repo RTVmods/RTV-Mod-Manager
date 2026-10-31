@@ -47,6 +47,10 @@ public class Settings
     /// the one after it.</summary>
     public string LastFeaturedModpack { get; set; } = "";
 
+    /// <summary>Browse's mod order: trending, downloads, followers, views,
+    /// newest or updated (the listing's own order).</summary>
+    public string BrowseSort { get; set; } = "updated";
+
     [JsonIgnore]
     public bool IsManagerCacheFresh
     {
