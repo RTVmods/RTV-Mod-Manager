@@ -11,6 +11,12 @@
 //   ├── extra-logs/            ← (optional) root-level *.log files from the
 //   │                            game user dir (modloader_filescope.log, …)
 //   ├── mod_config.cfg         ← the in-game loader's enabled/priority state
+//   ├── saves/listing.txt      ← the game's save files and the Save Slots
+//   │                            folder (MultiSaveSlots): names, sizes and
+//   │                            modification times, never the save contents
+//   ├── saves/MultiSaveSlots/… ← the slot folder's small state files only:
+//   │                            state.cfg, pending.cfg, each slot's
+//   │                            _meta.cfg, each backup's _backup.cfg
 //   ├── support-info.json      ← manager version, edition, MML version,
 //   │                            counts, timestamp
 //   └── profile.vmprofile      ← (opt-in) the active profile with its mod
@@ -284,10 +290,35 @@ public static class SupportPackage
                 else
                     result.Warnings.Add("mod_config.cfg not found.");
 
+                // 3h. The saves: what is there and how old it is. A save
+                // that loaded wrong (an older run, the wrong shelter) is
+                // diagnosed from the file dates and the Save Slots state,
+                // so the listing goes in with every package; the save
+                // contents stay out.
+                Report("Listing the saves…", 88);
+                var savesListed = 0;
+                try
+                {
+                    var listing = ListSaves(GameUserDir, out savesListed);
+                    var listEntry = zip.CreateEntry("saves/listing.txt", CompressionLevel.Optimal);
+                    using (var es = listEntry.Open())
+                    using (var sw = new StreamWriter(es))
+                        sw.Write(listing);
+                    foreach (var f in SaveStateFiles(GameUserDir))
+                    {
+                        var rel = System.IO.Path.GetRelativePath(GameUserDir, f).Replace('\\', '/');
+                        AddFile(zip, f, "saves/" + rel, result.Warnings);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"saves/: {ex.Message}");
+                }
+
                 // 3g. support-info.json
                 try
                 {
-                    var info = BuildInfo(profile, entries, modsDir, result.LogFileCount, result.ModFilesIncluded);
+                    var info = BuildInfo(profile, entries, modsDir, result.LogFileCount, result.ModFilesIncluded, savesListed);
                     var infoEntry = zip.CreateEntry("support-info.json", CompressionLevel.Optimal);
                     using var es = infoEntry.Open();
                     using var sw = new StreamWriter(es);
@@ -417,8 +448,80 @@ public static class SupportPackage
         }
     }
 
+    /// <summary>The save files under the game's user folder and the Save
+    /// Slots folder as text, one line per file: modification time (UTC),
+    /// size and path. Root-level logs are left out (they go in logs/).
+    /// <paramref name="count"/> gets the number of files listed.</summary>
+    public static string ListSaves(string userDir, out int count)
+    {
+        var sb = new System.Text.StringBuilder();
+        count = 0;
+        sb.AppendLine("modified (UTC)        size  path");
+        if (string.IsNullOrEmpty(userDir) || !Directory.Exists(userDir))
+        {
+            sb.AppendLine("(game user folder not found: " + userDir + ")");
+            return sb.ToString();
+        }
+        var files = new List<string>();
+        try
+        {
+            files.AddRange(Directory.GetFiles(userDir)
+                .Where(f => !f.EndsWith(".log", StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (Exception ex) { sb.AppendLine("(root: " + ex.Message + ")"); }
+        var slots = System.IO.Path.Combine(userDir, SaveSlots.FolderName);
+        if (Directory.Exists(slots))
+        {
+            try { files.AddRange(Directory.GetFiles(slots, "*", SearchOption.AllDirectories)); }
+            catch (Exception ex) { sb.AppendLine("(" + SaveSlots.FolderName + ": " + ex.Message + ")"); }
+        }
+        else
+        {
+            sb.AppendLine("(no " + SaveSlots.FolderName + " folder)");
+        }
+        foreach (var f in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var fi = new FileInfo(f);
+                var rel = System.IO.Path.GetRelativePath(userDir, f).Replace('\\', '/');
+                sb.Append(fi.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss"))
+                  .Append("  ").Append(fi.Length.ToString().PadLeft(10))
+                  .Append("  ").AppendLine(rel);
+                count++;
+            }
+            catch { /* unreadable: skip the line */ }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>The Save Slots folder's small state files, worth copying
+    /// into the package as they are: state.cfg, pending.cfg, fallback.cfg,
+    /// file_rules.cfg, every slot's _meta.cfg and every backup's
+    /// _backup.cfg. Never a save file.</summary>
+    public static IEnumerable<string> SaveStateFiles(string userDir)
+    {
+        if (string.IsNullOrEmpty(userDir)) yield break;
+        var slots = System.IO.Path.Combine(userDir, SaveSlots.FolderName);
+        if (!Directory.Exists(slots)) yield break;
+        foreach (var name in new[] { "state.cfg", "pending.cfg", "fallback.cfg", "file_rules.cfg" })
+        {
+            var p = System.IO.Path.Combine(slots, name);
+            if (File.Exists(p)) yield return p;
+        }
+        string[] metas;
+        try { metas = Directory.GetFiles(slots, "_meta.cfg", SearchOption.AllDirectories); }
+        catch { metas = Array.Empty<string>(); }
+        foreach (var m in metas.OrderBy(m => m, StringComparer.OrdinalIgnoreCase)) yield return m;
+        string[] backups;
+        try { backups = Directory.GetFiles(slots, "_backup.cfg", SearchOption.AllDirectories); }
+        catch { backups = Array.Empty<string>(); }
+        foreach (var b in backups.OrderBy(b => b, StringComparer.OrdinalIgnoreCase)) yield return b;
+    }
+
     private static object BuildInfo(
-        ModProfile profile, List<ModEntry> entries, string modsDir, int logFileCount, bool modFilesIncluded)
+        ModProfile profile, List<ModEntry> entries, string modsDir, int logFileCount, bool modFilesIncluded,
+        int saveFilesListed)
     {
         var asmVer = Assembly.GetExecutingAssembly().GetName().Version
                    ?? new Version(0, 0, 0);
@@ -445,6 +548,7 @@ public static class SupportPackage
             mmlVersion        = string.IsNullOrEmpty(mml) ? "(not detected)" : mml,
             gameUserDir       = GameUserDir,
             logFileCount,
+            saveFilesListed,
         };
     }
 
