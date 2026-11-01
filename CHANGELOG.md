@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.10 (2026-11-01)
+
+- **Save Slots keeps the last version of every save.** Before the built-in Save Slots mod rewrites a slot folder or replaces the game's save folder (loading another slot, a new game, a delete), the files there go to `MultiSaveSlots\_backups\<time>_<slot or user>\` first, with a note saying why; the last 10 per slot are kept. A run that is ahead of its slot is mirrored into the slot before another slot is loaded, so switching slots never discards progress. Permadeath stays permadeath: the dead slot and every backup of that run are deleted. A new game started with the game launched outside the mod loader never replaces a slot either: it gets the first empty slot on the next start (or a backup, with the slot's files put back, when none is free). Every copy the mod makes is now one line in the game log. (Save Slots 0.2.)
+- **Support packages list the saves.** A package now carries `saves/listing.txt` (the game's save files and the whole Save Slots folder, with sizes and modification times) and the slot folder's small state files, so a save that loaded wrong can be traced. The save contents themselves stay out.
+
 ## 0.7.9 (2026-11-01)
 
 - **Sort the mods in Browse.** A sort menu at the right end of the tab row offers the same orders as the VostokMods site: Trending, Downloads, Followers, Views, Newest and Last updated (the default). It applies to All and to each category, works with search, and is remembered. Trending is VostokMods' own ranking, read when you pick it.
