@@ -134,6 +134,12 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 else if (slug.Length > 0 && browse.Cards.FirstOrDefault(c => c.Slug == slug) is { } card) browse.Selected = card;
                 await Task.Delay(4000);
             }
+            // `profiles:<A>|<B>` selects A and compares it with B.
+            if (shell.Selected.Page is ProfilesViewModel profiles && req.Page.Contains(':'))
+            {
+                var names = req.Page[(req.Page.IndexOf(':') + 1)..].Split('|');
+                profiles.Show(names[0], names.Length > 1 ? names[1] : null);
+            }
             await Task.Delay(req.Page == "startup" ? 60 : 800);
             target.UpdateLayout();
 

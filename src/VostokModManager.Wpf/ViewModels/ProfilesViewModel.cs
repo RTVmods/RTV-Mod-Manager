@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
-using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
@@ -11,23 +10,21 @@ using VostokModManager.Wpf.Views;
 
 namespace VostokModManager.Wpf.ViewModels;
 
-/// <summary>One saved profile's card.</summary>
+/// <summary>One saved profile in the page's list.</summary>
 public sealed partial class ProfileCard : ObservableObject
 {
     private readonly ProfilesViewModel _owner;
 
-    public ProfileCard(ProfilesViewModel owner, ProfileSummary summary, bool isOpen)
+    public ProfileCard(ProfilesViewModel owner, ProfileSummary summary)
     {
         _owner = owner;
         Summary = summary;
-        _isOpen = isOpen;
     }
 
     public ProfileSummary Summary { get; }
     public ModProfile Profile => Summary.Profile;
     public string Name => Summary.Name;
     public bool IsActive => Summary.IsActive;
-    public string Tag => IsActive ? "ACTIVE" : "";
 
     /// <summary>The description, or what the profile is when it has none.</summary>
     public string Role
@@ -35,28 +32,26 @@ public sealed partial class ProfileCard : ObservableObject
         get
         {
             if (!string.IsNullOrWhiteSpace(Summary.Description)) return Summary.Description.Trim();
-            if (IsActive) return "What the mods folder runs now.";
+            if (IsActive) return "Your loadout: what the game loads.";
             var when = (Summary.UpdatedAt ?? Summary.CreatedAt).ToLocalTime();
             return $"Saved profile · last changed {when:d MMM yyyy}";
         }
     }
 
-    public string ModCount => Summary.ModCount.ToString();
-    public string EnabledCount => Summary.EnabledCount.ToString();
+    public string Counts => $"{Summary.ModCount} mods · {Summary.EnabledCount} on";
 
-    /// <summary>The Save Slots slots tied to this profile, or a dash.</summary>
-    public string Slots => Summary.SaveSlots.Count == 0
-        ? "No save slots tied"
-        : string.Join(" · ", Summary.SaveSlots.Select(s => s.Occupied ? $"{s.Number} {s.Title}" : $"{s.Number} (empty)"));
+    /// <summary>The Save Slots slots tied to this profile, or "".</summary>
+    public string Slots => Summary.SaveSlots.Count == 0 ? ""
+        : "Slot " + string.Join(" · ", Summary.SaveSlots.Select(s => s.Occupied ? $"{s.Number} {s.Title}" : $"{s.Number} (empty)"));
     public bool HasSlots => Summary.SaveSlots.Count > 0;
 
     public string MainLabel => IsActive ? "Open loadout" : "Make active";
 
-    /// <summary>True while this card's mod list is open in the side panel.</summary>
-    [ObservableProperty] private bool _isOpen;
+    /// <summary>The profile the selected one is being compared with.</summary>
+    [ObservableProperty] private bool _isCompared;
 
-    /// <summary>True while mods dragged from the side panel hover over
-    /// this card (a drop copies them into this profile).</summary>
+    /// <summary>True while mods dragged from the mod list hover over this
+    /// profile (a drop copies them into it).</summary>
     [ObservableProperty] private bool _isDropTarget;
 
     [RelayCommand] private void Main() { if (IsActive) _owner.OpenModsPage(); else _owner.MakeActive(this); }
@@ -66,72 +61,13 @@ public sealed partial class ProfileCard : ObservableObject
     [RelayCommand] private void Describe() => _owner.Describe(this);
     [RelayCommand] private void Delete() => _owner.Delete(this);
     [RelayCommand] private Task Apply() => _owner.ApplyAsync(Profile);
-    [RelayCommand] private void ShowMods() => _owner.ToggleDetail(this);
+    [RelayCommand] private void CompareHere() => _owner.CompareWith = this;
 }
 
-/// <summary>A profile's column in the comparison matrix.</summary>
-public sealed record MatrixColumn(string Name, bool IsActive)
-{
-    public string Tag => IsActive ? "ACTIVE" : "";
-}
-
-/// <summary>How a matrix cell reads against the rest of its row.</summary>
-public enum CellTone { Same, Differs, Absent }
-
-/// <summary>One profile's entry for one mod, as the matrix shows it.</summary>
-public sealed record MatrixCell(string Text, CellTone Tone, string Profile)
-{
-    public string Tooltip => $"{Profile}: {Text}";
-}
-
-/// <summary>One entry of a row's ⋯ menu: a heading (no command), a
-/// separator (empty header) or an action.</summary>
-public sealed record MatrixAction(string Header, ICommand? Command)
-{
-    public bool IsSeparator => Header.Length == 0;
-    public static MatrixAction Separator { get; } = new("", null);
-}
-
-/// <summary>One mod across every saved profile.</summary>
-public sealed partial class MatrixRowItem : ObservableObject
-{
-    private readonly ProfilesViewModel _owner;
-    private readonly bool _loading;
-
-    public MatrixRowItem(ProfilesViewModel owner, ProfileMatrixRow row, IReadOnlyList<MatrixCell> cells,
-        IReadOnlyList<MatrixAction> actions, bool isChecked)
-    {
-        _owner = owner;
-        Row = row;
-        Cells = cells;
-        Actions = actions;
-        _loading = true;
-        IsChecked = isChecked;
-        _loading = false;
-    }
-
-    public ProfileMatrixRow Row { get; }
-    public string Name => Row.DisplayName;
-    public string ModId => Row.ModId;
-    public string What => Row.What;
-    public IReadOnlyList<MatrixCell> Cells { get; }
-    public IReadOnlyList<MatrixAction> Actions { get; }
-    public string MoreName => $"Copy or remove {Row.DisplayName}";
-    public string CheckName => $"Select {Row.DisplayName}";
-
-    /// <summary>Ticked for the toolbar's copy / remove actions.</summary>
-    [ObservableProperty] private bool _isChecked;
-
-    partial void OnIsCheckedChanged(bool value)
-    {
-        if (!_loading) _owner.OnRowChecked(this, value);
-    }
-}
-
-/// <summary>Mods dragged from the side panel onto another profile's card.</summary>
+/// <summary>Mods dragged from the mod list onto another profile.</summary>
 public sealed record DraggedProfileMods(ModProfile Source, IReadOnlyList<ProfileMod> Mods);
 
-/// <summary>One mod in the side panel's list of a profile.</summary>
+/// <summary>One mod in the selected profile's list.</summary>
 public sealed partial class ProfileModItem : ObservableObject
 {
     private readonly ProfilesViewModel _owner;
@@ -168,7 +104,7 @@ public sealed partial class ProfileModItem : ObservableObject
     /// the box loses focus.</summary>
     [ObservableProperty] private string _priorityText = "";
 
-    /// <summary>Selected in the side panel's list (two-way with the row).</summary>
+    /// <summary>Selected in the list (two-way with the row).</summary>
     [ObservableProperty] private bool _isSelected;
 
     partial void OnEnabledChanged(bool value)
@@ -180,7 +116,7 @@ public sealed partial class ProfileModItem : ObservableObject
     partial void OnIsSelectedChanged(bool value)
     {
         if (_loading) return;
-        _owner.OnDetailSelectionChanged();
+        _owner.OnModSelectionChanged();
     }
 
     /// <summary>Saves the typed load order; anything that isn't a whole
@@ -211,21 +147,90 @@ public sealed partial class ProfileModItem : ObservableObject
     [RelayCommand] private void Remove() => _owner.RemoveFromProfile(this);
 }
 
-/// <summary>The Profiles page: a card per saved profile, the comparison
-/// matrix across all of them, and a side panel with one profile's mods.</summary>
+/// <summary>One mod in the A/B comparison: each side's entry as text,
+/// and the copy (and remove) actions that apply to it.</summary>
+public sealed partial class PairItem : ObservableObject
+{
+    private readonly ProfilesViewModel _owner;
+
+    public PairItem(ProfilesViewModel owner, PairRow row, string aText, string bText)
+    {
+        _owner = owner;
+        Row = row;
+        AText = aText;
+        BText = bText;
+    }
+
+    public PairRow Row { get; }
+    public string Name => Row.DisplayName;
+    public string ModId => Row.ModId;
+    public string AText { get; }
+    public string BText { get; }
+    public bool HasA => Row.A != null;
+    public bool HasB => Row.B != null;
+    public bool IsDifferent => Row.Kind == PairKind.Different;
+    public bool CanCopyToB => HasA && Row.Kind != PairKind.Same;
+    public bool CanCopyToA => HasB && Row.Kind != PairKind.Same;
+    public bool CanRemoveFromA => Row.Kind == PairKind.OnlyInA;
+    public bool CanRemoveFromB => Row.Kind == PairKind.OnlyInB;
+    public string CopyToBTip => $"Copy {Name} as it is in '{_owner.AName}' into '{_owner.BName}'";
+    public string CopyToATip => $"Copy {Name} as it is in '{_owner.BName}' into '{_owner.AName}'";
+    public string RemoveFromATip => $"Remove {Name} from '{_owner.AName}'";
+    public string RemoveFromBTip => $"Remove {Name} from '{_owner.BName}'";
+
+    [RelayCommand] private void CopyToB() => _owner.CopyPairs(new[] { this }, toB: true);
+    [RelayCommand] private void CopyToA() => _owner.CopyPairs(new[] { this }, toB: false);
+    [RelayCommand] private void RemoveFromA() => _owner.RemovePair(this, fromB: false);
+    [RelayCommand] private void RemoveFromB() => _owner.RemovePair(this, fromB: true);
+}
+
+/// <summary>A group of the comparison: only in A, only in B, different,
+/// the same. Each copies its whole group across in one click.</summary>
+public sealed partial class PairSection : ObservableObject
+{
+    private readonly ProfilesViewModel _owner;
+
+    public PairSection(ProfilesViewModel owner, PairKind kind, string title, string hint, IReadOnlyList<PairItem> items, bool expanded)
+    {
+        _owner = owner;
+        Kind = kind;
+        Title = title;
+        Hint = hint;
+        Items = items;
+        _isExpanded = expanded;
+    }
+
+    public PairKind Kind { get; }
+    public string Title { get; }
+    public string Hint { get; }
+    public IReadOnlyList<PairItem> Items { get; }
+    public int Count => Items.Count;
+    public bool HasItems => Items.Count > 0;
+    public bool CanCopyAllToB => Kind is PairKind.OnlyInA or PairKind.Different && HasItems;
+    public bool CanCopyAllToA => Kind is PairKind.OnlyInB or PairKind.Different && HasItems;
+    public string CopyAllToBLabel => Kind == PairKind.Different ? $"Use all of '{_owner.AName}' →" : $"Copy all {Count} to '{_owner.BName}' →";
+    public string CopyAllToALabel => Kind == PairKind.Different ? $"← Use all of '{_owner.BName}'" : $"← Copy all {Count} to '{_owner.AName}'";
+
+    /// <summary>"The same in both" starts folded; the others open.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ToggleLabel))] private bool _isExpanded;
+    public string ToggleLabel => IsExpanded ? "Hide" : "Show";
+
+    [RelayCommand] private void Toggle() => IsExpanded = !IsExpanded;
+    [RelayCommand] private void CopyAllToB() => _owner.CopyPairs(Items, toB: true);
+    [RelayCommand] private void CopyAllToA() => _owner.CopyPairs(Items, toB: false);
+}
+
+/// <summary>The Profiles page: every saved profile down the left; the
+/// selected one's mods on the right, or, with "Compare with", what
+/// differs between it (A) and another profile (B), grouped so the mods
+/// only one of them has stand out, each copyable across.</summary>
 public sealed partial class ProfilesViewModel : PageViewModel
 {
-    private const double NameColumnWidth = 300;
-    private const double MinCellWidth = 118;
-
-    private ProfileComparison? _comparison;
     private bool _loaded;
-    private string? _detailName;
-    private List<ProfileMod> _detailMods = new();
-    /// <summary>The matrix rows ticked, by mod id (kept across filters
-    /// and reloads while the mod is still in some profile).</summary>
-    private readonly HashSet<string> _checkedIds = new(StringComparer.OrdinalIgnoreCase);
-    private bool _bulkChecking;
+    private string? _selectedName;
+    private string? _compareName;
+    private List<ProfileMod> _shownMods = new();
+    private bool _reloading;
 
     public ProfilesViewModel(ManagerSession session) : base(session)
     {
@@ -239,80 +244,70 @@ public sealed partial class ProfilesViewModel : PageViewModel
     }
 
     public ObservableCollection<ProfileCard> Cards { get; } = new();
-    public ObservableCollection<MatrixColumn> Columns { get; } = new();
-    public ObservableCollection<MatrixRowItem> Rows { get; } = new();
-    public ObservableCollection<ProfileModItem> DetailMods { get; } = new();
+    /// <summary>What "Compare with" offers: every profile but the selected one.</summary>
+    public ObservableCollection<ProfileCard> CompareChoices { get; } = new();
+    public ObservableCollection<ProfileModItem> Mods { get; } = new();
+    public ObservableCollection<PairSection> Sections { get; } = new();
 
     /// <summary>The outcome of the last profile action taken on this page.</summary>
     [ObservableProperty] private string _notice = "";
-
     [ObservableProperty] private string _header = "";
-    [ObservableProperty] private string _matrixSummary = "";
-    [ObservableProperty] private string _matrixCount = "";
-    [ObservableProperty] private string _matrixEmpty = "";
-    [ObservableProperty] private bool _onlyDifferences = true;
     [ObservableProperty] private string _query = "";
-    /// <summary>Below this the cells scroll sideways instead of squeezing.</summary>
-    [ObservableProperty] private double _cellsMinWidth;
-    [ObservableProperty] private bool _canCompare;
+    [ObservableProperty] private string _modsSummary = "";
+    [ObservableProperty] private string _compareSummary = "";
+    [ObservableProperty] private string _compareEmpty = "";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DetailIsActive), nameof(DetailEditable))]
-    [NotifyCanExecuteChangedFor(nameof(RemoveSelectedModsCommand))]
-    private ProfileCard? _detail;
+    [NotifyPropertyChangedFor(nameof(SelectedIsActive), nameof(SelectedEditable), nameof(HasSelected), nameof(AName))]
+    [NotifyCanExecuteChangedFor(nameof(RemoveSelectedModsCommand), nameof(SwapCommand))]
+    private ProfileCard? _selected;
 
-    /// <summary>The side panel shows the active profile: that one is the
-    /// loadout, edited on the Loadout page, so here it is read-only (its
-    /// mods can still be copied to another profile).</summary>
-    public bool DetailIsActive => Detail?.IsActive == true;
-    public bool DetailEditable => Detail != null && !Detail.IsActive;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsComparing), nameof(NotComparing), nameof(BName))]
+    [NotifyCanExecuteChangedFor(nameof(SwapCommand), nameof(StopComparingCommand))]
+    private ProfileCard? _compareWith;
+
+    public bool HasSelected => Selected != null;
+    public bool IsComparing => Selected != null && CompareWith != null;
+    public bool NotComparing => !IsComparing;
+    public string AName => Selected?.Name ?? "";
+    public string BName => CompareWith?.Name ?? "";
+
+    /// <summary>The selected profile is the loadout: edited on the
+    /// Loadout page, so here its list is read-only (its mods can still be
+    /// copied to another profile).</summary>
+    public bool SelectedIsActive => Selected?.IsActive == true;
+    public bool SelectedEditable => Selected != null && !Selected.IsActive;
 
     [RelayCommand] private void EditInLoadout() => OpenModsPage();
 
-    [ObservableProperty] private string _detailQuery = "";
-    [ObservableProperty] private string _detailSummary = "";
-
-    // side panel selection
+    // the mod list's selection
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RemoveSelectedModsCommand))]
-    [NotifyPropertyChangedFor(nameof(HasDetailSelection))]
-    private int _detailSelectedCount;
-    public bool HasDetailSelection => DetailSelectedCount > 0;
+    [NotifyPropertyChangedFor(nameof(HasModSelection))]
+    private int _modSelectedCount;
+    public bool HasModSelection => ModSelectedCount > 0;
     [ObservableProperty] private string _removeSelectedLabel = "Remove from profile";
     [ObservableProperty] private string _copySelectedLabel = "Copy to profile…";
 
-    // matrix selection and its toolbar
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CopyCheckedEntriesCommand), nameof(CopyCheckedVersionsCommand), nameof(RemoveCheckedEntriesCommand))]
-    private int _checkedCount;
-    [ObservableProperty] private string _checkedSummary = "";
-    /// <summary>The header tick: true when every shown row is ticked,
-    /// false when none is, null in between.</summary>
-    [ObservableProperty] private bool? _allShownChecked = false;
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CopyCheckedEntriesCommand), nameof(CopyCheckedVersionsCommand))]
-    private ProfileCard? _copyFrom;
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CopyCheckedEntriesCommand), nameof(CopyCheckedVersionsCommand))]
-    private ProfileCard? _copyTo;
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RemoveCheckedEntriesCommand))]
-    private ProfileCard? _removeFrom;
+    partial void OnQueryChanged(string value) => Fill(force: true);
 
-    /// <summary>The frozen mod column's width.</summary>
-    public double NameWidth => NameColumnWidth;
-
-    partial void OnOnlyDifferencesChanged(bool value) => FillRows();
-    partial void OnQueryChanged(string value) => FillRows();
-    partial void OnDetailQueryChanged(string value) => FillDetail(force: true);
-
-    partial void OnAllShownCheckedChanged(bool? value)
+    partial void OnSelectedChanged(ProfileCard? value)
     {
-        if (_bulkChecking || value == null) return;
-        _bulkChecking = true;
-        foreach (var r in Rows) r.IsChecked = value.Value;
-        _bulkChecking = false;
-        UpdateChecked();
+        if (_reloading) return;
+        _selectedName = value?.Name;
+        // A profile isn't compared with itself.
+        if (value != null && CompareWith == value) CompareWith = null;
+        FillCompareChoices();
+        Fill(force: true);
+    }
+
+    partial void OnCompareWithChanged(ProfileCard? value)
+    {
+        if (_reloading) return;
+        _compareName = value?.Name;
+        foreach (var c in Cards) c.IsCompared = c == value;
+        Fill(force: true);
     }
 
     public override void OnShown() => Load();
@@ -328,310 +323,197 @@ public sealed partial class ProfilesViewModel : PageViewModel
     private void Load()
     {
         _loaded = true;
-        // The active profile leads: first card, first matrix column (the
-        // comparison sorts "only in the first profile" to the top).
+        // The active profile leads the list.
         var summaries = Session.GetProfileSummaries().OrderByDescending(s => s.IsActive).ToList();
 
-        // The toolbar's picks survive the cards being rebuilt (clearing
-        // them nulls the combo boxes' selection).
-        var (fromName, toName, removeName) = (CopyFrom?.Name, CopyTo?.Name, RemoveFrom?.Name);
-        Cards.Clear();
-        foreach (var s in summaries)
-            Cards.Add(new ProfileCard(this, s, IsSame(s.Name, _detailName)));
-        CopyFrom = FindCard(fromName) ?? Cards.FirstOrDefault();
-        CopyTo = FindCard(toName) is { } t && t != CopyFrom ? t : Cards.FirstOrDefault(c => c != CopyFrom);
-        RemoveFrom = FindCard(removeName) ?? CopyTo;
+        _reloading = true;
+        try
+        {
+            Cards.Clear();
+            foreach (var s in summaries) Cards.Add(new ProfileCard(this, s));
+            Selected = FindCard(_selectedName) ?? Cards.FirstOrDefault(c => c.IsActive) ?? Cards.FirstOrDefault();
+            _selectedName = Selected?.Name;
+            CompareWith = FindCard(_compareName) is { } b && b != Selected ? b : null;
+            _compareName = CompareWith?.Name;
+            foreach (var c in Cards) c.IsCompared = c == CompareWith;
+            FillCompareChoices();
+        }
+        finally { _reloading = false; }
 
         var active = summaries.FirstOrDefault(s => s.IsActive);
         Header = summaries.Count switch
         {
             0 => "No saved profiles yet. A profile is a named set of mods, versions and load order you can switch between.",
             _ => $"{summaries.Count} saved profile{(summaries.Count == 1 ? "" : "s")}"
-                 + (active != null ? $" · '{active.Name}' is live in the mods folder" : " · none is active")
-                 + ". Switching swaps the mods folder from My Mods; locked mods stay put.",
+                 + (active != null ? $" · '{active.Name}' is your loadout" : " · none is active")
+                 + ". Pick one to see its mods, or compare it with another.",
         };
-
-        var profiles = summaries.Select(s => s.Profile).ToList();
-        Columns.Clear();
-        foreach (var s in summaries) Columns.Add(new MatrixColumn(s.Name, s.IsActive));
-        CanCompare = profiles.Count >= 2;
-        _comparison = profiles.Count >= 2 ? Session.CompareProfiles(profiles) : null;
-        // A ticked mod no profile lists any more has nothing left to act on.
-        var ids = new HashSet<string>(_comparison?.Rows.Select(r => r.ModId) ?? Enumerable.Empty<string>(),
-            StringComparer.OrdinalIgnoreCase);
-        _checkedIds.RemoveWhere(id => !ids.Contains(id));
-        CellsMinWidth = Math.Max(1, profiles.Count) * MinCellWidth;
-        MatrixSummary = _comparison?.Summary
-            ?? (profiles.Count == 1 ? "Save a second profile to compare them here." : "");
-        FillRows();
-
-        // Keep the side panel on the same profile across reloads.
-        var open = Cards.FirstOrDefault(c => c.IsOpen);
-        Detail = open;
-        if (open == null) _detailName = null;
-        FillDetail(force: false);
+        Fill(force: false);
     }
 
-    private void FillRows()
+    private void FillCompareChoices()
     {
-        Rows.Clear();
-        if (_comparison == null)
+        var keep = CompareWith;
+        CompareChoices.Clear();
+        foreach (var c in Cards.Where(c => c != Selected)) CompareChoices.Add(c);
+        // Clearing the list drops the combo's pick; put it back.
+        if (keep != null && CompareChoices.Contains(keep) && CompareWith != keep) CompareWith = keep;
+    }
+
+    /// <summary>Fills whichever view is showing: the comparison, or the
+    /// selected profile's mods.</summary>
+    private void Fill(bool force)
+    {
+        if (IsComparing) FillComparison();
+        else
         {
-            MatrixCount = "";
-            MatrixEmpty = "";
-            UpdateChecked();
-            return;
+            Sections.Clear();
+            CompareSummary = "";
+            CompareEmpty = "";
         }
-        var shown = _comparison.Filter(OnlyDifferences, Query).ToList();
-        foreach (var r in shown) Rows.Add(BuildRow(r));
-        var total = _comparison.Rows.Count;
-        MatrixCount = $"{shown.Count} of {total} mods";
-        MatrixEmpty = shown.Count > 0 ? ""
-            : Query.Trim().Length > 0 ? $"No mod matches '{Query.Trim()}'."
-            : OnlyDifferences ? "Every profile agrees on every mod." : "No mods in any profile.";
-        UpdateChecked();
+        FillMods(force || IsComparing);
     }
 
-    // ── matrix selection ──────────────────────────────────────────────
+    // ── the comparison ────────────────────────────────────────────────
 
-    public void OnRowChecked(MatrixRowItem row, bool value)
+    private void FillComparison()
     {
-        if (value) _checkedIds.Add(row.ModId);
-        else _checkedIds.Remove(row.ModId);
-        if (!_bulkChecking) UpdateChecked();
-    }
+        Sections.Clear();
+        var (a, b) = (Selected!, CompareWith!);
+        var pairs = Session.CompareProfiles(new[] { a.Profile, b.Profile }).Pairs();
+        var q = Query.Trim();
+        var shown = q.Length == 0 ? pairs
+            : pairs.Where(p => p.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                               || p.ModId.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
-    /// <summary>The ticked mod ids, in the comparison's row order (rows
-    /// hidden by the filter included).</summary>
-    private List<string> CheckedIds() =>
-        _comparison == null ? new()
-            : _comparison.Rows.Select(r => r.ModId).Where(_checkedIds.Contains).ToList();
-
-    private void UpdateChecked()
-    {
-        CheckedCount = CheckedIds().Count;
-        var shown = Rows.Count(r => r.IsChecked);
-        var hidden = CheckedCount - shown;
-        CheckedSummary = CheckedCount == 0
-            ? "Tick mods to copy or remove several at once"
-            : $"{CheckedCount} selected" + (hidden > 0 ? $" · {hidden} hidden by the filter" : "");
-        _bulkChecking = true;
-        AllShownChecked = shown == 0 ? false : shown == Rows.Count ? true : null;
-        _bulkChecking = false;
-    }
-
-    private void ClearChecked()
-    {
-        _checkedIds.Clear();
-        _bulkChecking = true;
-        foreach (var r in Rows) r.IsChecked = false;
-        _bulkChecking = false;
-        UpdateChecked();
-    }
-
-    private bool CanCopyChecked() =>
-        CheckedCount > 0 && CopyFrom != null && CopyTo != null && CopyFrom != CopyTo;
-
-    private bool CanRemoveChecked() => CheckedCount > 0 && RemoveFrom != null;
-
-    /// <summary>Copies the ticked rows' whole entries (version, enabled
-    /// state, load order) from one profile into another.</summary>
-    [RelayCommand(CanExecute = nameof(CanCopyChecked))]
-    private void CopyCheckedEntries()
-    {
-        if (CopyFrom == null || CopyTo == null) return;
-        var (from, to) = (CopyFrom.Profile, CopyTo.Profile);
-        var n = Session.CopyProfileEntries(from, to, CheckedIds());
-        if (n == 0) return;  // the session said why
-        Notice = $"Copied {n} entr{(n == 1 ? "y" : "ies")} from '{from.Name}' to '{to.Name}'.";
-        ClearChecked();
-        Load();
-    }
-
-    /// <summary>Moves the ticked rows in the target profile to the
-    /// source profile's versions, leaving on/off and load order alone.</summary>
-    [RelayCommand(CanExecute = nameof(CanCopyChecked))]
-    private void CopyCheckedVersions()
-    {
-        if (CopyFrom == null || CopyTo == null) return;
-        var (from, to) = (CopyFrom.Profile, CopyTo.Profile);
-        var n = Session.CopyProfileVersions(from, to, CheckedIds());
-        if (n == 0)
+        // Load order and on/off only show where they differ in that row.
+        string Text(ProfileMod? m, ProfileMod? other)
         {
-            Session.Prompt.Inform("No versions changed",
-                $"None of the selected mods needed a change: each one is either missing from '{from.Name}' "
-                + $"or '{to.Name}', or already at the same version in both.");
-            return;
-        }
-        // The session's status line ("Moved n mod(s) ...") lands in Notice.
-        ClearChecked();
-        Load();
-    }
-
-    /// <summary>Drops the ticked rows from one profile (after the
-    /// session's confirmation).</summary>
-    [RelayCommand(CanExecute = nameof(CanRemoveChecked))]
-    private void RemoveCheckedEntries()
-    {
-        if (RemoveFrom == null) return;
-        var profile = RemoveFrom.Profile;
-        var ids = CheckedIds();
-        var present = ids.Count(id => profile.Mods.Any(m => IsSame(m.ModId, id)));
-        if (present == 0)
-        {
-            Session.Prompt.Inform("Nothing to remove", $"None of the selected mods are in '{profile.Name}'.");
-            return;
-        }
-        if (!Session.RemoveProfileEntries(profile, ids)) return;
-        Notice = $"Removed {present} mod{(present == 1 ? "" : "s")} from '{profile.Name}'.";
-        ClearChecked();
-        Load();
-    }
-
-    /// <summary>A matrix row: each cell's text and tone, and the row's menu.</summary>
-    private MatrixRowItem BuildRow(ProfileMatrixRow row)
-    {
-        var profiles = _comparison!.Profiles;
-        var present = row.Cells.Where(c => c.Present).ToList();
-        var priorityMatters = present.Select(c => c.Priority).Distinct().Count() > 1;
-
-        string Sig(ProfileMatrixCell c) => c.Present ? $"{c.Version}\n{c.Enabled}\n{c.Priority}" : "";
-        string Text(ProfileMatrixCell c)
-        {
-            if (!c.Present) return "not in profile";
-            var bits = new List<string> { string.IsNullOrEmpty(c.Version) ? "no version" : c.Version };
-            if (!c.Enabled) bits.Add("off");
-            if (priorityMatters) bits.Add($"prio {c.Priority}");
+            if (m == null) return "—";
+            var bits = new List<string> { string.IsNullOrEmpty(m.Version) ? "no version" : m.Version };
+            if (!m.IsEnabled) bits.Add("off");
+            if (other != null && other.Priority != m.Priority) bits.Add($"order {m.Priority}");
             return string.Join(" · ", bits);
         }
+        List<PairItem> Of(PairKind kind) => shown.Where(p => p.Kind == kind)
+            .Select(p => new PairItem(this, p, Text(p.A, p.B), Text(p.B, p.A))).ToList();
 
-        // The most common entry is the reference; the active profile's
-        // entry wins a tie, so "differs" reads as "differs from live".
-        var activeIndex = IndexOfActive(profiles);
-        var groups = row.Cells
-            .Select((c, i) => (Cell: c, Index: i))
-            .Where(x => x.Cell.Present)
-            .GroupBy(x => Sig(x.Cell))
-            .OrderByDescending(g => g.Count())
-            .ThenByDescending(g => g.Any(x => x.Index == activeIndex))
-            .ToList();
-        var reference = groups.Count > 0 ? groups[0].Key : "";
+        Sections.Add(new PairSection(this, PairKind.OnlyInA, $"ONLY IN '{a.Name.ToUpperInvariant()}'",
+            $"'{b.Name}' doesn't have these.", Of(PairKind.OnlyInA), expanded: true));
+        Sections.Add(new PairSection(this, PairKind.OnlyInB, $"ONLY IN '{b.Name.ToUpperInvariant()}'",
+            $"'{a.Name}' doesn't have these.", Of(PairKind.OnlyInB), expanded: true));
+        Sections.Add(new PairSection(this, PairKind.Different, "IN BOTH, BUT DIFFERENT",
+            "A different version, on in one and off in the other, or another load order.", Of(PairKind.Different), expanded: true));
+        Sections.Add(new PairSection(this, PairKind.Same, "THE SAME IN BOTH",
+            "Same version, same on/off and load order.", Of(PairKind.Same), expanded: false));
 
-        var cells = row.Cells.Select((c, i) => new MatrixCell(
-                Text(c),
-                !c.Present ? CellTone.Absent : Sig(c) == reference ? CellTone.Same : CellTone.Differs,
-                profiles[i].Name))
-            .ToList();
+        int N(PairKind k) => pairs.Count(p => p.Kind == k);
+        CompareSummary = N(PairKind.OnlyInA) + N(PairKind.OnlyInB) + N(PairKind.Different) == 0
+            ? $"The two profiles are identical: {N(PairKind.Same)} mods, same versions, on/off and load order."
+            : $"{N(PairKind.OnlyInA)} only in '{a.Name}' · {N(PairKind.OnlyInB)} only in '{b.Name}' · "
+              + $"{N(PairKind.Different)} different · {N(PairKind.Same)} the same";
+        CompareEmpty = shown.Count == 0 && q.Length > 0 ? $"No mod matches '{q}'." : "";
+    }
 
-        // The menu: the common entry can be copied into every profile
-        // that holds something else (or nothing); a less common one only
-        // into the active profile. Then one remove per profile.
-        var actions = new List<MatrixAction>();
-        foreach (var g in groups)
+    /// <summary>Copies entries across: A's into B (`toB`) or B's into A.
+    /// A mod the target lacks is added; one it has takes the source's
+    /// version, on/off and load order.</summary>
+    public void CopyPairs(IReadOnlyCollection<PairItem> items, bool toB)
+    {
+        if (Selected == null || CompareWith == null) return;
+        var (from, to) = toB ? (Selected, CompareWith) : (CompareWith, Selected);
+        var ids = items.Where(i => toB ? i.HasA : i.HasB).Select(i => i.ModId).ToList();
+        if (ids.Count == 0) return;
+        var n = Session.CopyProfileEntries(from.Profile, to.Profile, ids);
+        if (n == 0) return;  // the session said why
+        Notice = $"Copied {n} mod{(n == 1 ? "" : "s")} from '{from.Name}' into '{to.Name}'."
+            + (to.IsActive ? " That profile is your loadout: apply it from the Loadout page to install them." : "");
+        Load();
+    }
+
+    public void RemovePair(PairItem item, bool fromB)
+    {
+        var card = fromB ? CompareWith : Selected;
+        if (card == null || !Session.RemoveProfileEntries(card.Profile, new[] { item.ModId })) return;
+        Notice = $"Removed '{item.Name}' from '{card.Name}'.";
+        Load();
+    }
+
+    private bool CanSwap() => Selected != null && CompareWith != null;
+
+    /// <summary>Swaps A and B.</summary>
+    [RelayCommand(CanExecute = nameof(CanSwap))]
+    private void Swap()
+    {
+        var (a, b) = (Selected, CompareWith);
+        _reloading = true;
+        try
         {
-            var holders = g.Select(x => x.Index).ToList();
-            var sourceIndex = holders.Contains(activeIndex) ? activeIndex : holders[0];
-            var source = profiles[sourceIndex];
-            var targets = Enumerable.Range(0, profiles.Count)
-                .Where(i => !holders.Contains(i) && (g.Key == reference || i == activeIndex))
-                .ToList();
-            if (targets.Count == 0) continue;
-            if (actions.Count > 0) actions.Add(MatrixAction.Separator);
-            actions.Add(new MatrixAction($"Copy {Text(row.Cells[sourceIndex])} from '{source.Name}' to", null));
-            foreach (var t in targets)
-            {
-                var target = profiles[t];
-                actions.Add(new MatrixAction($"    {target.Name}",
-                    new RelayCommand(() => CopyEntry(source, target, row.ModId))));
-            }
+            Selected = b;
+            CompareWith = a;
         }
-        var removable = row.Cells.Select((c, i) => (c, i)).Where(x => x.c.Present).Select(x => profiles[x.i]).ToList();
-        if (removable.Count > 0)
+        finally { _reloading = false; }
+        (_selectedName, _compareName) = (Selected?.Name, CompareWith?.Name);
+        foreach (var c in Cards) c.IsCompared = c == CompareWith;
+        FillCompareChoices();
+        Fill(force: true);
+    }
+
+    private bool CanStopComparing() => CompareWith != null;
+
+    [RelayCommand(CanExecute = nameof(CanStopComparing))]
+    private void StopComparing() => CompareWith = null;
+
+    // ── the selected profile's mods ───────────────────────────────────
+
+    /// <summary>Fills the mod list. A reload that left the same mods in
+    /// place only re-reads the ticks, so a tick being clicked keeps its
+    /// row (and focus).</summary>
+    private void FillMods(bool force)
+    {
+        if (Selected == null || IsComparing)
         {
-            if (actions.Count > 0) actions.Add(MatrixAction.Separator);
-            actions.Add(new MatrixAction("Remove it from", null));
-            foreach (var p in removable)
-                actions.Add(new MatrixAction($"    {p.Name}…", new RelayCommand(() => RemoveEntry(p, row.ModId))));
-        }
-        return new MatrixRowItem(this, row, cells, actions, _checkedIds.Contains(row.ModId));
-    }
-
-    private int IndexOfActive(IReadOnlyList<ModProfile> profiles)
-    {
-        for (var i = 0; i < profiles.Count; i++)
-            if (Session.IsActiveProfile(profiles[i])) return i;
-        return -1;
-    }
-
-    // ── side panel: one profile's mods ────────────────────────────────
-
-    public void ToggleDetail(ProfileCard card)
-    {
-        var open = !card.IsOpen;
-        foreach (var c in Cards) c.IsOpen = false;
-        card.IsOpen = open;
-        _detailName = open ? card.Name : null;
-        Detail = open ? card : null;
-        DetailQuery = "";
-        FillDetail(force: true);
-    }
-
-    [RelayCommand]
-    private void CloseDetail()
-    {
-        foreach (var c in Cards) c.IsOpen = false;
-        _detailName = null;
-        Detail = null;
-        FillDetail(force: true);
-    }
-
-    /// <summary>Fills the side panel's list. A reload that left the same
-    /// mods in place only re-reads the ticks, so a tick being clicked
-    /// keeps its row (and focus).</summary>
-    private void FillDetail(bool force)
-    {
-        if (Detail == null)
-        {
-            DetailMods.Clear();
-            _detailMods.Clear();
-            DetailSummary = "";
+            Mods.Clear();
+            _shownMods.Clear();
+            ModsSummary = "";
+            OnModSelectionChanged();
             return;
         }
-        var profile = Detail.Profile;
-        var views = Session.GetProfileMods(profile, DetailQuery);
+        var profile = Selected.Profile;
+        var views = Session.GetProfileMods(profile, Query);
         var mods = views.Select(v => v.Mod).ToList();
-        if (!force && mods.Count == _detailMods.Count && mods.Zip(_detailMods).All(p => ReferenceEquals(p.First, p.Second)))
+        if (!force && mods.Count == _shownMods.Count && mods.Zip(_shownMods).All(p => ReferenceEquals(p.First, p.Second)))
         {
-            foreach (var item in DetailMods) item.Sync();
+            foreach (var item in Mods) item.Sync();
         }
         else
         {
             // The selection follows the mods (by entry, or by id when
             // the profile was re-read from disk) across a rebuild.
-            var selected = new HashSet<string>(DetailMods.Where(i => i.IsSelected).Select(i => i.Mod.ModId),
+            var selected = new HashSet<string>(Mods.Where(i => i.IsSelected).Select(i => i.Mod.ModId),
                 StringComparer.OrdinalIgnoreCase);
-            DetailMods.Clear();
+            Mods.Clear();
             foreach (var v in views)
-                DetailMods.Add(new ProfileModItem(this, profile, v, !force && selected.Contains(v.Mod.ModId)));
-            _detailMods = mods;
+                Mods.Add(new ProfileModItem(this, profile, v, !force && selected.Contains(v.Mod.ModId)));
+            _shownMods = mods;
         }
         var on = profile.Mods.Count(m => m.IsEnabled);
-        DetailSummary = $"{profile.Mods.Count} mods · {on} enabled"
-            + (Detail.IsActive ? " · this is your loadout: change it on the Loadout page"
-                : " · edits here change the profile only, not the live mods folder");
-        OnDetailSelectionChanged();
+        ModsSummary = $"{profile.Mods.Count} mods · {on} on"
+            + (Selected.IsActive ? " · this is your loadout: change it on the Loadout page"
+                : " · edits here change the profile only, not your loadout");
+        OnModSelectionChanged();
     }
 
     public void SetEnabled(ProfileModItem item, bool enabled)
     {
-        if (DetailEditable) Session.SetProfileModEnabled(item.Profile, item.Mod, enabled);
+        if (SelectedEditable) Session.SetProfileModEnabled(item.Profile, item.Mod, enabled);
     }
 
     /// <summary>Saves a row's typed load order. False when it wasn't saved.</summary>
     public bool SetPriority(ProfileModItem item, int priority)
     {
         // A row a reload already replaced has a stale entry: ignore it.
-        if (!DetailMods.Contains(item) || !DetailEditable) return false;
+        if (!Mods.Contains(item) || !SelectedEditable) return false;
         var name = item.Name;
         if (!Session.SetProfileModPriority(item.Profile, item.Mod, priority)) return false;
         Notice = $"'{name}' now loads at priority {priority} in '{item.Profile.Name}'.";
@@ -640,35 +522,35 @@ public sealed partial class ProfilesViewModel : PageViewModel
 
     public void RemoveFromProfile(ProfileModItem item)
     {
-        if (!DetailEditable || !Session.RemoveModsFromProfile(item.Profile, new[] { item.Mod })) return;
+        if (!SelectedEditable || !Session.RemoveModsFromProfile(item.Profile, new[] { item.Mod })) return;
         Notice = $"Removed '{item.Name}' from '{item.Profile.Name}'.";
         Load();
     }
 
-    /// <summary>The side panel's selected rows, in list order.</summary>
-    public List<ProfileModItem> DetailSelection => DetailMods.Where(i => i.IsSelected).ToList();
+    /// <summary>The list's selected rows, in list order.</summary>
+    public List<ProfileModItem> ModSelection => Mods.Where(i => i.IsSelected).ToList();
 
     /// <summary>The profiles the selected rows can be copied into.</summary>
-    public List<ProfileCard> CopyTargets => Cards.Where(c => c != Detail).ToList();
+    public List<ProfileCard> CopyTargets => Cards.Where(c => c != Selected).ToList();
 
-    public void OnDetailSelectionChanged()
+    public void OnModSelectionChanged()
     {
-        var n = DetailMods.Count(i => i.IsSelected);
-        DetailSelectedCount = n;
+        var n = Mods.Count(i => i.IsSelected);
+        ModSelectedCount = n;
         RemoveSelectedLabel = n > 1 ? $"Remove from profile ({n})" : "Remove from profile";
         CopySelectedLabel = n > 1 ? $"Copy {n} to profile…" : "Copy to profile…";
     }
 
-    private bool CanRemoveSelectedMods() => DetailSelectedCount > 0 && DetailEditable;
+    private bool CanRemoveSelectedMods() => ModSelectedCount > 0 && SelectedEditable;
 
-    /// <summary>Removes every selected row from the open profile, after
-    /// one confirmation.</summary>
+    /// <summary>Removes every selected row from the selected profile,
+    /// after one confirmation.</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveSelectedMods))]
     private void RemoveSelectedMods()
     {
-        if (Detail == null) return;
-        var profile = Detail.Profile;
-        var mods = DetailSelection.Select(i => i.Mod).ToList();
+        if (Selected == null) return;
+        var profile = Selected.Profile;
+        var mods = ModSelection.Select(i => i.Mod).ToList();
         if (!Session.RemoveModsFromProfile(profile, mods)) return;
         Notice = $"Removed {mods.Count} mod{(mods.Count == 1 ? "" : "s")} from '{profile.Name}'.";
         Load();
@@ -677,9 +559,9 @@ public sealed partial class ProfilesViewModel : PageViewModel
     /// <summary>The drag payload for the selected rows, or null.</summary>
     public DraggedProfileMods? DragPayload()
     {
-        if (Detail == null) return null;
-        var mods = DetailSelection.Select(i => i.Mod).ToList();
-        return mods.Count == 0 ? null : new DraggedProfileMods(Detail.Profile, mods);
+        if (Selected == null) return null;
+        var mods = ModSelection.Select(i => i.Mod).ToList();
+        return mods.Count == 0 ? null : new DraggedProfileMods(Selected.Profile, mods);
     }
 
     /// <summary>"Copy to profile…": the selected rows into `target`.</summary>
@@ -688,10 +570,10 @@ public sealed partial class ProfilesViewModel : PageViewModel
         if (DragPayload() is { } payload) CopyMods(target, payload);
     }
 
-    /// <summary>A drop of side-panel rows on a card, or "Copy to
-    /// profile…": new metadata-only entries in `target`, ids it already
-    /// lists skipped. The session tells the user the counts; the page
-    /// keeps them too.</summary>
+    /// <summary>A drop of list rows on a profile, or "Copy to profile…":
+    /// new metadata-only entries in `target`, ids it already lists
+    /// skipped. The session tells the user the counts; the page keeps
+    /// them too.</summary>
     public void CopyMods(ProfileCard target, DraggedProfileMods payload)
     {
         if (ReferenceEquals(target.Profile, payload.Source)) return;
@@ -709,7 +591,7 @@ public sealed partial class ProfilesViewModel : PageViewModel
     public static bool CanDrop(ProfileCard card, DraggedProfileMods payload)
         => !ReferenceEquals(card.Profile, payload.Source);
 
-    // ── card actions ──────────────────────────────────────────────────
+    // ── profile actions ───────────────────────────────────────────────
 
     /// <summary>Switches the live mods folder to `card`'s profile. The
     /// page reloads whatever happened: a failed switch can leave part of
@@ -739,9 +621,10 @@ public sealed partial class ProfilesViewModel : PageViewModel
 
     public void Rename(ProfileCard card)
     {
-        var wasOpen = card.IsOpen;
+        var (wasSelected, wasCompared) = (card == Selected, card == CompareWith);
         if (!Session.RenameProfile(card.Profile)) return;
-        if (wasOpen) _detailName = card.Profile.Name;
+        if (wasSelected) _selectedName = card.Profile.Name;
+        if (wasCompared) _compareName = card.Profile.Name;
         Load();
     }
 
@@ -753,7 +636,8 @@ public sealed partial class ProfilesViewModel : PageViewModel
     public void Delete(ProfileCard card)
     {
         if (!Session.DeleteProfile(card.Profile)) return;
-        if (card.IsOpen) _detailName = null;
+        if (card == Selected) _selectedName = null;
+        if (card == CompareWith) _compareName = null;
         Load();
     }
 
@@ -842,16 +726,11 @@ public sealed partial class ProfilesViewModel : PageViewModel
         new ProfileDependenciesWindow(report) { Owner = Application.Current?.MainWindow }.ShowDialog();
     }
 
-    // ── matrix actions ────────────────────────────────────────────────
-
-    private void CopyEntry(ModProfile from, ModProfile to, string modId)
+    /// <summary>The DEBUG screenshot harness: select `a` and compare it with `b`.</summary>
+    public void Show(string? a, string? b)
     {
-        if (Session.CopyProfileEntries(from, to, new[] { modId }) > 0) Load();
-    }
-
-    private void RemoveEntry(ModProfile profile, string modId)
-    {
-        if (Session.RemoveProfileEntries(profile, new[] { modId })) Load();
+        if (FindCard(a) is { } ca) Selected = ca;
+        if (FindCard(b) is { } cb && cb != Selected) CompareWith = cb;
     }
 
     private ProfileCard? FindCard(string? name) =>

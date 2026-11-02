@@ -6,97 +6,66 @@
         <Style x:Key="SmallButton" TargetType="Button" BasedOn="{StaticResource Btn.Outline}">
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Padding" Value="12,0" />
         </Style>
         <Style x:Key="SmallPrimary" TargetType="Button" BasedOn="{StaticResource Btn.Primary}">
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="14,0" />
         </Style>
-        <Style x:Key="MoreButton" TargetType="Button" BasedOn="{StaticResource Btn.Quiet}">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="MinHeight" Value="30" />
+        <!-- the copy arrows between the A and B columns -->
+        <Style x:Key="ArrowButton" TargetType="Button" BasedOn="{StaticResource Btn.Outline}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="MinHeight" Value="28" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="3,0" />
         </Style>
-        <!-- A card's name: reads as a title, opens the profile's mod list. -->
-        <Style x:Key="NameButton" TargetType="Button">
-            <Setter Property="FontFamily" Value="{DynamicResource Font.Lora}" />
-            <Setter Property="FontSize" Value="19" />
-            <Setter Property="FontWeight" Value="Medium" />
+        <Style x:Key="RemoveX" TargetType="Button" BasedOn="{StaticResource Btn.Quiet}">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text3}" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource B.SalmonText}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- The profile list: a white bar marks the selected one (A). -->
+        <Style x:Key="ProfileItem" TargetType="ListBoxItem">
             <Setter Property="Foreground" Value="{StaticResource B.Text}" />
-            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="Transparent">
-                            <TextBlock x:Name="tx" Text="{TemplateBinding Content}" TextTrimming="CharacterEllipsis"
-                                       Foreground="{TemplateBinding Foreground}" />
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="bd" Background="Transparent" BorderBrush="{StaticResource B.HairlineSoft}"
+                                BorderThickness="0,0,0,1" SnapsToDevicePixels="True">
+                            <DockPanel>
+                                <Border x:Name="bar" DockPanel.Dock="Left" Width="3" Background="Transparent" />
+                                <ContentPresenter />
+                            </DockPanel>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="tx" Property="TextDecorations" Value="Underline" />
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource B.Fill}" />
                             </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="tx" Property="TextDecorations" Value="Underline" />
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource B.Selected}" />
+                                <Setter TargetName="bar" Property="Background" Value="{StaticResource B.Primary}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- A matrix row's height, shared by the frozen name column and the cells. -->
-        <Style x:Key="MatrixRow" TargetType="Border">
-            <Setter Property="Height" Value="46" />
-            <Setter Property="BorderBrush" Value="{StaticResource B.HairlineSoft}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="SnapsToDevicePixels" Value="True" />
-        </Style>
-        <!-- Both scroll bars, and no light corner square between them
-             (the stock template paints it with a system colour). -->
-        <ControlTemplate x:Key="TwoWayScroll" TargetType="ScrollViewer">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" />
-                <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Value="{TemplateBinding VerticalOffset}"
-                           Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}"
-                           Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
-                <ScrollBar x:Name="PART_HorizontalScrollBar" Grid.Row="1" Orientation="Horizontal" Value="{TemplateBinding HorizontalOffset}"
-                           Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}"
-                           Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}" />
-            </Grid>
-        </ControlTemplate>
-        <Style x:Key="MatrixBarText" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Foreground" Value="{StaticResource B.Text2}" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0,0,8,0" />
-        </Style>
-        <Style x:Key="MatrixBarCombo" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
-            <Setter Property="Width" Value="150" />
-            <Setter Property="MinHeight" Value="34" />
-            <Setter Property="Height" Value="34" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="IsSynchronizedWithCurrentItem" Value="False" />
-            <Setter Property="ItemTemplate">
-                <Setter.Value>
-                    <DataTemplate DataType="{x:Type vm:ProfileCard}">
-                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
-                    </DataTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <!-- The side panel's rows: selectable several at once (bound to
-             the item so a reload keeps the selection). -->
-        <Style x:Key="DetailRow" TargetType="ListBoxItem" BasedOn="{StaticResource Row.Item}">
+        <!-- The mod list's rows: selectable several at once (bound to the
+             item so a reload keeps the selection). -->
+        <Style x:Key="ModRow" TargetType="ListBoxItem" BasedOn="{StaticResource Row.Item}">
             <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
         </Style>
         <Style x:Key="PriorityBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
@@ -107,423 +76,362 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
         </Style>
-        <Style x:Key="MatrixHead" TargetType="Border">
-            <Setter Property="Height" Value="52" />
-            <Setter Property="BorderBrush" Value="{StaticResource B.Hairline}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="SnapsToDevicePixels" Value="True" />
+        <!-- A side's entry in the comparison: amber where the two differ. -->
+        <Style x:Key="SideText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Foreground" Value="{StaticResource B.Text2}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDifferent}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource B.AmberText}" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
+    <DockPanel Margin="32,26,32,22">
+        <!-- header -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,18">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom">
+                <Button Content="Dependencies" Margin="0,0,10,0" MinHeight="44" Command="{Binding ShowDependenciesCommand}"
+                        ToolTip="What the active profile's mods depend on, and whether each one is installed" />
+                <Button Content="Import…" Margin="0,0,10,0" MinHeight="44" Command="{Binding ImportCommand}"
+                        ToolTip="Import a .vmprofile, modpack .zip or mod-list .json as a new profile" />
+                <Button Content="New profile" MinHeight="44" Command="{Binding NewProfileCommand}"
+                        ToolTip="An empty profile (your locked mods only) to build a new mod list in" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="PROFILES" Style="{StaticResource T.Label}" />
+                <TextBlock Text="Profiles" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
+                <TextBlock Text="{Binding Header}" Style="{StaticResource T.Muted}" Margin="0,6,0,0"
+                           MaxWidth="760" HorizontalAlignment="Left" TextWrapping="Wrap" />
+                <!-- the outcome of the last action on this page (a switch's counts, a copy, a remove) -->
+                <TextBlock Text="{Binding Notice}" FontSize="13" Foreground="{StaticResource B.Text2}" Margin="0,6,0,0"
+                           MaxWidth="760" HorizontalAlignment="Left" TextWrapping="Wrap"
+                           Visibility="{Binding Notice, Converter={StaticResource VisibleWhen}}" />
+            </StackPanel>
+        </DockPanel>
 
-        <DockPanel Margin="32,26,32,22">
-            <!-- header -->
-            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,18">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom">
-                    <Button Content="Dependencies" Margin="0,0,10,0" MinHeight="44" Command="{Binding ShowDependenciesCommand}"
-                            ToolTip="What the active profile's mods depend on, and whether each one is installed" />
-                    <Button Content="Import…" Margin="0,0,10,0" MinHeight="44" Command="{Binding ImportCommand}"
-                            ToolTip="Import a .vmprofile, modpack .zip or mod-list .json as a new profile" />
-                    <Button Content="New profile" MinHeight="44" Command="{Binding NewProfileCommand}"
-                            ToolTip="An empty profile (your locked mods only) to build a new mod list in" />
-                </StackPanel>
-                <StackPanel>
-                    <TextBlock Text="PROFILES" Style="{StaticResource T.Label}" />
-                    <TextBlock Text="Compare profiles" Style="{StaticResource T.H1}" Margin="0,2,0,0" />
-                    <TextBlock Text="{Binding Header}" Style="{StaticResource T.Muted}" Margin="0,6,0,0"
-                               MaxWidth="680" HorizontalAlignment="Left" />
-                    <!-- the outcome of the last action on this page (a switch's counts, a copy, a remove) -->
-                    <TextBlock Text="{Binding Notice}" FontSize="13" Foreground="{StaticResource B.Text2}" Margin="0,6,0,0"
-                               MaxWidth="680" HorizontalAlignment="Left" TextWrapping="Wrap"
-                               Visibility="{Binding Notice, Converter={StaticResource VisibleWhen}}" />
-                </StackPanel>
-            </DockPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="290" />
+                <ColumnDefinition Width="24" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-            <!-- profile cards, in a row that scrolls sideways -->
-            <ScrollViewer DockPanel.Dock="Top" x:Name="CardScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
-                          PreviewMouseWheel="OnCardWheel" Focusable="False">
-                <ItemsControl ItemsSource="{Binding Cards}" Focusable="False" Margin="0,0,0,10">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:ProfileCard}">
-                            <Border x:Name="card" Width="262" Height="250" Margin="0,0,14,0" Style="{StaticResource Panel.Card}"
-                                    AllowDrop="True" DragEnter="OnCardDragOver" DragOver="OnCardDragOver"
-                                    DragLeave="OnCardDragLeave" Drop="OnCardDrop">
-                                <DockPanel Margin="18,15,18,16">
-                                    <StackPanel DockPanel.Dock="Bottom">
-                                        <Button x:Name="main" Content="{Binding MainLabel}" Style="{StaticResource SmallPrimary}" Command="{Binding MainCommand}" />
-                                        <Grid Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <Button Content="Clone" Style="{StaticResource SmallButton}" Margin="0,0,8,0" Command="{Binding CloneCommand}"
-                                                    ToolTip="A copy under a new name; not made active" />
-                                            <Button Grid.Column="1" Content="Export…" Style="{StaticResource SmallButton}" Margin="0,0,8,0"
-                                                    Command="{Binding ExportCommand}" />
-                                            <Button Grid.Column="2" Content="⋯" Style="{StaticResource SmallButton}" Width="40" Padding="0"
-                                                    Click="OnMore" AutomationProperties.Name="More for this profile">
-                                                <Button.ContextMenu>
-                                                    <ContextMenu>
-                                                        <MenuItem Header="Apply to the live mods folder…" Command="{Binding ApplyCommand}"
-                                                                  Visibility="{Binding IsActive, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
-                                                        <MenuItem Header="Show its mods" Command="{Binding ShowModsCommand}" />
-                                                        <Separator />
-                                                        <MenuItem Header="Rename…" Command="{Binding RenameCommand}" />
-                                                        <MenuItem Header="Description…" Command="{Binding DescribeCommand}" />
-                                                        <Separator />
-                                                        <MenuItem Header="Delete…" Command="{Binding DeleteCommand}" />
-                                                    </ContextMenu>
-                                                </Button.ContextMenu>
-                                            </Button>
-                                        </Grid>
-                                    </StackPanel>
-
+            <!-- every profile; the selected one is A -->
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="YOUR PROFILES" Style="{StaticResource T.Label}" Margin="0,0,0,8" />
+                <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,1,0,0">
+                    <ListBox x:Name="ProfileList" ItemsSource="{Binding Cards}" SelectedItem="{Binding Selected}"
+                             ItemContainerStyle="{StaticResource ProfileItem}" AutomationProperties.Name="Profiles">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ProfileCard}">
+                                <Border x:Name="card" Background="Transparent" Padding="14,11,12,11" BorderThickness="1" BorderBrush="Transparent"
+                                        AllowDrop="True" DragEnter="OnCardDragOver" DragOver="OnCardDragOver"
+                                        DragLeave="OnCardDragLeave" Drop="OnCardDrop" ToolTip="{Binding Role}">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="{Binding MainLabel}" Command="{Binding MainCommand}" />
+                                            <MenuItem Header="Compare with the selected profile" Command="{Binding CompareHereCommand}" />
+                                            <Separator />
+                                            <MenuItem Header="Clone" Command="{Binding CloneCommand}" />
+                                            <MenuItem Header="Export…" Command="{Binding ExportCommand}" />
+                                            <MenuItem Header="Rename…" Command="{Binding RenameCommand}" />
+                                            <MenuItem Header="Description…" Command="{Binding DescribeCommand}" />
+                                            <Separator />
+                                            <MenuItem Header="Delete…" Command="{Binding DeleteCommand}" />
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <StackPanel>
                                         <DockPanel>
-                                            <Border DockPanel.Dock="Right" VerticalAlignment="Center" Background="{StaticResource B.Primary}" Padding="7,2"
+                                            <Border DockPanel.Dock="Right" VerticalAlignment="Center" Background="{StaticResource B.Primary}" Padding="6,1"
                                                     Margin="8,0,0,0" Visibility="{Binding IsActive, Converter={StaticResource VisibleWhen}}">
-                                                <TextBlock Text="{Binding Tag}" FontSize="10.5" Foreground="{StaticResource B.OnPrimary}" />
+                                                <TextBlock Text="LOADOUT" FontSize="10" Foreground="{StaticResource B.OnPrimary}" />
                                             </Border>
-                                            <Button Content="{Binding Name}" Style="{StaticResource NameButton}" Command="{Binding ShowModsCommand}"
-                                                    ToolTip="Show this profile's mods" />
+                                            <Border DockPanel.Dock="Right" VerticalAlignment="Center" BorderBrush="{StaticResource B.Blue}" BorderThickness="1"
+                                                    Padding="6,0" Margin="8,0,0,0" Visibility="{Binding IsCompared, Converter={StaticResource VisibleWhen}}">
+                                                <TextBlock Text="B" FontSize="11" Foreground="{StaticResource B.Blue}" FontWeight="SemiBold" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Name}" FontSize="15.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
                                         </DockPanel>
-                                        <TextBlock Text="{Binding Role}" Style="{StaticResource T.Muted}" Margin="0,3,0,0"
-                                                   Height="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Role}" />
-                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                            <TextBlock Text="{Binding ModCount}" FontSize="21" FontWeight="Medium" VerticalAlignment="Bottom" />
-                                            <TextBlock Text="MODS" Style="{StaticResource T.Label}" Margin="6,0,22,4" VerticalAlignment="Bottom" />
-                                            <TextBlock Text="{Binding EnabledCount}" FontSize="21" FontWeight="Medium" VerticalAlignment="Bottom" />
-                                            <TextBlock Text="ENABLED" Style="{StaticResource T.Label}" Margin="6,0,0,4" VerticalAlignment="Bottom" />
-                                        </StackPanel>
-                                        <TextBlock x:Name="slots" Text="{Binding Slots}" FontSize="12.5" Margin="0,6,0,0"
-                                                   Foreground="{StaticResource B.Text2}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Slots}" />
+                                        <TextBlock Text="{Binding Counts}" FontSize="12.5" Foreground="{StaticResource B.Text2}" Margin="0,3,0,0" />
+                                        <TextBlock Text="{Binding Slots}" FontSize="12" Foreground="{StaticResource B.Text4}" Margin="0,1,0,0"
+                                                   TextTrimming="CharacterEllipsis" Visibility="{Binding HasSlots, Converter={StaticResource VisibleWhen}}" />
                                     </StackPanel>
-                                </DockPanel>
-                            </Border>
-                            <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                    <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.EdgeStrong}" />
-                                    <Setter TargetName="main" Property="Style" Value="{StaticResource SmallButton}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsOpen}" Value="True">
-                                    <Setter TargetName="card" Property="Background" Value="{StaticResource B.Raised}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding HasSlots}" Value="False">
-                                    <Setter TargetName="slots" Property="Foreground" Value="{StaticResource B.Text4}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
-                                    <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.Blue}" />
-                                    <Setter TargetName="card" Property="Background" Value="{StaticResource B.BlueFill}" />
-                                </DataTrigger>
-                            </DataTemplate.Triggers>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-
-            <!-- where they differ -->
-            <DockPanel DockPanel.Dock="Top" Margin="0,18,0,10">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Bottom"
-                            IsEnabled="{Binding CanCompare}">
-                    <CheckBox Content="Only show differences" IsChecked="{Binding OnlyDifferences}" Margin="0,0,18,0" FontSize="13" />
-                    <Border Width="240" Height="38" Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeSoft}" BorderThickness="1">
-                        <DockPanel Margin="12,0">
-                            <Path DockPanel.Dock="Left" Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}"
-                                  Width="14" Height="14" Stroke="{StaticResource B.Text2}" />
-                            <Grid Margin="10,0,0,0">
-                                <TextBlock Text="Filter mods" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" FontSize="14"
-                                           IsHitTestVisible="False"
-                                           Visibility="{Binding Query, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
-                                <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" FontSize="14"
-                                         BorderThickness="0" Padding="0" VerticalAlignment="Center" AutomationProperties.Name="Filter the comparison" />
-                            </Grid>
-                        </DockPanel>
-                    </Border>
-                </StackPanel>
-                <StackPanel>
-                    <TextBlock Text="WHERE THEY DIFFER" Style="{StaticResource T.Label}" />
-                    <TextBlock Text="{Binding MatrixSummary}" Style="{StaticResource T.Muted}" Margin="0,4,0,0" />
-                </StackPanel>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                        <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource B.Blue}" />
+                                        <Setter TargetName="card" Property="Background" Value="{StaticResource B.BlueFill}" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
             </DockPanel>
 
-            <!-- what to do with the ticked rows -->
-            <Border DockPanel.Dock="Top" Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.HairlineSoft}"
-                    BorderThickness="1" Padding="14,8,8,8" Margin="0,0,0,10"
-                    Visibility="{Binding CanCompare, Converter={StaticResource VisibleWhen}}">
-                <WrapPanel Orientation="Horizontal">
-                    <TextBlock x:Name="CheckedText" Text="{Binding CheckedSummary}" FontSize="13" Foreground="{StaticResource B.Text2}"
-                               VerticalAlignment="Center" Margin="0,4,22,4" MinWidth="120" />
-                    <StackPanel Orientation="Horizontal" Margin="0,2,18,2">
-                        <TextBlock Text="Copy entries from" Style="{StaticResource MatrixBarText}" />
-                        <ComboBox Style="{StaticResource MatrixBarCombo}" ItemsSource="{Binding Cards}"
-                                  SelectedItem="{Binding CopyFrom}" AutomationProperties.Name="Copy from this profile" />
-                        <TextBlock Text="to" Style="{StaticResource MatrixBarText}" Margin="8,0" />
-                        <ComboBox Style="{StaticResource MatrixBarCombo}" ItemsSource="{Binding Cards}"
-                                  SelectedItem="{Binding CopyTo}" AutomationProperties.Name="Copy into this profile" />
+            <!-- the selected profile (A) -->
+            <DockPanel Grid.Column="2" Visibility="{Binding HasSelected, Converter={StaticResource VisibleWhen}}">
+                <!-- its name and actions -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+                        <Button x:Name="MainButton" Content="{Binding Selected.MainLabel}" Style="{StaticResource SmallPrimary}" Margin="0,0,8,0"
+                                Command="{Binding Selected.MainCommand}" />
+                        <Button Content="Clone" Style="{StaticResource SmallButton}" Margin="0,0,8,0" Command="{Binding Selected.CloneCommand}"
+                                ToolTip="A copy under a new name; not made active" />
+                        <Button Content="Export…" Style="{StaticResource SmallButton}" Margin="0,0,8,0" Command="{Binding Selected.ExportCommand}" />
+                        <Button Content="⋯" Style="{StaticResource SmallButton}" Width="40" Padding="0" Click="OnMore"
+                                AutomationProperties.Name="More for this profile">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Apply to the live mods folder…" Command="{Binding Selected.ApplyCommand}"
+                                              Visibility="{Binding SelectedEditable, Converter={StaticResource VisibleWhen}}" />
+                                    <MenuItem Header="Rename…" Command="{Binding Selected.RenameCommand}" />
+                                    <MenuItem Header="Description…" Command="{Binding Selected.DescribeCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="Delete…" Command="{Binding Selected.DeleteCommand}" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,18,2">
-                        <Button Content="Copy entries" Style="{StaticResource SmallButton}"
-                                Command="{Binding CopyCheckedEntriesCommand}"
-                                ToolTip="Copy the ticked mods' whole entries (version, on/off, load order); mods the target lacks are added" />
-                        <Button Content="Copy versions only" Style="{StaticResource SmallButton}" Margin="8,0,0,0"
-                                Command="{Binding CopyCheckedVersionsCommand}"
-                                ToolTip="Move the ticked mods in the target to the source's versions; on/off and load order stay" />
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Selected.Name}" Style="{StaticResource T.H2}" TextTrimming="CharacterEllipsis" />
+                            <Border VerticalAlignment="Center" Background="{StaticResource B.Primary}" Padding="7,2" Margin="12,0,0,0"
+                                    Visibility="{Binding SelectedIsActive, Converter={StaticResource VisibleWhen}}">
+                                <TextBlock Text="LOADOUT" FontSize="10.5" Foreground="{StaticResource B.OnPrimary}" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding Selected.Role}" Style="{StaticResource T.Muted}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
-                        <TextBlock Text="Remove from" Style="{StaticResource MatrixBarText}" />
-                        <ComboBox Style="{StaticResource MatrixBarCombo}" ItemsSource="{Binding Cards}"
-                                  SelectedItem="{Binding RemoveFrom}" AutomationProperties.Name="Remove from this profile" />
-                        <Button Content="Remove…" Style="{StaticResource SmallButton}" Margin="10,0,0,0"
-                                Command="{Binding RemoveCheckedEntriesCommand}"
-                                ToolTip="Drop the ticked mods from that profile (asks first)" />
-                    </StackPanel>
-                </WrapPanel>
-            </Border>
+                </DockPanel>
 
-            <!-- the matrix: a frozen mod column, and the profiles' cells
-                 scrolling both ways beside it -->
-            <Grid Visibility="{Binding CanCompare, Converter={StaticResource VisibleWhen}}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="{Binding NameWidth}" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <Border Style="{StaticResource MatrixHead}">
-                    <DockPanel VerticalAlignment="Bottom" Margin="14,0,0,7">
-                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding AllShownChecked}" VerticalAlignment="Center"
-                                  Margin="0,0,12,0" AutomationProperties.Name="Select every shown mod"
-                                  ToolTip="Tick or clear every mod shown" />
-                        <StackPanel>
-                            <TextBlock Text="MOD" Style="{StaticResource T.Label}" />
-                            <TextBlock Text="{Binding MatrixCount}" FontSize="12" Foreground="{StaticResource B.Text4}" />
+                <!-- compare with, and the filter -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="1"
+                        Padding="14,10" Margin="0,0,0,14">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Right" Width="230" Height="36" Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.EdgeSoft}"
+                                BorderThickness="1" Margin="12,0,0,0">
+                            <DockPanel Margin="12,0">
+                                <Path DockPanel.Dock="Left" Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}"
+                                      Width="14" Height="14" Stroke="{StaticResource B.Text2}" />
+                                <Grid Margin="10,0,0,0">
+                                    <TextBlock Text="Filter mods" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" FontSize="14"
+                                               IsHitTestVisible="False"
+                                               Visibility="{Binding Query, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                    <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" FontSize="14"
+                                             BorderThickness="0" Padding="0" VerticalAlignment="Center" AutomationProperties.Name="Filter mods" />
+                                </Grid>
+                            </DockPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Compare with" FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Grid Width="260">
+                                <ComboBox ItemsSource="{Binding CompareChoices}" SelectedItem="{Binding CompareWith}" Height="36" FontSize="14"
+                                          IsSynchronizedWithCurrentItem="False" AutomationProperties.Name="Compare with this profile">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:ProfileCard}">
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <TextBlock Text="Pick another profile…" Foreground="{StaticResource B.Text4}" FontSize="14" VerticalAlignment="Center"
+                                           Margin="12,0,0,0" IsHitTestVisible="False"
+                                           Visibility="{Binding NotComparing, Converter={StaticResource VisibleWhen}}" />
+                            </Grid>
+                            <Button Content="⇄ Swap" Style="{StaticResource SmallButton}" Margin="10,0,0,0" Command="{Binding SwapCommand}"
+                                    ToolTip="Swap the two profiles' places" Visibility="{Binding IsComparing, Converter={StaticResource VisibleWhen}}" />
+                            <Button Content="Stop comparing" Style="{StaticResource Btn.Link}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                    Command="{Binding StopComparingCommand}" Visibility="{Binding IsComparing, Converter={StaticResource VisibleWhen}}" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
 
-                <ScrollViewer x:Name="HeadScroll" Grid.Column="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
-                              Focusable="False" PreviewMouseWheel="OnMatrixWheel">
-                    <Border Style="{StaticResource MatrixHead}" Width="{Binding ActualWidth, ElementName=CellsPanel}" HorizontalAlignment="Left"
-                            Margin="0,0,8,0">
-                        <ItemsControl ItemsSource="{Binding Columns}" Focusable="False" VerticalAlignment="Bottom" Margin="0,0,0,7">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <UniformGrid Rows="1" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:MatrixColumn}">
-                                    <StackPanel Margin="0,0,12,0" VerticalAlignment="Bottom" ToolTip="{Binding Name}">
-                                        <TextBlock Text="{Binding Tag}" FontSize="10.5" Foreground="{StaticResource B.Text}"
-                                                   Visibility="{Binding IsActive, Converter={StaticResource VisibleWhen}}" />
-                                        <TextBlock x:Name="name" Text="{Binding Name}" FontSize="13" Foreground="{StaticResource B.Text2}"
-                                                   TextWrapping="Wrap" MaxHeight="36" TextTrimming="CharacterEllipsis" LineHeight="18" />
-                                    </StackPanel>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                            <Setter TargetName="name" Property="Foreground" Value="{StaticResource B.Text}" />
-                                            <Setter TargetName="name" Property="FontWeight" Value="SemiBold" />
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Border>
-                </ScrollViewer>
-
-                <!-- frozen column: the mod and its ⋯ menu -->
-                <ScrollViewer x:Name="NameScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"
-                              Focusable="False" PreviewMouseWheel="OnMatrixWheel">
-                    <ItemsControl ItemsSource="{Binding Rows}" Focusable="False" Margin="0,0,0,8">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:MatrixRowItem}">
-                                <Border x:Name="row" Style="{StaticResource MatrixRow}" Background="Transparent"
-                                        MouseLeftButtonUp="OnCellRowClick">
-                                    <DockPanel>
-                                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IsChecked}" VerticalAlignment="Center"
-                                                  Margin="14,0,0,0" AutomationProperties.Name="{Binding CheckName}" />
-                                        <Button DockPanel.Dock="Right" Content="⋯" Style="{StaticResource MoreButton}" Margin="0,0,12,0"
-                                                VerticalAlignment="Center" Click="OnRowMore"
-                                                AutomationProperties.Name="{Binding MoreName}" ToolTip="Copy or remove this mod's entry" />
-                                        <StackPanel Margin="12,0,8,0" VerticalAlignment="Center" ToolTip="{Binding What}">
-                                            <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding ModId}" FontSize="11.5" Foreground="{StaticResource B.Text4}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                    </DockPanel>
-                                </Border>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding IsChecked}" Value="True">
-                                        <Setter TargetName="row" Property="Background" Value="{StaticResource B.Selected}" />
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-
-                <!-- the cells -->
-                <ScrollViewer x:Name="CellScroll" Grid.Row="1" Grid.Column="1" Template="{StaticResource TwoWayScroll}" HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Auto" Focusable="False" ScrollChanged="OnCellsScrolled"
-                              PreviewMouseWheel="OnMatrixWheel">
-                    <ItemsControl x:Name="CellsPanel" ItemsSource="{Binding Rows}" Focusable="False" MinWidth="{Binding CellsMinWidth}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:MatrixRowItem}">
-                                <Border x:Name="row" Style="{StaticResource MatrixRow}" Background="Transparent"
-                                        MouseLeftButtonUp="OnCellRowClick">
-                                    <ItemsControl ItemsSource="{Binding Cells}" Focusable="False" VerticalAlignment="Center">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <UniformGrid Rows="1" />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="{x:Type vm:MatrixCell}">
-                                                <TextBlock x:Name="cell" Text="{Binding Text}" FontSize="13" Margin="0,0,12,0"
-                                                           Foreground="{StaticResource B.Text2}" TextTrimming="CharacterEllipsis"
-                                                           ToolTip="{Binding Tooltip}" />
-                                                <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding Tone}" Value="{x:Static vm:CellTone.Differs}">
-                                                        <Setter TargetName="cell" Property="Foreground" Value="{StaticResource B.AmberText}" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Tone}" Value="{x:Static vm:CellTone.Absent}">
-                                                        <Setter TargetName="cell" Property="Foreground" Value="{StaticResource B.Text4}" />
-                                                        <Setter TargetName="cell" Property="FontStyle" Value="Italic" />
-                                                    </DataTrigger>
-                                                </DataTemplate.Triggers>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </Border>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding IsChecked}" Value="True">
-                                        <Setter TargetName="row" Property="Background" Value="{StaticResource B.Selected}" />
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-
-                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding MatrixEmpty}" Style="{StaticResource T.Muted}" Margin="14,14,0,0"
-                           Visibility="{Binding MatrixEmpty, Converter={StaticResource VisibleWhen}}" />
-            </Grid>
-        </DockPanel>
-
-        <!-- side panel: one profile's mods -->
-        <Border Grid.Column="1" Width="420" Background="{StaticResource B.Rail}" BorderBrush="{StaticResource B.Hairline}"
-                BorderThickness="1,0,0,0" Visibility="{Binding Detail, Converter={StaticResource VisibleWhen}}">
-            <DockPanel Margin="24,24,20,20">
-                <DockPanel DockPanel.Dock="Top">
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Quiet}" Width="36" Padding="0" Command="{Binding CloseDetailCommand}"
-                            AutomationProperties.Name="Close the profile's mod list" ToolTip="Close">
-                        <Path Data="{StaticResource Icon.Close}" Style="{StaticResource IconPath}" Width="14" Height="14" />
-                    </Button>
-                    <TextBlock Text="PROFILE MODS" Style="{StaticResource T.Label}" VerticalAlignment="Center" />
-                </DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="{Binding Detail.Name}" Style="{StaticResource T.H2}" Margin="0,2,0,4" />
-                <TextBlock DockPanel.Dock="Top" Text="{Binding DetailSummary}" Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
-                <Border DockPanel.Dock="Top" Height="38" Background="{StaticResource B.Fill}" BorderBrush="{StaticResource B.EdgeSoft}"
-                        BorderThickness="1" Margin="0,0,0,8">
-                    <DockPanel Margin="12,0">
-                        <Path DockPanel.Dock="Left" Data="{StaticResource Icon.Search}" Style="{StaticResource IconPath}"
-                              Width="14" Height="14" Stroke="{StaticResource B.Text2}" />
-                        <Grid Margin="10,0,0,0">
-                            <TextBlock Text="Filter this profile" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" FontSize="14"
-                                       IsHitTestVisible="False"
-                                       Visibility="{Binding DetailQuery, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
-                            <TextBox Text="{Binding DetailQuery, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" FontSize="14"
-                                     BorderThickness="0" Padding="0" VerticalAlignment="Center" AutomationProperties.Name="Filter this profile's mods" />
+                <Grid>
+                    <!-- not comparing: the profile's mods -->
+                    <DockPanel Visibility="{Binding NotComparing, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding ModsSummary}" Style="{StaticResource T.Muted}" Margin="0,0,0,10" />
+                        <!-- the selection's actions -->
+                        <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                            <Button DockPanel.Dock="Right" Content="Edit in Loadout" Style="{StaticResource SmallPrimary}"
+                                    Command="{Binding EditInLoadoutCommand}" Visibility="{Binding SelectedIsActive, Converter={StaticResource VisibleWhen}}"
+                                    ToolTip="This profile is your loadout: turn mods on and off, set the order and update them on the Loadout page" />
+                            <Button Content="{Binding RemoveSelectedLabel}" Style="{StaticResource SmallButton}" Margin="0,0,8,0"
+                                    Command="{Binding RemoveSelectedModsCommand}" ToolTip="Drop the selected mods from this profile (asks first)"
+                                    Visibility="{Binding SelectedEditable, Converter={StaticResource VisibleWhen}}" />
+                            <Button Content="{Binding CopySelectedLabel}" Style="{StaticResource SmallButton}" Margin="0,0,12,0"
+                                    Click="OnCopyTo" IsEnabled="{Binding HasModSelection}"
+                                    ToolTip="Add the selected mods to another profile; mods it already lists are skipped" />
+                            <TextBlock Text="Ctrl- or Shift-click to pick several, or drag them onto a profile on the left."
+                                       FontSize="12" Foreground="{StaticResource B.Text4}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <!-- column heads -->
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="72" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="ON" Style="{StaticResource T.Label}" Margin="8,0,0,0" />
+                            <TextBlock Grid.Column="1" Text="MOD" Style="{StaticResource T.Label}" />
+                            <TextBlock Grid.Column="2" Text="ORDER" Style="{StaticResource T.Label}" HorizontalAlignment="Center"
+                                       ToolTip="Load order (priority): type a number, then Enter" />
                         </Grid>
+                        <Border BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,1,0,0">
+                            <ListBox x:Name="ModList" ItemsSource="{Binding Mods}" AutomationProperties.Name="Mods in this profile"
+                                     SelectionMode="Extended" ItemContainerStyle="{StaticResource ModRow}"
+                                     VirtualizingPanel.IsVirtualizing="False"
+                                     PreviewMouseLeftButtonDown="OnModMouseDown" PreviewMouseMove="OnModMouseMove"
+                                     PreviewMouseLeftButtonUp="OnModMouseUp" ContextMenuOpening="OnModMenu">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu />
+                                </ListBox.ContextMenu>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:ProfileModItem}">
+                                        <Grid MinHeight="46" ToolTip="{Binding Note}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="40" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="64" />
+                                                <ColumnDefinition Width="72" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox IsChecked="{Binding Enabled}" Margin="10,0,0,0" AutomationProperties.Name="{Binding Name}"
+                                                      IsEnabled="{Binding DataContext.SelectedEditable, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,4,8,4">
+                                                <TextBlock x:Name="name" Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{StaticResource B.Text4}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="2" Style="{StaticResource PriorityBox}"
+                                                     IsEnabled="{Binding DataContext.SelectedEditable, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                     Text="{Binding PriorityText, UpdateSourceTrigger=PropertyChanged}"
+                                                     KeyDown="OnPriorityKey" LostKeyboardFocus="OnPriorityLostFocus"
+                                                     AutomationProperties.Name="{Binding PriorityName}"
+                                                     ToolTip="Load order (priority): type a number, then Enter" />
+                                            <Button Grid.Column="3" Content="Remove" Style="{StaticResource Btn.Link}" FontSize="12" VerticalAlignment="Center"
+                                                    HorizontalAlignment="Right" Margin="0,0,8,0" Command="{Binding RemoveCommand}"
+                                                    Visibility="{Binding DataContext.SelectedEditable, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource VisibleWhen}}"
+                                                    AutomationProperties.Name="{Binding RemoveName}" />
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                <Setter TargetName="name" Property="Foreground" Value="{StaticResource B.Text3}" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
                     </DockPanel>
-                </Border>
-                <!-- the selection's actions -->
-                <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                    <Button Content="Edit in Loadout" Style="{StaticResource Btn.Primary}" Margin="0,0,0,10" MinHeight="36"
-                            Command="{Binding EditInLoadoutCommand}" Visibility="{Binding DetailIsActive, Converter={StaticResource VisibleWhen}}"
-                            ToolTip="This profile is your loadout: turn mods on and off, set the order and update them on the Loadout page" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button Content="{Binding RemoveSelectedLabel}" Style="{StaticResource SmallButton}" Margin="0,0,8,0"
-                                Command="{Binding RemoveSelectedModsCommand}"
-                                ToolTip="Drop the selected mods from this profile (asks first)" />
-                        <Button Grid.Column="1" Content="{Binding CopySelectedLabel}" Style="{StaticResource SmallButton}"
-                                Click="OnCopyTo" IsEnabled="{Binding HasDetailSelection}"
-                                ToolTip="Add the selected mods to another profile; mods it already lists are skipped" />
-                    </Grid>
-                    <TextBlock Text="Ctrl- or Shift-click to pick several. Drag them onto another profile's card to copy them there."
-                               FontSize="12" Foreground="{StaticResource B.Text4}" TextWrapping="Wrap" Margin="0,8,0,0" />
-                </StackPanel>
-                <!-- column heads -->
-                <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="36" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="58" />
-                        <ColumnDefinition Width="62" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="1" Text="MOD" Style="{StaticResource T.Label}" />
-                    <TextBlock Grid.Column="2" Text="ORDER" Style="{StaticResource T.Label}" HorizontalAlignment="Center"
-                               ToolTip="Load order (priority): type a number, then Enter" />
-                </Grid>
-                <ListBox x:Name="DetailList" ItemsSource="{Binding DetailMods}" AutomationProperties.Name="Mods in this profile"
-                         SelectionMode="Extended" ItemContainerStyle="{StaticResource DetailRow}"
-                         VirtualizingPanel.IsVirtualizing="False"
-                         PreviewMouseLeftButtonDown="OnDetailMouseDown" PreviewMouseMove="OnDetailMouseMove"
-                         PreviewMouseLeftButtonUp="OnDetailMouseUp" ContextMenuOpening="OnDetailMenu">
-                    <ListBox.ContextMenu>
-                        <ContextMenu />
-                    </ListBox.ContextMenu>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:ProfileModItem}">
-                            <Grid MinHeight="48" ToolTip="{Binding Note}">
+
+                    <!-- comparing: A on the left, B on the right, copy arrows between -->
+                    <DockPanel Visibility="{Binding IsComparing, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding CompareSummary}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                   TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource B.Hairline}" BorderThickness="0,0,0,1" Padding="0,0,0,6">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="36" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="58" />
-                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
-                                <CheckBox IsChecked="{Binding Enabled}" Margin="6,0,0,0" AutomationProperties.Name="{Binding Name}" IsEnabled="{Binding DataContext.DetailEditable, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,4,8,4">
-                                    <TextBlock x:Name="name" Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{StaticResource B.Text4}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="MOD" Style="{StaticResource T.Label}" VerticalAlignment="Bottom" Margin="12,0,0,0" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Bottom">
+                                    <TextBlock Text="A" FontSize="10.5" Foreground="{StaticResource B.Text3}" />
+                                    <TextBlock Text="{Binding AName}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding AName}" />
                                 </StackPanel>
-                                <TextBox Grid.Column="2" Style="{StaticResource PriorityBox}" IsEnabled="{Binding DataContext.DetailEditable, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                         Text="{Binding PriorityText, UpdateSourceTrigger=PropertyChanged}"
-                                         KeyDown="OnPriorityKey" LostKeyboardFocus="OnPriorityLostFocus"
-                                         AutomationProperties.Name="{Binding PriorityName}"
-                                         ToolTip="Load order (priority): type a number, then Enter" />
-                                <Button Grid.Column="3" Content="Remove" Style="{StaticResource Btn.Link}" FontSize="12" VerticalAlignment="Center"
-                                        HorizontalAlignment="Right" Margin="0,0,4,0" Command="{Binding RemoveCommand}"
-                                        Visibility="{Binding DataContext.DetailEditable, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource VisibleWhen}}"
-                                        AutomationProperties.Name="{Binding RemoveName}" />
+                                <StackPanel Grid.Column="3" VerticalAlignment="Bottom">
+                                    <TextBlock Text="B" FontSize="10.5" Foreground="{StaticResource B.Blue}" />
+                                    <TextBlock Text="{Binding BName}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding BName}" />
+                                </StackPanel>
                             </Grid>
-                            <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding Enabled}" Value="False">
-                                    <Setter TargetName="name" Property="Foreground" Value="{StaticResource B.Text3}" />
-                                </DataTrigger>
-                            </DataTemplate.Triggers>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                        </Border>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding CompareEmpty}" Style="{StaticResource T.Muted}" Margin="12,12,0,0"
+                                   Visibility="{Binding CompareEmpty, Converter={StaticResource VisibleWhen}}" />
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                            <ItemsControl ItemsSource="{Binding Sections}" Focusable="False" Margin="0,0,0,12">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:PairSection}">
+                                        <StackPanel Margin="0,16,0,0">
+                                            <!-- the group's head: what it is, how many, copy them all -->
+                                            <DockPanel Margin="0,0,0,6">
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Content="{Binding CopyAllToALabel}" Style="{StaticResource SmallButton}" Margin="8,0,0,0" MaxWidth="300"
+                                                            Command="{Binding CopyAllToACommand}" Visibility="{Binding CanCopyAllToA, Converter={StaticResource VisibleWhen}}" />
+                                                    <Button Content="{Binding CopyAllToBLabel}" Style="{StaticResource SmallButton}" Margin="8,0,0,0" MaxWidth="300"
+                                                            Command="{Binding CopyAllToBCommand}" Visibility="{Binding CanCopyAllToB, Converter={StaticResource VisibleWhen}}" />
+                                                    <Button Content="{Binding ToggleLabel}" Style="{StaticResource SmallButton}" Margin="8,0,0,0"
+                                                            Command="{Binding ToggleCommand}" Visibility="{Binding HasItems, Converter={StaticResource VisibleWhen}}" />
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock>
+                                                        <Run Text="{Binding Title, Mode=OneWay}" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource B.Text}" />
+                                                        <Run Text="{Binding Count, Mode=OneWay}" FontSize="12.5" Foreground="{StaticResource B.Text3}" />
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Hint}" FontSize="12" Foreground="{StaticResource B.Text4}" Margin="0,1,0,0" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <TextBlock Text="None." FontSize="13" Foreground="{StaticResource B.Text4}" Margin="12,2,0,0"
+                                                       Visibility="{Binding HasItems, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                            <ItemsControl ItemsSource="{Binding Items}" Focusable="False"
+                                                          Visibility="{Binding IsExpanded, Converter={StaticResource VisibleWhen}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type vm:PairItem}">
+                                                        <Border x:Name="row" BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,1,0,0"
+                                                                Background="Transparent" MinHeight="44">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="200" />
+                                                                    <ColumnDefinition Width="100" />
+                                                                    <ColumnDefinition Width="200" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel VerticalAlignment="Center" Margin="12,4,12,4">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                                                    <TextBlock Text="{Binding ModId}" FontSize="11.5" Foreground="{StaticResource B.Text4}" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                                    <TextBlock Text="{Binding AText}" Style="{StaticResource SideText}" ToolTip="{Binding AText}" MaxWidth="160" />
+                                                                    <Button Content="×" Style="{StaticResource RemoveX}" Command="{Binding RemoveFromACommand}"
+                                                                            ToolTip="{Binding RemoveFromATip}" AutomationProperties.Name="{Binding RemoveFromATip}"
+                                                                            Visibility="{Binding CanRemoveFromA, Converter={StaticResource VisibleWhen}}" />
+                                                                </StackPanel>
+                                                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                    <Button Content="←" Style="{StaticResource ArrowButton}" Command="{Binding CopyToACommand}"
+                                                                            ToolTip="{Binding CopyToATip}" AutomationProperties.Name="{Binding CopyToATip}"
+                                                                            Visibility="{Binding CanCopyToA, Converter={StaticResource VisibleWhen}}" />
+                                                                    <Button Content="→" Style="{StaticResource ArrowButton}" Command="{Binding CopyToBCommand}"
+                                                                            ToolTip="{Binding CopyToBTip}" AutomationProperties.Name="{Binding CopyToBTip}"
+                                                                            Visibility="{Binding CanCopyToB, Converter={StaticResource VisibleWhen}}" />
+                                                                </StackPanel>
+                                                                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,8,0">
+                                                                    <TextBlock Text="{Binding BText}" Style="{StaticResource SideText}" ToolTip="{Binding BText}" MaxWidth="160" />
+                                                                    <Button Content="×" Style="{StaticResource RemoveX}" Command="{Binding RemoveFromBCommand}"
+                                                                            ToolTip="{Binding RemoveFromBTip}" AutomationProperties.Name="{Binding RemoveFromBTip}"
+                                                                            Visibility="{Binding CanRemoveFromB, Converter={StaticResource VisibleWhen}}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </Border>
+                                                        <DataTemplate.Triggers>
+                                                            <Trigger SourceName="row" Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="row" Property="Background" Value="{StaticResource B.Fill}" />
+                                                            </Trigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Grid>
             </DockPanel>
-        </Border>
-    </Grid>
+        </Grid>
+    </DockPanel>
 </UserControl>

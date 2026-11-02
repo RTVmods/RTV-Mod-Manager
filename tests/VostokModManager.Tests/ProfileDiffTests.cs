@@ -39,6 +39,22 @@ public class ProfileDiffTests
     }
 
     [Fact]
+    public void Two_profiles_pair_up_by_where_each_mod_stands()
+    {
+        using var sb = new Sandbox();
+        var s = OpenAB(sb, new ScriptedPrompt());
+
+        var pairs = s.CompareProfiles(new[] { ProfileKit.Named(s, "Default"), ProfileKit.Named(s, "B") }).Pairs();
+
+        Assert.Equal(new[] { PairKind.OnlyInA, PairKind.Different, PairKind.OnlyInB, PairKind.Same },
+            pairs.Select(p => p.Kind));
+        Assert.Null(pairs[0].B);
+        Assert.Equal("2.0", pairs[1].B!.Version);
+        Assert.Null(pairs[2].A);
+        Assert.Equal("1.0", pairs[3].A!.Version);
+    }
+
+    [Fact]
     public void Three_profiles_form_a_matrix()
     {
         using var sb = new Sandbox();

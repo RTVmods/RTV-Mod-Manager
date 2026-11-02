@@ -12,7 +12,7 @@ public partial class ProfilesView : UserControl
 {
     public ProfilesView() => InitializeComponent();
 
-    /// <summary>A card's ⋯ button opens its menu on a left click.</summary>
+    /// <summary>The ⋯ button opens its menu on a left click.</summary>
     private void OnMore(object sender, RoutedEventArgs e)
     {
         if (sender is Button { ContextMenu: { } menu } b)
@@ -23,32 +23,9 @@ public partial class ProfilesView : UserControl
         }
     }
 
-    /// <summary>A matrix row's ⋯ button: the copy / remove menu, built
-    /// from the row's actions (how many depends on the row).</summary>
-    private void OnRowMore(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { DataContext: MatrixRowItem row } b || row.Actions.Count == 0) return;
-        var menu = new ContextMenu { PlacementTarget = b, Placement = PlacementMode.Bottom };
-        foreach (var a in row.Actions)
-        {
-            if (a.IsSeparator) menu.Items.Add(new Separator());
-            else if (a.Command == null) menu.Items.Add(new MenuItem { Header = a.Header, IsEnabled = false });
-            else menu.Items.Add(new MenuItem { Header = a.Header, Command = a.Command });
-        }
-        b.ContextMenu = menu;
-        menu.IsOpen = true;
-    }
-
     private ProfilesViewModel? Vm => DataContext as ProfilesViewModel;
 
-    /// <summary>A click on a matrix row (not on its tick, ⋯ or a cell's
-    /// own control) toggles its tick.</summary>
-    private void OnCellRowClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: MatrixRowItem row }) row.IsChecked = !row.IsChecked;
-    }
-
-    // ── side panel: load order box ────────────────────────────────────
+    // ── the mod list: load order box ────────────────────────────────────
 
     private void OnPriorityKey(object sender, KeyEventArgs e)
     {
@@ -70,7 +47,7 @@ public partial class ProfilesView : UserControl
         if (sender is TextBox { DataContext: ProfileModItem item }) item.CommitPriority();
     }
 
-    // ── side panel: copy menu ─────────────────────────────────────────
+    // ── the mod list: copy menu ─────────────────────────────────────────
 
     /// <summary>"Copy to profile…": a menu of the other profiles.</summary>
     private void OnCopyTo(object sender, RoutedEventArgs e)
@@ -84,14 +61,14 @@ public partial class ProfilesView : UserControl
     }
 
     /// <summary>Right-click on the list: remove or copy the selection.</summary>
-    private void OnDetailMenu(object sender, ContextMenuEventArgs e)
+    private void OnModMenu(object sender, ContextMenuEventArgs e)
     {
-        if (Vm is not { } vm || vm.DetailSelectedCount == 0)
+        if (Vm is not { } vm || vm.ModSelectedCount == 0)
         {
             e.Handled = true;
             return;
         }
-        DetailList.ContextMenu = BuildCopyMenu(vm, withRemove: true);
+        ModList.ContextMenu = BuildCopyMenu(vm, withRemove: true);
     }
 
     private static ContextMenu BuildCopyMenu(ProfilesViewModel vm, bool withRemove)
@@ -103,7 +80,7 @@ public partial class ProfilesView : UserControl
             menu.Items.Add(new Separator());
         }
         var targets = vm.CopyTargets;
-        var n = vm.DetailSelectedCount;
+        var n = vm.ModSelectedCount;
         if (targets.Count == 0)
         {
             menu.Items.Add(new MenuItem { Header = "No other profile to copy into", IsEnabled = false });
@@ -122,7 +99,7 @@ public partial class ProfilesView : UserControl
         return menu;
     }
 
-    // ── side panel → card drag ────────────────────────────────────────
+    // ── the mod list → a profile on the left ────────────────────────────────────────
 
     private Point? _dragStart;
     /// <summary>A press on an already-selected row of a multi-selection:
@@ -130,7 +107,7 @@ public partial class ProfilesView : UserControl
     /// narrowed to that row on release if no drag started.</summary>
     private ListBoxItem? _pendingSelect;
 
-    private void OnDetailMouseDown(object sender, MouseButtonEventArgs e)
+    private void OnModMouseDown(object sender, MouseButtonEventArgs e)
     {
         _dragStart = null;
         _pendingSelect = null;
@@ -139,20 +116,20 @@ public partial class ProfilesView : UserControl
         if (FindUp<TextBox>(source) != null || FindUp<ButtonBase>(source) != null) return;
         var container = FindUp<ListBoxItem>(source);
         if (container == null) return;
-        _dragStart = e.GetPosition(DetailList);
-        if (container.IsSelected && DetailList.SelectedItems.Count > 1
+        _dragStart = e.GetPosition(ModList);
+        if (container.IsSelected && ModList.SelectedItems.Count > 1
             && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) == 0)
         {
             _pendingSelect = container;
             e.Handled = true;
-            DetailList.Focus();
+            ModList.Focus();
         }
     }
 
-    private void OnDetailMouseMove(object sender, MouseEventArgs e)
+    private void OnModMouseMove(object sender, MouseEventArgs e)
     {
         if (_dragStart is not { } start || e.LeftButton != MouseButtonState.Pressed) return;
-        var pos = e.GetPosition(DetailList);
+        var pos = e.GetPosition(ModList);
         if (Math.Abs(pos.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
             && Math.Abs(pos.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
             return;
@@ -160,15 +137,15 @@ public partial class ProfilesView : UserControl
         _pendingSelect = null;
         if (Vm?.DragPayload() is not { } payload) return;
         var data = new DataObject(typeof(DraggedProfileMods), payload);
-        DragDrop.DoDragDrop(DetailList, data, DragDropEffects.Copy);
+        DragDrop.DoDragDrop(ModList, data, DragDropEffects.Copy);
         foreach (var c in Vm?.Cards ?? Enumerable.Empty<ProfileCard>()) c.IsDropTarget = false;
     }
 
-    private void OnDetailMouseUp(object sender, MouseButtonEventArgs e)
+    private void OnModMouseUp(object sender, MouseButtonEventArgs e)
     {
         if (_pendingSelect is { } container)
         {
-            DetailList.SelectedItems.Clear();
+            ModList.SelectedItems.Clear();
             container.IsSelected = true;
         }
         _pendingSelect = null;
@@ -216,33 +193,5 @@ public partial class ProfilesView : UserControl
             d = d is Visual or Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
         }
         return null;
-    }
-
-    /// <summary>The card row only scrolls sideways, so the wheel does that.</summary>
-    private void OnCardWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (CardScroll.ScrollableWidth <= 0) return;
-        e.Handled = true;
-        CardScroll.ScrollToHorizontalOffset(CardScroll.HorizontalOffset - e.Delta);
-    }
-
-    /// <summary>The cells drive the frozen mod column (vertically) and
-    /// the profile header (sideways).</summary>
-    private void OnCellsScrolled(object sender, ScrollChangedEventArgs e)
-    {
-        NameScroll.ScrollToVerticalOffset(e.VerticalOffset);
-        HeadScroll.ScrollToHorizontalOffset(e.HorizontalOffset);
-    }
-
-    /// <summary>The wheel anywhere on the matrix scrolls the cells (Shift:
-    /// sideways), 48 px a notch like a plain ScrollViewer.</summary>
-    private void OnMatrixWheel(object sender, MouseWheelEventArgs e)
-    {
-        e.Handled = true;
-        var step = e.Delta * 0.4;
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
-            CellScroll.ScrollToHorizontalOffset(CellScroll.HorizontalOffset - step);
-        else
-            CellScroll.ScrollToVerticalOffset(CellScroll.VerticalOffset - step);
     }
 }

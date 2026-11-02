@@ -126,10 +126,27 @@ public sealed record ProfileMatrixRow(
     bool HasDifferences,
     string What);
 
+/// <summary>Where a mod stands between two profiles A and B.</summary>
+public enum PairKind { OnlyInA, OnlyInB, Different, Same }
+
+/// <summary>One mod in a two-profile comparison: A's and B's entries
+/// (null where the profile lacks it) and what differs (`What`).</summary>
+public sealed record PairRow(string ModId, string DisplayName, ProfileMod? A, ProfileMod? B, PairKind Kind, string What);
+
 /// <summary>Every mod present in any of the compared profiles.</summary>
 public sealed record ProfileComparison(IReadOnlyList<ModProfile> Profiles, IReadOnlyList<ProfileMatrixRow> Rows)
 {
     public int DifferenceCount => Rows.Count(r => r.HasDifferences);
+
+    /// <summary>A two-profile comparison's rows by where each mod stands
+    /// (only valid when two profiles were compared).</summary>
+    public IReadOnlyList<PairRow> Pairs() => Rows.Select(r => new PairRow(
+            r.ModId, r.DisplayName, r.Cells[0].Mod, r.Cells[1].Mod,
+            !r.Cells[1].Present ? PairKind.OnlyInA
+            : !r.Cells[0].Present ? PairKind.OnlyInB
+            : r.HasDifferences ? PairKind.Different : PairKind.Same,
+            r.What))
+        .ToList();
 
     /// <summary>The rows a grid shows: with `onlyDifferences`, the ones
     /// that differ; with `text`, the ones whose name, id, difference or

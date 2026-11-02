@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **The Profiles page is rebuilt around comparing two profiles.** Your profiles are listed down the left; click one to see its mods on the right, with its actions (Make active / Open loadout, Clone, Export, and Rename, Description, Delete under **⋯**). **Compare with** picks a second profile, and the page then shows exactly how the two differ, in groups: **Only in A**, **Only in B**, **In both, but different** (version, on/off or load order, in amber) and **The same in both** (folded). Arrows between the two columns copy a mod across, each group copies all of its mods at once, and **×** removes a mod from the profile that has it. **⇄ Swap** switches the two sides. This replaces the row of cards and the grid with a column for every profile. Right-click a profile in the list for its actions, including **Compare with the selected profile**.
+
 ## 0.7.11 (2026-11-02)
 
 - **Save slots no longer share mod state.** Save Slots mirrors files by extension, and `.cfg` counted as global settings, so the per-run state some mods keep in `.cfg` files stayed in place when you changed slot: a new run inherited another run's placed cat beds and trays (Cat Bed + Food Tray), granted stoves and campfires (Shelter Fireplace), exit doors (Shelter View), container locks (Loot Vicinity) and quick-slot bindings (Quick Slots). Those names are now built into the mod's force-tracked list, so they travel with the slot like the game's own saves. An existing `MultiSaveSlotsile_rules.cfg` gets the new names merged in on the next game start (the two list lines are rewritten, your comments stay); a name you listed under `never_touch_files` is left alone. (Save Slots 0.3.)
