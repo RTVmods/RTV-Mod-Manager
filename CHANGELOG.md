@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.13 (2026-11-03)
 
 - **Drift you can clear.** When your loadout lists mods the mods folder doesn't have (for example after copying mods into it on the Profiles page), **Save to profile** now drops them from the profile, so the profile matches the folder and the drift goes away. Before, it left them listed and the same drift came straight back. The drift window also has **Install the N missing**, which does the opposite: it opens the Apply plan and puts those mods in the mods folder, from My Mods or VostokMods. The Loadout chip now reads **N change(s) not saved · Review**.
 - **Copying mods into your loadout installs them.** On the Profiles page, copying or dragging mods into the active profile now opens the Apply plan straight away, instead of leaving them listed but not installed.
