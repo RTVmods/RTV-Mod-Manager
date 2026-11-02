@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## 0.7.11 (2026-11-02)
+
+- **Save slots no longer share mod state.** Save Slots mirrors files by extension, and `.cfg` counted as global settings, so the per-run state some mods keep in `.cfg` files stayed in place when you changed slot: a new run inherited another run's placed cat beds and trays (Cat Bed + Food Tray), granted stoves and campfires (Shelter Fireplace), exit doors (Shelter View), container locks (Loot Vicinity) and quick-slot bindings (Quick Slots). Those names are now built into the mod's force-tracked list, so they travel with the slot like the game's own saves. An existing `MultiSaveSlotsile_rules.cfg` gets the new names merged in on the next game start (the two list lines are rewritten, your comments stay); a name you listed under `never_touch_files` is left alone. (Save Slots 0.3.)
+
 ## 0.7.10 (2026-11-01)
 
 - **Save Slots keeps the last version of every save.** Before the built-in Save Slots mod rewrites a slot folder or replaces the game's save folder (loading another slot, a new game, a delete), the files there go to `MultiSaveSlots\_backups\<time>_<slot or user>\` first, with a note saying why; the last 10 per slot are kept. A run that is ahead of its slot is mirrored into the slot before another slot is loaded, so switching slots never discards progress. Permadeath stays permadeath: the dead slot and every backup of that run are deleted. A new game started with the game launched outside the mod loader never replaces a slot either: it gets the first empty slot on the next start (or a backup, with the slot's files put back, when none is free). Every copy the mod makes is now one line in the game log. (Save Slots 0.2.)
