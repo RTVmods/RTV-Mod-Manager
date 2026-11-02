@@ -2,6 +2,11 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Drift you can clear.** When your loadout lists mods the mods folder doesn't have (for example after copying mods into it on the Profiles page), **Save to profile** now drops them from the profile, so the profile matches the folder and the drift goes away. Before, it left them listed and the same drift came straight back. The drift window also has **Install the N missing**, which does the opposite: it opens the Apply plan and puts those mods in the mods folder, from My Mods or VostokMods. The Loadout chip now reads **N change(s) not saved · Review**.
+- **Copying mods into your loadout installs them.** On the Profiles page, copying or dragging mods into the active profile now opens the Apply plan straight away, instead of leaving them listed but not installed.
+
 ## 0.7.12 (2026-11-03)
 
 - **The Profiles page is rebuilt around comparing two profiles.** Your profiles are listed down the left; click one to see its mods on the right, with its actions (Make active / Open loadout, Clone, Export, and Rename, Description, Delete under **⋯**). **Compare with** picks a second profile, and the page then shows exactly how the two differ, in groups: **Only in A**, **Only in B**, **In both, but different** (version, on/off or load order, in amber) and **The same in both** (folded). Arrows between the two columns copy a mod across, each group copies all of its mods at once, and **×** removes a mod from the profile that has it. **⇄ Swap** switches the two sides. This replaces the row of cards and the grid with a column for every profile. Right-click a profile in the list for its actions, including **Compare with the selected profile**.

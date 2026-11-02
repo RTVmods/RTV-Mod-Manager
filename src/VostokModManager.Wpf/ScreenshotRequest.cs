@@ -70,6 +70,17 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target = new Views.ImportTargetWindow(vm);
                 target.Show();
             }
+            else if (req.Page == "drift")
+            {
+                // The drift review with mods the folder lacks.
+                target = new Views.DriftReviewWindow(new[]
+                {
+                    new VostokModManager.Services.DriftItem("custom-fonts", "Custom Fonts", "in the profile, not in the mods folder", NotLive: true),
+                    new VostokModManager.Services.DriftItem("mcm-profile-sync", "MCM Profile Sync  v0.1  •  by Joni", "in the profile, not in the mods folder", NotLive: true),
+                    new VostokModManager.Services.DriftItem("prone", "Prone", "in the profile, not in the mods folder", NotLive: true),
+                }, "Game mode");
+                target.Show();
+            }
             else if (req.Page == "prompt-update")
             {
                 // The manager-update question: three buttons on one row.

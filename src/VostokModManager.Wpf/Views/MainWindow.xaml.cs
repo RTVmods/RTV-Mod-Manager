@@ -47,6 +47,7 @@ public partial class MainWindow : Window
         mods.MissingDepsUi = MissingDependenciesWindow.Resolver(() => this);
         mods.LibraryPicker = () => LibraryPickerWindow.Pick(this, session);
         mods.UnlinkedViewer = () => LinkReviewWindow.Show(this, session);
+        mods.ProfileApplier = profile => Services.ApplyFlow.RunAsync(session, profile);
     }
 
     protected override void OnClosing(CancelEventArgs e)

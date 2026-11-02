@@ -182,7 +182,7 @@ public partial class ProfilesView : UserControl
         if (!ProfilesViewModel.CanDrop(card, payload) || Vm is not { } vm) return;
         // After the drag loop has unwound: the copy's message box and
         // the reload (which rebuilds this card) shouldn't run inside it.
-        Dispatcher.BeginInvoke(() => vm.CopyMods(card, payload));
+        Dispatcher.BeginInvoke(() => _ = vm.CopyMods(card, payload));
     }
 
     private static T? FindUp<T>(DependencyObject? d) where T : DependencyObject

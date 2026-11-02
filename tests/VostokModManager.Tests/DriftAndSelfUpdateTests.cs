@@ -33,13 +33,14 @@ public class DriftAndSelfUpdateTests
         Assert.Equal(new[]
             {
                 ("Alpha", "priority: profile 3 → live 5"),
-                ("Ghost", "in profile but not currently live (Apply will re-fetch)"),
+                ("Ghost", "in the profile, not in the mods folder"),
             },
             drift.Select(d => (d.DisplayName, d.Description)));
         var status = s.GetDriftStatus()!;
         Assert.Equal(2, status.Count);
         Assert.Equal("⚠ Drift (2) vs 'Default': Alpha (priority: profile 3 → live 5); "
-            + "Ghost (in profile but not currently live (Apply will re-fetch))  —  click for details.", status.Text);
+            + "Ghost (in the profile, not in the mods folder)  —  click for details.", status.Text);
+        Assert.True(drift[1].NotLive);
     }
 
     [Fact]
@@ -52,12 +53,14 @@ public class DriftAndSelfUpdateTests
         Assert.Equal(3, ModProfile.LoadAll().Single().Mods.First(m => m.ModId == "alpha").Priority);
 
         IReadOnlyList<DriftItem>? reviewed = null;
-        Assert.Equal(1, s.SyncLiveStateIntoActiveProfile(d => { reviewed = d; return true; }));
+        Assert.Equal(2, s.SyncLiveStateIntoActiveProfile(d => { reviewed = d; return true; }));
 
         Assert.Equal(2, reviewed!.Count);
-        Assert.Equal(5, ModProfile.LoadAll().Single().Mods.First(m => m.ModId == "alpha").Priority);
-        // A profile mod that isn't live stays listed: Apply re-fetches it.
-        Assert.Equal("ghost", Assert.Single(s.ComputeDrift()).ModId);
+        var saved = ModProfile.LoadAll().Single();
+        Assert.Equal(5, saved.Mods.First(m => m.ModId == "alpha").Priority);
+        // The profile now matches the folder: the mod it lacks is dropped.
+        Assert.DoesNotContain(saved.Mods, m => m.ModId == "ghost");
+        Assert.Empty(s.ComputeDrift());
     }
 
     // ── mod loader ────────────────────────────────────────────────────

@@ -7,6 +7,8 @@ using Microsoft.Win32;
 using VostokModManager.Domain;
 using VostokModManager.Services;
 
+using VostokModManager.Wpf.Views;
+
 namespace VostokModManager.Wpf.ViewModels;
 
 /// <summary>What a row's status column says, which also picks its colour.</summary>
@@ -231,7 +233,7 @@ public sealed partial class ModsViewModel : PageViewModel
             ConflictCount = Session.LastConflicts.Count;
             UnlinkedCount = Session.UnlinkedMods().Count(e => !Session.IsBuiltInActive(e.ModId));
             DriftText = Session.GetDriftStatus() is { Count: > 0 } d
-                ? $"{d.Count} change(s) not saved to '{d.ProfileName}' · Save to profile"
+                ? $"{d.Count} change(s) not saved to '{d.ProfileName}' · Review"
                 : "";
             Footer = $"{all.Count(r => r.Enabled)} of {all.Count} enabled";
             UpdatesSummary = string.Join("\n", new[] { Session.SummarizeUpdates(), Session.UnlinkedHint() }.Where(s => s.Length > 0));
@@ -562,15 +564,29 @@ public sealed partial class ModsViewModel : PageViewModel
         if ((item ?? Selected)?.Entry is { } e) await Session.LinkModAsync(e);
     }
 
+    /// <summary>The drift chip: review it, then save the live state into
+    /// the profile, or install the profile's mods the folder lacks.</summary>
     [RelayCommand]
-    private void SyncDrift() => Session.SyncLiveStateIntoActiveProfile(DriftReviewer);
+    private async Task SyncDrift()
+    {
+        var choice = DriftChoice.Cancel;
+        Session.SyncLiveStateIntoActiveProfile(DriftReviewer == null ? null : items =>
+        {
+            choice = DriftReviewer(items);
+            return choice == DriftChoice.Save;
+        });
+        if (choice == DriftChoice.Install && Session.ActiveProfile is { } profile && ProfileApplier != null)
+            await ProfileApplier(profile);
+    }
 
     /// <summary>Set by the shell: the full windows for conflicts, the
     /// dependency picker, earlier versions and the drift review.</summary>
     public Action<string?>? ConflictsViewer { get; set; }
     public Func<ModEntry, Task>? DependencyEditor { get; set; }
     public Func<ModEntry, Task>? VersionsViewer { get; set; }
-    public Func<IReadOnlyList<DriftItem>, bool>? DriftReviewer { get; set; }
+    public Func<IReadOnlyList<DriftItem>, DriftChoice>? DriftReviewer { get; set; }
+    /// <summary>Opens a profile's Apply plan (the drift review's Install).</summary>
+    public Func<ModProfile, Task>? ProfileApplier { get; set; }
     public Action? UnlinkedViewer { get; set; }
 
     [RelayCommand]

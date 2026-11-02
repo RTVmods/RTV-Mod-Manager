@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using VostokModManager.Domain;
 using VostokModManager.Services;
+using VostokModManager.Wpf.Services;
 using VostokModManager.Wpf.Views;
 
 namespace VostokModManager.Wpf.ViewModels;
@@ -178,8 +179,8 @@ public sealed partial class PairItem : ObservableObject
     public string RemoveFromATip => $"Remove {Name} from '{_owner.AName}'";
     public string RemoveFromBTip => $"Remove {Name} from '{_owner.BName}'";
 
-    [RelayCommand] private void CopyToB() => _owner.CopyPairs(new[] { this }, toB: true);
-    [RelayCommand] private void CopyToA() => _owner.CopyPairs(new[] { this }, toB: false);
+    [RelayCommand] private Task CopyToB() => _owner.CopyPairs(new[] { this }, toB: true);
+    [RelayCommand] private Task CopyToA() => _owner.CopyPairs(new[] { this }, toB: false);
     [RelayCommand] private void RemoveFromA() => _owner.RemovePair(this, fromB: false);
     [RelayCommand] private void RemoveFromB() => _owner.RemovePair(this, fromB: true);
 }
@@ -216,8 +217,8 @@ public sealed partial class PairSection : ObservableObject
     public string ToggleLabel => IsExpanded ? "Hide" : "Show";
 
     [RelayCommand] private void Toggle() => IsExpanded = !IsExpanded;
-    [RelayCommand] private void CopyAllToB() => _owner.CopyPairs(Items, toB: true);
-    [RelayCommand] private void CopyAllToA() => _owner.CopyPairs(Items, toB: false);
+    [RelayCommand] private Task CopyAllToB() => _owner.CopyPairs(Items, toB: true);
+    [RelayCommand] private Task CopyAllToA() => _owner.CopyPairs(Items, toB: false);
 }
 
 /// <summary>The Profiles page: every saved profile down the left; the
@@ -418,7 +419,7 @@ public sealed partial class ProfilesViewModel : PageViewModel
     /// <summary>Copies entries across: A's into B (`toB`) or B's into A.
     /// A mod the target lacks is added; one it has takes the source's
     /// version, on/off and load order.</summary>
-    public void CopyPairs(IReadOnlyCollection<PairItem> items, bool toB)
+    public async Task CopyPairs(IReadOnlyCollection<PairItem> items, bool toB)
     {
         if (Selected == null || CompareWith == null) return;
         var (from, to) = toB ? (Selected, CompareWith) : (CompareWith, Selected);
@@ -426,9 +427,17 @@ public sealed partial class ProfilesViewModel : PageViewModel
         if (ids.Count == 0) return;
         var n = Session.CopyProfileEntries(from.Profile, to.Profile, ids);
         if (n == 0) return;  // the session said why
-        Notice = $"Copied {n} mod{(n == 1 ? "" : "s")} from '{from.Name}' into '{to.Name}'."
-            + (to.IsActive ? " That profile is your loadout: apply it from the Loadout page to install them." : "");
+        Notice = $"Copied {n} mod{(n == 1 ? "" : "s")} from '{from.Name}' into '{to.Name}'.";
         Load();
+        await InstallIfLoadout(to.Profile);
+    }
+
+    /// <summary>A copy into the loadout only changes its list; the Apply
+    /// plan then puts the new mods in the mods folder (or the user closes
+    /// it and the Loadout page shows the drift).</summary>
+    private async Task InstallIfLoadout(ModProfile target)
+    {
+        if (Session.IsActiveProfile(target)) await ApplyAsync(target);
     }
 
     public void RemovePair(PairItem item, bool fromB)
@@ -567,14 +576,14 @@ public sealed partial class ProfilesViewModel : PageViewModel
     /// <summary>"Copy to profile…": the selected rows into `target`.</summary>
     public void CopySelectedTo(ProfileCard target)
     {
-        if (DragPayload() is { } payload) CopyMods(target, payload);
+        if (DragPayload() is { } payload) _ = CopyMods(target, payload);
     }
 
     /// <summary>A drop of list rows on a profile, or "Copy to profile…":
     /// new metadata-only entries in `target`, ids it already lists
     /// skipped. The session tells the user the counts; the page keeps
     /// them too.</summary>
-    public void CopyMods(ProfileCard target, DraggedProfileMods payload)
+    public async Task CopyMods(ProfileCard target, DraggedProfileMods payload)
     {
         if (ReferenceEquals(target.Profile, payload.Source)) return;
         var name = target.Name;
@@ -584,7 +593,9 @@ public sealed partial class ProfilesViewModel : PageViewModel
               + (result.Skipped > 0 ? $" · {result.Skipped} already there, skipped." : ".")
             : $"Nothing copied into '{name}': "
               + (result.Skipped > 0 ? $"all {result.Skipped} already there." : "no mods picked.");
+        var profile = target.Profile;
         Load();
+        if (result.Added > 0) await InstallIfLoadout(profile);
     }
 
     /// <summary>Whether a drag of `payload` can land on `card`.</summary>
@@ -670,18 +681,8 @@ public sealed partial class ProfilesViewModel : PageViewModel
     /// then checks for updates as a switch would.</summary>
     public async Task ApplyAsync(ModProfile profile)
     {
-        ApplyPlan plan;
-        try { plan = Session.BuildApplyPlan(profile); }
-        catch (Exception ex)
-        {
-            Session.Prompt.Error("Couldn't plan the apply", ex);
-            return;
-        }
-        var vm = new ApplyPlanViewModel(Session, plan);
-        new ApplyPlanWindow(vm) { Owner = Application.Current?.MainWindow }.ShowDialog();
-        if (!vm.Finished) return;  // closed without running
-        Load();
-        if (vm.Result is { Applied: true }) await Session.CheckUpdatesAsync();
+        var ran = await ApplyFlow.RunAsync(Session, profile);
+        if (ran) Load();
     }
 
     // ── header actions ────────────────────────────────────────────────

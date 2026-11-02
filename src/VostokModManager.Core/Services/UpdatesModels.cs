@@ -175,7 +175,9 @@ public sealed record ConflictDetail(
 // ── drift ─────────────────────────────────────────────────────────────
 
 /// <summary>One difference between the active profile and what is live.</summary>
-public sealed record DriftItem(string ModId, string DisplayName, string Description);
+/// <summary>`NotLive`: the profile lists the mod but the mods folder
+/// doesn't have it (Save to profile drops it, Apply installs it).</summary>
+public sealed record DriftItem(string ModId, string DisplayName, string Description, bool NotLive = false);
 
 /// <summary>The drift status line: shown only when there is drift.</summary>
 public sealed record DriftStatus(string ProfileName, IReadOnlyList<DriftItem> Items, string Text)

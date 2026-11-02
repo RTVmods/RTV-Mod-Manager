@@ -31,8 +31,7 @@ public sealed partial class ManagerSession
             var name = !string.IsNullOrEmpty(pm.DisplayName) ? pm.DisplayName : pm.ModId;
             if (!liveById.TryGetValue(pm.ModId, out var live))
             {
-                result.Add(new DriftItem(pm.ModId, name,
-                    "in profile but not currently live (Apply will re-fetch)"));
+                result.Add(new DriftItem(pm.ModId, name, "in the profile, not in the mods folder", NotLive: true));
                 continue;
             }
             if (pm.IsEnabled != live.IsEnabled)
@@ -75,7 +74,10 @@ public sealed partial class ManagerSession
 
     /// <summary>Writes each live mod's enabled / priority / version into
     /// the active profile, adding entries for live mods it doesn't list
-    /// — the "I tweaked the live state, save it back" shortcut. `review`
+    /// and dropping the ones the mods folder doesn't have, so the profile
+    /// matches the live state — the "I tweaked the live state, save it
+    /// back" shortcut. (Applying the profile is the other way round: it
+    /// installs what the folder lacks.) `review`
     /// is shown the exact drift first (the drift detail view) and can
     /// cancel by returning false. Returns the number of fields changed,
     /// 0 when there was nothing to sync or the user cancelled, -1 when
@@ -122,6 +124,10 @@ public sealed partial class ManagerSession
                 changed++;
             }
         }
+        // Entries for mods the folder doesn't have: the live state has none.
+        var liveIds = new HashSet<string>(Registry.Entries.Select(e => e.ModId).Where(id => !string.IsNullOrEmpty(id)),
+            StringComparer.OrdinalIgnoreCase);
+        changed += ActiveProfile.Mods.RemoveAll(m => !string.IsNullOrEmpty(m.ModId) && !liveIds.Contains(m.ModId));
         if (changed == 0)
         {
             Say(StatusArea.Mods, "No drift detected — nothing to sync.");
