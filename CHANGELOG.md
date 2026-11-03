@@ -2,6 +2,12 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Setup gets a vanilla game ready for mods.** On a game that has never been modded, setup used to stop at "no mods folder" and left the Mod Loader to be installed by hand. Now:
+  - **Game folder:** a Road to Vostok install without a mods folder is recognised, and **Create the mods folder and use it** makes it. The installs found in your Steam libraries are offered the same way.
+  - **Mod Loader and MCM** (step 2): **Install the Mod Loader** downloads the latest release from GitHub and puts its two files (`modloader.gd` and `override.cfg`) beside the game. **Install MCM** downloads Mod Configuration Menu from VostokMods into the mods folder, since most mods with settings show them through it. The step is done once both are there.
+
 ## 0.7.13 (2026-11-03)
 
 - **Drift you can clear.** When your loadout lists mods the mods folder doesn't have (for example after copying mods into it on the Profiles page), **Save to profile** now drops them from the profile, so the profile matches the folder and the drift goes away. Before, it left them listed and the same drift came straight back. The drift window also has **Install the N missing**, which does the opposite: it opens the Apply plan and puts those mods in the mods folder, from My Mods or VostokMods. The Loadout chip now reads **N change(s) not saved · Review**.

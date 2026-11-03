@@ -40,8 +40,11 @@ public sealed record SetupStepStatus(SetupStepId Id, string Title, SetupState St
 /// <param name="Ok">The mods folder exists: the manager can use it.</param>
 /// <param name="HasModloader">modloader.gd sits beside the game.</param>
 /// <param name="Message">What's wrong, or a one-line confirmation.</param>
+/// <param name="CanCreateMods">The folder is a Road to Vostok install (RTV.exe or RTV.pck)
+/// with no mods folder yet: a vanilla game, which only needs one.</param>
 public sealed record GameFolderCheck(
-    bool Ok, string GameDir, string ModsDir, bool GameDirExists, bool HasModloader, string Message);
+    bool Ok, string GameDir, string ModsDir, bool GameDirExists, bool HasModloader, string Message,
+    bool CanCreateMods = false);
 
 /// <summary>Step 1: the folder in use, and installs found in the Steam libraries.</summary>
 public sealed record GameFolderStatus(GameFolderCheck Current, bool IsDefaultSteamPath, IReadOnlyList<string> DetectedModsDirs);
@@ -189,13 +192,43 @@ public sealed partial class ManagerSession
         var gameExists = gameDir.Length > 0 && Directory.Exists(gameDir);
         var modsExists = Directory.Exists(modsDir);
         var hasLoader = File.Exists(MmlInstall.ResolveModloaderPath(modsDir));
+        var isGame = gameExists && IsGameInstall(gameDir);
         string msg;
         if (!gameExists) msg = $"`{gameDir}` doesn't exist.";
+        else if (!modsExists && isGame)
+            msg = $"Road to Vostok is in `{gameDir}`, but it has no mods folder yet (a game that has never "
+                + "been modded). Create it to start.";
         else if (!modsExists)
             msg = $"`{gameDir}` has no mods folder. Pick the Road to Vostok install folder, "
                 + "or create a `mods` folder in it.";
         else msg = $"Mods folder: {modsDir}";
-        return new GameFolderCheck(modsExists, gameDir, modsDir, gameExists, hasLoader, msg);
+        return new GameFolderCheck(modsExists, gameDir, modsDir, gameExists, hasLoader, msg,
+            CanCreateMods: !modsExists && isGame);
+    }
+
+    /// <summary>True when `dir` holds the game itself (its exe or pack).</summary>
+    public static bool IsGameInstall(string dir)
+        => File.Exists(Path.Combine(dir, "RTV.exe")) || File.Exists(Path.Combine(dir, "RTV.pck"));
+
+    /// <summary>Step 1 for a vanilla game: creates the game's mods folder
+    /// and points the manager at it. Null (after telling the user) when the
+    /// folder isn't a game install or the folder couldn't be made.</summary>
+    public SettingsApplyResult? CreateModsFolderStep(string path)
+    {
+        var check = CheckGameFolder(path);
+        if (check.Ok) return ApplyGameFolderStep(check.ModsDir);
+        if (!check.CanCreateMods)
+        {
+            Prompt.Inform("Not a Road to Vostok folder", check.Message, PromptKind.Warning);
+            return null;
+        }
+        try { Directory.CreateDirectory(check.ModsDir); }
+        catch (Exception ex)
+        {
+            Prompt.Error("Couldn't create the mods folder", ex);
+            return null;
+        }
+        return ApplyGameFolderStep(check.ModsDir);
     }
 
     /// <summary>Points the manager at the picked install (see
@@ -244,10 +277,71 @@ public sealed partial class ManagerSession
         return found;
     }
 
-    // step 2 — mod loader
+    // step 2 — mod loader and MCM
 
     public ModLoaderStatus GetModLoaderStatus()
         => new(MmlInstall.DetectInstalledVersion(ModsDir), MmlInstall.SupportsSkipUi(ModsDir), Settings.SkipLoaderUi);
+
+    /// <summary>Mod Configuration Menu's VostokMods page and mod id: most
+    /// mods with settings show them through it.</summary>
+    public const string McmSlug = "mod-configuration-menu";
+    public const string McmModId = "doinkoink-mcm";
+
+    /// <summary>The installed MCM's version, or "" when the mods folder
+    /// doesn't have it.</summary>
+    public string McmInstalledVersion()
+        => Registry.Entries.FirstOrDefault(e =>
+                string.Equals(e.ModId, McmModId, StringComparison.OrdinalIgnoreCase)
+                || (e.Source.IsValid && e.Source.Provider == ModSource.VostokMods
+                    && string.Equals(e.Source.Id, McmSlug, StringComparison.OrdinalIgnoreCase)))
+            ?.Version ?? "";
+
+    /// <summary>Installs the latest Mod Loader beside the game: reads the
+    /// newest release tag from GitHub, then downloads and places its
+    /// files (an existing loader is backed up first). True when done.</summary>
+    public async Task<bool> InstallModLoaderAsync()
+    {
+        await CheckMmlVersionAsync(forceFresh: true);
+        var tag = Settings.MmlLatestTag;
+        if (string.IsNullOrEmpty(tag))
+        {
+            Prompt.Inform("Couldn't reach GitHub",
+                "The latest Mod Loader release couldn't be looked up. Check your connection and try again, "
+                + $"or install it by hand from {MmlReleasesFallbackUrl}.", PromptKind.Warning);
+            return false;
+        }
+        return await UpdateMmlAsync(tag);
+    }
+
+    /// <summary>Downloads Mod Configuration Menu from VostokMods and
+    /// installs it into the mods folder (and the active profile, as any
+    /// install). True when it was installed.</summary>
+    public async Task<bool> InstallMcmAsync()
+    {
+        if (!Directory.Exists(ModsDir))
+        {
+            Prompt.Inform("No mods folder", "Set up the game folder first: MCM goes into its mods folder.", PromptKind.Warning);
+            return false;
+        }
+        var temp = Path.Combine(Path.GetTempPath(), "vmm_dl_" + Guid.NewGuid().ToString("N") + ".vmz");
+        try
+        {
+            Say(StatusArea.Mods, "Downloading Mod Configuration Menu from VostokMods …");
+            await DownloadModFileAsync(McmSlug, temp, null);
+            var result = await InstallDownloadedModAsync(temp, ModSource.ForSlug(McmSlug));
+            return result.Installed.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Prompt.Inform("MCM not installed", $"Couldn't download or install Mod Configuration Menu:\n\n{ex.Message}",
+                PromptKind.Error);
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* temp */ }
+        }
+    }
 
     /// <summary>Sets whether launches from the manager skip the loader's launcher.</summary>
     public bool ApplyModLoaderStep(bool skipLoaderUi)

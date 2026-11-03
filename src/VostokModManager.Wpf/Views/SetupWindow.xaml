@@ -117,13 +117,24 @@
                                         <DataTemplate>
                                             <Button Style="{StaticResource Btn.Quiet}" HorizontalContentAlignment="Left"
                                                     Command="{Binding DataContext.UseFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}">
-                                                <TextBlock><Run Text="Use " /><Run Text="{Binding Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                                    CommandParameter="{Binding Path}">
+                                                <TextBlock><Run Text="Use " /><Run Text="{Binding Path, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /><Run Text="{Binding Note, Mode=OneWay}" Foreground="{StaticResource B.Text3}" /></TextBlock>
                                             </Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <Button Content="Use this folder" HorizontalAlignment="Left" Command="{Binding UseFolderCommand}" CommandParameter="" />
+                                <Button HorizontalAlignment="Left" Command="{Binding UseFolderCommand}" CommandParameter="">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource Btn.Outline}">
+                                            <Setter Property="Content" Value="Use this folder" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CanCreateMods}" Value="True">
+                                                    <Setter Property="Content" Value="Create the mods folder and use it" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -133,9 +144,23 @@
                         <StackPanel>
                             <ContentControl Content="{Binding Steps[1]}" ContentTemplate="{StaticResource StepHeader}" Focusable="False" />
                             <StackPanel Style="{StaticResource StepBody}" Visibility="{Binding Steps[1].IsOpen, Converter={StaticResource VisibleWhen}}">
-                                <TextBlock Text="{Binding LoaderText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}" Margin="0,0,0,12" />
+                                <TextBlock Text="MOD LOADER" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                                <TextBlock Text="{Binding LoaderText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                           TextWrapping="Wrap" Margin="0,0,0,10" />
+                                <Button Content="Install the Mod Loader" Style="{StaticResource Btn.Primary}" HorizontalAlignment="Left" Margin="0,0,0,12"
+                                        Command="{Binding InstallLoaderCommand}" IsEnabled="{Binding HasModsFolder}"
+                                        Visibility="{Binding LoaderInstalled, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
                                 <CheckBox Content="Skip the loader's own window when I launch from the manager" IsChecked="{Binding SkipLauncher}"
-                                          IsEnabled="{Binding SkipLauncherSupported}" />
+                                          IsEnabled="{Binding SkipLauncherSupported}" Margin="0,0,0,18"
+                                          Visibility="{Binding LoaderInstalled, Converter={StaticResource VisibleWhen}}" />
+                                <TextBlock Text="MOD CONFIGURATION MENU" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                                <TextBlock Text="{Binding McmText}" Style="{StaticResource T.Body}" FontSize="14" Foreground="{StaticResource B.Text2}"
+                                           TextWrapping="Wrap" Margin="0,0,0,10" />
+                                <Button Content="Install MCM" Style="{StaticResource Btn.Primary}" HorizontalAlignment="Left"
+                                        Command="{Binding InstallMcmCommand}" IsEnabled="{Binding HasModsFolder}"
+                                        Visibility="{Binding McmInstalled, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                <TextBlock Text="Downloading…" Style="{StaticResource T.Muted}" Margin="0,10,0,0"
+                                           Visibility="{Binding Installing, Converter={StaticResource VisibleWhen}}" />
                             </StackPanel>
                         </StackPanel>
                     </Border>

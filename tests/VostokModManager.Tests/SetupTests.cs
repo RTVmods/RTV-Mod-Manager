@@ -160,6 +160,80 @@ public class SetupTests
     }
 
     [Fact]
+    public void A_vanilla_game_gets_its_mods_folder_made()
+    {
+        using var sb = new Sandbox();
+        var vanilla = Path.Combine(sb.Root, "Vanilla", "Road to Vostok");
+        Directory.CreateDirectory(vanilla);
+        File.WriteAllText(Path.Combine(vanilla, "RTV.exe"), "");
+        var notGame = Path.Combine(sb.Root, "Empty");
+        Directory.CreateDirectory(notGame);
+        var prompt = new ScriptedPrompt();
+        var session = LaunchKit.Open(sb, prompt, new RecordingLauncher());
+
+        var check = ManagerSession.CheckGameFolder(vanilla);
+        Assert.False(check.Ok);
+        Assert.True(check.CanCreateMods);
+        Assert.False(ManagerSession.CheckGameFolder(notGame).CanCreateMods);
+
+        Assert.Null(session.CreateModsFolderStep(notGame));
+        Assert.False(Directory.Exists(Path.Combine(notGame, "mods")));
+        Assert.Contains("inform:Not a Road to Vostok folder", prompt.Asked);
+
+        Assert.NotNull(session.CreateModsFolderStep(vanilla));
+        Assert.True(Directory.Exists(Path.Combine(vanilla, "mods")));
+        Assert.Equal(Path.Combine(vanilla, "mods"), session.Settings.ModsDir);
+    }
+
+    [Fact]
+    public async Task Setup_installs_the_mod_loader_on_a_game_without_one()
+    {
+        using var sb = new Sandbox();
+        var prompt = new ScriptedPrompt();
+        var session = UpdatesTests.Offline(LaunchKit.Open(sb, prompt, new RecordingLauncher()));
+        session.UpdateNet.FetchMmlRelease = () => Task.FromResult<VostokModManager.Api.MmlRelease?>(
+            new VostokModManager.Api.MmlRelease { TagName = "v3.4.2", HtmlUrl = "u" });
+        session.UpdateNet.DownloadMmlAsset = (tag, asset, path) =>
+        {
+            File.WriteAllText(path, asset == "modloader.gd"
+                ? "extends Node\nconst MODLOADER_VERSION := \"3.4.2\"\n" + new string('#', 1200)
+                : "[autoload]");
+            return Task.CompletedTask;
+        };
+        Assert.False(session.GetModLoaderStatus().Installed);
+
+        Assert.True(await session.InstallModLoaderAsync());
+
+        Assert.Equal("3.4.2", session.GetModLoaderStatus().InstalledVersion);
+        Assert.True(File.Exists(Path.Combine(sb.GameDir, "override.cfg")));
+        Assert.Empty(Directory.GetFiles(sb.GameDir, "*.bak"));
+        Assert.Contains("inform:Mod Loader installed", prompt.Asked);
+    }
+
+    [Fact]
+    public async Task Setup_installs_mcm_from_vostokmods()
+    {
+        using var sb = new Sandbox();
+        var session = UpdatesTests.Offline(LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher()));
+        session.Refresh();
+        string? asked = null;
+        session.UpdateNet.DownloadMod = (slug, path, _) =>
+        {
+            asked = slug;
+            File.WriteAllBytes(path, Sandbox.BuildVmz(ManagerSession.McmModId, "2.9.3", "Mod Configuration Menu"));
+            return Task.CompletedTask;
+        };
+        Assert.Equal("", session.McmInstalledVersion());
+
+        Assert.True(await session.InstallMcmAsync());
+
+        Assert.Equal(ManagerSession.McmSlug, asked);
+        Assert.Equal("2.9.3", session.McmInstalledVersion());
+        Assert.Equal("vostokmods:" + ManagerSession.McmSlug,
+            session.Registry.FindById(ManagerSession.McmModId)!.Source.Key);
+    }
+
+    [Fact]
     public void Applying_another_game_folder_rescans_it_and_asks_for_the_watcher()
     {
         using var sb = new Sandbox();

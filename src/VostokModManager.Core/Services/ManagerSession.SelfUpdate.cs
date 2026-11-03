@@ -158,6 +158,7 @@ public sealed partial class ManagerSession
         var modloaderPath = Path.Combine(gameDir, "modloader.gd");
         var overridePath = Path.Combine(gameDir, "override.cfg");
         var modloaderTmp = modloaderPath + ".download";
+        var fresh = !File.Exists(modloaderPath);
         var overrideTmp = overridePath + ".download";
 
         IsUpdating = true;
@@ -209,10 +210,15 @@ public sealed partial class ManagerSession
             var bakNote = backups.Count > 0
                 ? $"\n\nBackups: {string.Join(", ", backups)}"
                 : "\n\n(No prior install — nothing to back up.)";
-            Prompt.Inform("MML updated",
-                $"MML updated to v{tag}.\n\n"
-                + "Restart Road to Vostok if it's running for the new loader to take effect."
-                + bakNote);
+            if (fresh)
+                Prompt.Inform("Mod Loader installed",
+                    $"Mod Loader {tag} is installed beside the game (modloader.gd and override.cfg).\n\n"
+                    + "The game loads mods from the mods folder from its next start.");
+            else
+                Prompt.Inform("MML updated",
+                    $"MML updated to v{tag}.\n\n"
+                    + "Restart Road to Vostok if it's running for the new loader to take effect."
+                    + bakNote);
             return true;
         }
         catch (Exception ex)

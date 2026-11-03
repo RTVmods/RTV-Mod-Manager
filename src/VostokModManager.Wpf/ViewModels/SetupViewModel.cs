@@ -35,6 +35,10 @@ public sealed partial class SetupStep : ObservableObject
     }
 }
 
+/// <summary>A game install found in the Steam libraries (step 1); `Note`
+/// says when its mods folder doesn't exist yet and will be made.</summary>
+public sealed record DetectedFolder(string Path, string Note);
+
 /// <summary>A loader profile offered for import in step 3.</summary>
 public sealed partial class LoaderProfileChoice : ObservableObject
 {
@@ -58,7 +62,7 @@ public sealed partial class SetupViewModel : ObservableObject
         Steps = new ObservableCollection<SetupStep>
         {
             new(SetupStepId.GameFolder, 1, "Game folder", true),
-            new(SetupStepId.ModLoader, 2, "Mod Loader", false),
+            new(SetupStepId.ModLoader, 2, "Mod Loader and MCM", false),
             new(SetupStepId.Profiles, 3, "Mods and profiles", true),
             new(SetupStepId.SaveSlots, 4, "Save slots", false),
             new(SetupStepId.VostokMods, 5, "Update checks", false),
@@ -81,7 +85,7 @@ public sealed partial class SetupViewModel : ObservableObject
     public string BackupItems { get; }
     public ObservableCollection<SetupStep> Steps { get; }
     public ObservableCollection<LoaderProfileChoice> LoaderProfiles { get; } = new();
-    public ObservableCollection<string> DetectedFolders { get; } = new();
+    public ObservableCollection<DetectedFolder> DetectedFolders { get; } = new();
 
     [ObservableProperty] private SetupStep? _openStep;
     [ObservableProperty] private string _progressText = "";
@@ -91,10 +95,18 @@ public sealed partial class SetupViewModel : ObservableObject
     // step 1
     [ObservableProperty] private string _folder = "";
     [ObservableProperty] private string _folderMessage = "";
+    /// <summary>The folder typed or picked is a game with no mods folder yet.</summary>
+    [ObservableProperty] private bool _canCreateMods;
     // step 2
     [ObservableProperty] private string _loaderText = "";
     [ObservableProperty] private bool _skipLauncher;
     [ObservableProperty] private bool _skipLauncherSupported;
+    [ObservableProperty] private bool _loaderInstalled;
+    [ObservableProperty] private string _mcmText = "";
+    [ObservableProperty] private bool _mcmInstalled;
+    [ObservableProperty] private bool _hasModsFolder;
+    /// <summary>A download is under way (the install buttons wait).</summary>
+    [ObservableProperty] private bool _installing;
     // step 3
     [ObservableProperty] private bool _profilesAdopted;
     [ObservableProperty] private string _profilesText = "";
@@ -128,17 +140,32 @@ public sealed partial class SetupViewModel : ObservableObject
         var folder = _session.GetGameFolderStatus();
         Folder = folder.Current.GameDirExists ? folder.Current.GameDir : _session.ModsDir;
         FolderMessage = folder.Current.Message;
+        CanCreateMods = folder.Current.CanCreateMods;
+        HasModsFolder = folder.Current.Ok;
         DetectedFolders.Clear();
-        foreach (var d in folder.DetectedModsDirs) DetectedFolders.Add(d);
+        foreach (var d in folder.DetectedModsDirs)
+            DetectedFolders.Add(new DetectedFolder(d, System.IO.Directory.Exists(d) ? "" : "  (creates its mods folder)"));
         Set(SetupStepId.GameFolder, folder.Current.Ok, folder.Current.Ok ? "Found" : "Not found yet");
 
         var loader = _session.GetModLoaderStatus();
+        LoaderInstalled = loader.Installed;
         LoaderText = loader.Installed
             ? $"Mod Loader {loader.InstalledVersion} is installed in the game folder."
-            : "The Mod Loader isn't installed in this game folder. Mods won't load until it is.";
+            : "The Mod Loader isn't installed in this game folder. Mods won't load until it is. "
+              + "Install downloads the latest release from GitHub and puts its two files (modloader.gd and "
+              + "override.cfg) beside the game.";
         SkipLauncher = loader.SkipLoaderUi;
         SkipLauncherSupported = loader.SupportsSkipUi;
-        Set(SetupStepId.ModLoader, loader.Installed, loader.Installed ? $"{loader.InstalledVersion} installed" : "Not installed");
+        var mcm = _session.McmInstalledVersion();
+        McmInstalled = mcm.Length > 0;
+        McmText = McmInstalled
+            ? $"Mod Configuration Menu {mcm} is in the mods folder."
+            : "Mod Configuration Menu (MCM) isn't installed. Most mods with settings show them through it, "
+              + "so it is worth having from the start. Install downloads it from VostokMods into the mods folder.";
+        Set(SetupStepId.ModLoader, loader.Installed && McmInstalled,
+            !loader.Installed ? "Not installed"
+            : McmInstalled ? $"{loader.InstalledVersion} · MCM {mcm}"
+            : $"{loader.InstalledVersion} · no MCM");
 
         var profiles = _session.GetProfilesSetupStatus();
         ProfilesAdopted = profiles.Adopted;
@@ -197,17 +224,55 @@ public sealed partial class SetupViewModel : ObservableObject
         if (dlg.ShowDialog() == true) Folder = dlg.FolderName;
     }
 
+    /// <summary>Uses the folder typed or picked; a game that has never
+    /// been modded gets its mods folder made first.</summary>
     [RelayCommand]
     private void UseFolder(string? path)
     {
         if (!string.IsNullOrEmpty(path)) Folder = path;
-        var result = _session.ApplyGameFolderStep(Folder);
+        var check = ManagerSession.CheckGameFolder(Folder);
+        var result = check.CanCreateMods ? _session.CreateModsFolderStep(Folder) : _session.ApplyGameFolderStep(Folder);
         if (result == null)
         {
-            FolderMessage = ManagerSession.CheckGameFolder(Folder).Message;
+            check = ManagerSession.CheckGameFolder(Folder);
+            FolderMessage = check.Message;
+            CanCreateMods = check.CanCreateMods;
             return;
         }
         Next();
+    }
+
+    partial void OnFolderChanged(string value)
+    {
+        var check = ManagerSession.CheckGameFolder(value);
+        CanCreateMods = check.CanCreateMods;
+        FolderMessage = check.Message;
+    }
+
+    private bool CanInstall() => !Installing;
+
+    [RelayCommand(CanExecute = nameof(CanInstall))]
+    private async Task InstallLoader()
+    {
+        Installing = true;
+        try { await _session.InstallModLoaderAsync(); }
+        finally { Installing = false; }
+        Read();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanInstall))]
+    private async Task InstallMcm()
+    {
+        Installing = true;
+        try { await _session.InstallMcmAsync(); }
+        finally { Installing = false; }
+        Read();
+    }
+
+    partial void OnInstallingChanged(bool value)
+    {
+        InstallLoaderCommand.NotifyCanExecuteChanged();
+        InstallMcmCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSkipLauncherChanged(bool value)

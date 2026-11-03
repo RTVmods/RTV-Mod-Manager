@@ -37,12 +37,14 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
             else await start;
             Window target = window;
             if (req.Page.StartsWith("startup")) { }
-            else if (req.Page == "setup")
+            else if (req.Page == "setup" || req.Page.StartsWith("setup:"))
             {
-                target = new Views.SetupWindow(new SetupViewModel(shell.Session, SetupReason.FromSettings))
-                {
-                    Width = req.Width, Height = req.Height,
-                };
+                // `setup:<step number>|<folder>` opens that step, with that folder typed in step 1.
+                var vm = new SetupViewModel(shell.Session, SetupReason.FromSettings);
+                var args = req.Page.Contains(':') ? req.Page[(req.Page.IndexOf(':') + 1)..].Split('|') : Array.Empty<string>();
+                if (args.Length > 1 && args[1].Length > 0) vm.Folder = args[1];
+                if (args.Length > 0 && int.TryParse(args[0], out var step)) vm.OpenCommand.Execute(vm.Steps[step - 1]);
+                target = new Views.SetupWindow(vm) { Width = req.Width, Height = req.Height };
                 target.Show();
             }
             else if (req.Page == "library-picker")
@@ -164,6 +166,11 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
             enc.Frames.Add(BitmapFrame.Create(bmp));
             Directory.CreateDirectory(Path.GetDirectoryName(req.OutPath)!);
             using (var fs = File.Create(req.OutPath)) enc.Save(fs);
+        }
+        catch (Exception ex)
+        {
+            // No picture: say why beside where it would have gone.
+            try { File.WriteAllText(req.OutPath + ".err.txt", ex.ToString()); } catch { /* nowhere to write */ }
         }
         finally
         {
