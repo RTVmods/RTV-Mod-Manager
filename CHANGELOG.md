@@ -4,6 +4,7 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 
 ## Unreleased
 
+- **Clone a save into another slot.** On the Saves page, **Clone…** on a save copies it into a slot you pick, under a name you give it, as a save of its own: playing one doesn't change the other. The copy keeps the save's mod profile. A slot that already holds a save is replaced only after you confirm, and its files are zipped to the backups folder first. The slot in play is never offered as the target, because the game writes it when you quit. Cloning the slot in play copies its latest files from the game's save folder. The game must be closed.
 - **Setup gets a vanilla game ready for mods.** On a game that has never been modded, setup used to stop at "no mods folder" and left the Mod Loader to be installed by hand. Now:
   - **Game folder:** a Road to Vostok install without a mods folder is recognised, and **Create the mods folder and use it** makes it. The installs found in your Steam libraries are offered the same way.
   - **Mod Loader and MCM** (step 2): **Install the Mod Loader** downloads the latest release from GitHub and puts its two files (`modloader.gd` and `override.cfg`) beside the game. **Install MCM** downloads Mod Configuration Menu from VostokMods into the mods folder, since most mods with settings show them through it. The step is done once both are there.

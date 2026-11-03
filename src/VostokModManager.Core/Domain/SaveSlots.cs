@@ -12,8 +12,10 @@
 // The manager reads the slots, edits two keys of a slot's _meta.cfg
 // (display_name and profile: the profile link the mod also edits in-game),
 // writes pending.cfg to launch the game straight into a slot, and zips the
-// whole folder as a backup. It never copies save files in or out of a slot;
-// that is the mod's job, done in-game where the game's own saves happen.
+// whole folder as a backup. It never moves save files in or out of the
+// game's save folder; that is the mod's job, done in-game where the game's
+// own saves happen. The one copy it makes is a slot cloned into another
+// slot folder, with the game closed.
 //
 // The .cfg files are Godot ConfigFiles, written by the game. Edits keep every
 // other line as it is.
@@ -252,6 +254,58 @@ public static class SaveSlots
         var removed = 0;
         foreach (var f in slotFiles.Concat(live)) { File.Delete(f); removed++; }
         return removed;
+    }
+
+    /// <summary>Copies slot `from` into slot `to` (a slot the mod does not
+    /// have in play): `to`'s old files are zipped to `backupZip` and removed,
+    /// then `from`'s files are copied in. For the slot in play the save
+    /// files come from the game's save folder, which is newer than its slot
+    /// folder until the mod's next sync. The copy gets its own run id and
+    /// `name` as its display name. Returns the number of files copied.</summary>
+    public static int CloneSlot(string root, string userDir, int from, int to, string name, string backupZip)
+    {
+        if (from == to) throw new ArgumentException("A slot can't be cloned into itself.");
+        if (to == ActiveSlot(root))
+            throw new InvalidOperationException($"Slot {to} is the one in play; the game would write over the copy.");
+        var src = SlotDir(root, from);
+        var dst = SlotDir(root, to);
+
+        // The source: its slot folder, or for the slot in play its live save
+        // files (the slot folder's own "_" files, such as _meta.cfg, still
+        // come from the slot folder).
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(src))
+            foreach (var f in Directory.GetFiles(src)) files[Path.GetFileName(f)] = f;
+        if (from == ActiveSlot(root))
+        {
+            var live = LiveSaveFiles(userDir, FileRules.Load(root));
+            if (live.Any(f => string.Equals(Path.GetFileName(f), OccupancyMarker, StringComparison.OrdinalIgnoreCase)))
+            {
+                foreach (var key in files.Keys.Where(k => !k.StartsWith('_')).ToList()) files.Remove(key);
+                foreach (var f in live) files[Path.GetFileName(f)] = f;
+            }
+        }
+        if (!files.ContainsKey(OccupancyMarker))
+            throw new InvalidOperationException($"Slot {from} holds no save to clone.");
+
+        // The target's old files, kept before they go.
+        Directory.CreateDirectory(dst);
+        var old = Directory.GetFiles(dst);
+        if (old.Length > 0)
+        {
+            var bdir = Path.GetDirectoryName(backupZip);
+            if (!string.IsNullOrEmpty(bdir)) Directory.CreateDirectory(bdir);
+            if (File.Exists(backupZip)) File.Delete(backupZip);
+            using (var zip = ZipFile.Open(backupZip, ZipArchiveMode.Create))
+                foreach (var f in old)
+                    zip.CreateEntryFromFile(f, $"{FolderName}/slot{to}/{Path.GetFileName(f)}", CompressionLevel.Optimal);
+            foreach (var f in old) File.Delete(f);
+        }
+
+        foreach (var (fileName, path) in files) File.Copy(path, Path.Combine(dst, fileName), overwrite: true);
+        SetMetaValue(root, to, "display_name", name.Trim());
+        SetMetaValue(root, to, "run_id", $"{DateTime.Now:yyyyMMdd-HHmmss}-{Random.Shared.Next(10000):D4}");
+        return files.Count;
     }
 
     /// <summary>Takes back a pending launch that did not happen.</summary>

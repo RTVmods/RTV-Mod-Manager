@@ -10,10 +10,10 @@
     <UserControl.Resources>
         <!-- Column widths shared by the heading row and every slot row. -->
         <GridLength x:Key="S.Num">64</GridLength>
-        <GridLength x:Key="S.Map">150</GridLength>
+        <GridLength x:Key="S.Map">140</GridLength>
         <GridLength x:Key="S.Played">160</GridLength>
         <GridLength x:Key="S.Profile">196</GridLength>
-        <GridLength x:Key="S.Actions">390</GridLength>
+        <GridLength x:Key="S.Actions">460</GridLength>
 
         <Style x:Key="Tag" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
@@ -129,6 +129,9 @@
                                 <StackPanel Grid.Column="5" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <Button Style="{StaticResource Btn.Quiet}" Content="Rename" Command="{Binding RenameCommand}"
                                             Visibility="{Binding Slot.CanRename, Converter={StaticResource VisibleWhen}}" />
+                                    <Button Style="{StaticResource Btn.Quiet}" Content="Clone…" Command="{Binding CloneCommand}"
+                                            ToolTip="Copy this save into another slot, as a save of its own"
+                                            Visibility="{Binding CanClone, Converter={StaticResource VisibleWhen}}" />
                                     <Button Style="{StaticResource Btn.Quiet}" Content="Delete" Command="{Binding DeleteCommand}" Margin="0,0,8,0"
                                             Visibility="{Binding Slot.CanDelete, Converter={StaticResource VisibleWhen}}" />
                                     <Button Content="New game" MinHeight="36" MinWidth="100" Margin="0,0,8,0" Command="{Binding NewGameCommand}"

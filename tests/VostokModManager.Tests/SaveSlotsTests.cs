@@ -66,6 +66,54 @@ public class SaveSlotsTests
     }
 
     [Fact]
+    public void Cloning_copies_a_slot_into_another_as_its_own_run()
+    {
+        using var sb = new Sandbox();
+        Slot(2, name: "Hard run", profile: "Beta", map: "Village");
+        File.WriteAllText(Path.Combine(SaveSlots.SlotDir(Root, 2), "World.tres"), "world");
+        SaveSlots.SetMetaValue(Root, 2, "run_id", "run-a");
+        Slot(4, name: "Old");
+        ActiveSlot(1);
+        var prompt = new ScriptedPrompt();
+        var session = LaunchKit.Open(sb, prompt, new RecordingLauncher());
+
+        // Neither the source nor the slot in play can take the copy.
+        Assert.Equal(new[] { 3, 4, 5 }, session.CloneTargets(2).Select(s => s.Number));
+
+        Assert.True(session.CloneSlot(2, 4, "Hard run (copy)"));
+
+        Assert.Contains("confirm:Replace a save", prompt.Asked);
+        var copy = SaveSlots.Read(Root, 4);
+        Assert.Equal(("Hard run (copy)", "Village", "Beta", true), (copy.DisplayName, copy.LastMap, copy.Profile, copy.Occupied));
+        Assert.Equal("world", File.ReadAllText(Path.Combine(SaveSlots.SlotDir(Root, 4), "World.tres")));
+        var meta = SaveSlots.ReadSection(Path.Combine(SaveSlots.SlotDir(Root, 4), SaveSlots.MetaFile), "meta");
+        Assert.NotEqual("run-a", meta["run_id"]);
+        // The source is untouched, and the replaced save was zipped first.
+        Assert.Equal("Hard run", SaveSlots.Read(Root, 2).DisplayName);
+        var zip = Assert.Single(Directory.GetFiles(AppPaths.BackupsDir, "saves-replaced-slot4-*.zip"));
+        using (var z = ZipFile.OpenRead(zip))
+            Assert.Contains(z.Entries, e => e.FullName == "MultiSaveSlots/slot4/Character.tres");
+    }
+
+    [Fact]
+    public void Cloning_the_slot_in_play_takes_its_live_save_files()
+    {
+        using var sb = new Sandbox();
+        Slot(1, name: "Live run");
+        ActiveSlot(1);
+        File.WriteAllText(Path.Combine(SaveSlots.DefaultUserDir, "Character.tres"), "newer live save");
+        var session = LaunchKit.Open(sb, new ScriptedPrompt(), new RecordingLauncher());
+
+        Assert.True(session.CloneSlot(1, 3, "Branch"));
+
+        Assert.Equal("newer live save", File.ReadAllText(Path.Combine(SaveSlots.SlotDir(Root, 3), "Character.tres")));
+        Assert.Equal("Branch", SaveSlots.Read(Root, 3).DisplayName);
+        // The copy never goes into the slot in play.
+        Assert.Throws<InvalidOperationException>(() =>
+            SaveSlots.CloneSlot(Root, SaveSlots.DefaultUserDir, 3, 1, "x", Path.Combine(sb.Root, "b.zip")));
+    }
+
+    [Fact]
     public void A_library_copy_counts_as_present()
     {
         using var sb = new Sandbox();

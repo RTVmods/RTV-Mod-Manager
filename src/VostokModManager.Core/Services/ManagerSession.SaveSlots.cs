@@ -4,8 +4,9 @@
 // The slot list (the Saves view's cards), launching straight into a slot
 // (switching to its profile first), a new game in a slot, rename, delete,
 // back up, and the per-slot profile link, written into the slot's
-// _meta.cfg (the same key the mod's in-game panel edits). The manager
-// never copies save files; the mod does that in-game.
+// _meta.cfg (the same key the mod's in-game panel edits), and cloning a
+// slot into another. Moving saves in and out of the game's save folder is
+// the mod's job, done in-game.
 //
 // Also the built-in mod's upkeep: turning other save-slot mods off,
 // keeping Save Slots out of profile lists, and removing it when the
@@ -229,6 +230,54 @@ public sealed partial class ManagerSession
         catch (Exception ex)
         {
             Prompt.Inform("Delete failed", ex.Message, PromptKind.Error);
+            return false;
+        }
+    }
+
+    /// <summary>The slots `from` can be cloned into: the mod's slots other
+    /// than itself and the one in play (the game writes that one on quit).</summary>
+    public IReadOnlyList<SaveSlots.Slot> CloneTargets(int from)
+    {
+        var root = SaveSlotsRoot;
+        var active = SaveSlots.ActiveSlot(root);
+        return SaveSlots.ReadAll(root)
+            .Where(s => s.Number != from && s.Number != active && s.Number <= SaveSlots.DefaultSlotCount)
+            .ToList();
+    }
+
+    /// <summary>Clones slot `from` into slot `to` under `name`, after
+    /// confirming when `to` holds a save (its files are zipped to the
+    /// backups folder first). The game must be closed. True when cloned.</summary>
+    public bool CloneSlot(int from, int to, string name)
+    {
+        var root = SaveSlotsRoot;
+        var src = SaveSlots.Read(root, from);
+        var dst = SaveSlots.Read(root, to);
+        if (Launcher.IsGameRunning())
+        {
+            Prompt.Inform("Clone", "Road to Vostok is running. Quit the game first.");
+            return false;
+        }
+        if (!src.Occupied)
+        {
+            Prompt.Inform("Clone", $"Slot {from} is empty: there is nothing to clone.");
+            return false;
+        }
+        if (dst.Occupied && !Prompt.Confirm("Replace a save",
+                $"Slot {to} holds \"{dst.Title}\". Replace it with a copy of \"{src.Title}\"?\n\n"
+                + $"Its files are zipped to your {AppPaths.BackupsDir} folder first.",
+                PromptKind.Warning))
+            return false;
+        try
+        {
+            var count = SaveSlots.CloneSlot(root, SaveSlots.DefaultUserDir, from, to, name,
+                SlotBackupPath($"replaced-slot{to}"));
+            Say(StatusArea.Profiles, $"Cloned slot {from} into slot {to} ({count} file(s)).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Prompt.Inform("Clone failed", ex.Message, PromptKind.Error);
             return false;
         }
     }

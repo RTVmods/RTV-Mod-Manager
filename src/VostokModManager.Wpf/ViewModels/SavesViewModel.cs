@@ -94,6 +94,8 @@ public sealed partial class SlotCard : ObservableObject
     [RelayCommand] private void Launch() => _owner.LaunchCommand.Execute(this);
     [RelayCommand] private void NewGame() => _owner.NewGameCommand.Execute(this);
     [RelayCommand] private void Rename() => _owner.RenameCommand.Execute(this);
+    [RelayCommand] private void Clone() => _owner.CloneCommand.Execute(this);
+    public bool CanClone => Slot.Occupied && !Slot.Dead;
     [RelayCommand] private void Delete() => _owner.DeleteCommand.Execute(this);
 
     partial void OnTiedProfileChanged(string value)
@@ -165,6 +167,29 @@ public sealed partial class SavesViewModel : PageViewModel
     {
         var name = Session.Prompt.AskText("Rename slot", $"A name for slot {card.Slot.Number}:", card.Slot.DisplayName);
         if (name != null && Session.RenameSlot(card.Slot.Number, name)) Load();
+    }
+
+    /// <summary>Copies the save into another slot: pick the slot, then a
+    /// name for the copy.</summary>
+    [RelayCommand]
+    private void Clone(SlotCard card)
+    {
+        var from = card.Slot.Number;
+        var targets = Session.CloneTargets(from);
+        if (targets.Count == 0)
+        {
+            Session.Prompt.Inform("Clone", "There is no other slot to clone into: the one in play can't take a copy.");
+            return;
+        }
+        var options = targets.Select(s => s.Occupied ? $"Slot {s.Number}: replace \"{s.Title}\"" : $"Slot {s.Number} (empty)").ToList();
+        var pick = Session.Prompt.Choose("Clone into which slot?",
+            $"A copy of \"{card.Slot.Title}\" goes into the slot you pick, as its own save: playing one doesn't change the other. "
+            + "The slot in play isn't offered (the game writes it when you quit).",
+            options);
+        if (pick < 0) return;
+        var name = Session.Prompt.AskText("Name the copy", "A name for the copy:", card.Slot.Title + " (copy)");
+        if (name == null) return;
+        if (Session.CloneSlot(from, targets[pick].Number, name)) Load();
     }
 
     [RelayCommand]
