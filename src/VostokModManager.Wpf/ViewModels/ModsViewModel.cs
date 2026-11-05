@@ -540,6 +540,22 @@ public sealed partial class ModsViewModel : PageViewModel
         finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
     }
 
+    /// <summary>Offers the required dependencies the enabled mods are
+    /// missing (the crash report's "Install missing dependencies").</summary>
+    public async Task ResolveMissingDependenciesAsync()
+    {
+        var missing = Session.GetLaunchReadiness().MissingDependencyIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var parents = Session.Registry.Enabled()
+            .Where(e => e.RequiredDependencies.Any(missing.Contains))
+            .Select(e => e.ModId)
+            .ToList();
+        if (parents.Count == 0 || Busy) return;
+        Busy = true;
+        try { await Session.CheckAndPromptMissingDepsAsync(parents, MissingDepsUi); }
+        finally { Busy = false; }
+    }
+
     [RelayCommand]
     private async Task CheckUpdates()
     {

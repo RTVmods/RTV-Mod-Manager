@@ -5,6 +5,13 @@ Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Man
 ## Unreleased
 
 - **Update your loadout's mods at startup.** When the startup check finds newer versions on VostokMods for mods that are on in your active profile, the manager asks you whether to update them. It lists each mod with its current and new version, all ticked. **Update** downloads the ticked ones; each mod's current file is backed up first, so it can be reverted. Mods that are off, locked or built in aren't offered. To stop the question, untick **At startup, offer to update the mods in my active profile** in Settings → Updates.
+- **A crash report instead of "restore a checkpoint?".** When the game crashes after a launch from the manager, a crash report opens:
+  - **What happened:** the exit code in plain words (an access violation, a stack overflow, …) and the last lines of the game's log before the crash, with the engine's backtrace.
+  - **Likely causes:** the mods that wrote to the log last before the crash, the mods named in script errors, and the mods turned on, updated or moved since your last session that ended cleanly. The strongest suspects are ticked.
+  - **Ways forward**, only the ones that apply: go back to your last clean session, turn off the ticked mods, update outdated mods, install missing dependencies, check the conflicts, read the log analysis (and ask Claude, in the AI edition), or build a support package to send to the mod's author. Each one is a button.
+  - The launch panel keeps a **Last game crashed · Review** link to open the report again, until the next launch or a session that ends cleanly.
+- **Crashes are caught more often.** The manager now also reads the session's log once the game closes. A crash report from the engine there counts as a crash even when the exit code read 0 or the manager lost track of the game. A game started from Steam that crashed is found at the manager's next start: the report opens if the crash is less than 12 hours old, otherwise only the launch-panel link shows. Each crash is reported once.
+- **Log analysis names the mod behind more errors.** Godot puts the failing script on the line under a `SCRIPT ERROR`. The analysis now reads it there, so the Mod column is filled in for those errors too.
 
 ## 0.7.14 (2026-11-03)
 

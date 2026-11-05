@@ -92,6 +92,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
         session.Changed += OnSessionChanged;
         session.Status += OnStatus;
+        session.GameCrashed += report =>
+        {
+            HasCrash = true;
+            ShowCrashReport?.Invoke(report);
+        };
         foreach (var page in Nav.Append(SettingsNav).Select(n => n.Page)) page.PropertyChanged += OnPageChanged;
         Imports = new Wpf.Services.ImportFlow(session, () => Application.Current?.MainWindow);
         Mods.ImportRequested += async files =>
@@ -359,6 +364,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 ManagerUpdate = mgr.IsOutdated ? $"Update to {mgr.Latest}" : "";
             }
             if (Session.IsFirstRun) Session.FinishFirstRun();
+            else CheckForUnseenCrash();
         }
         catch (Exception ex)
         {
@@ -509,9 +515,84 @@ public sealed partial class ShellViewModel : ObservableObject
         Services.GameFontTheme.Apply(Session.CurrentGameFont());
     }
 
+    // ── crashes ───────────────────────────────────────────────────────
+
+    /// <summary>Set by the window: shows the crash report.</summary>
+    public Action<CrashReport>? ShowCrashReport { get; set; }
+
+    /// <summary>The launch panel's "Last game crashed · Review" line.</summary>
+    [ObservableProperty] private bool _hasCrash;
+
+    [RelayCommand]
+    private void ReviewCrash()
+    {
+        if (Session.LastCrash is { } report) ShowCrashReport?.Invoke(report);
+    }
+
+    /// <summary>Carries out the step picked in the crash report.</summary>
+    public async Task RunCrashActionAsync(CrashAction action, IReadOnlyList<string> modIds)
+    {
+        var log = Session.LastCrash?.Log.LogPath ?? "";
+        switch (action)
+        {
+            case CrashAction.RestoreLastKnownGood:
+                Session.RestoreCheckpoint(VostokModManager.Domain.CheckpointSlot.LastKnownGood);
+                break;
+            case CrashAction.TurnOffSuspects:
+                if (Session.TurnOffModsAfterCrash(modIds) > 0) Open("mods");
+                break;
+            case CrashAction.UpdateMods:
+                Open("mods");
+                await Mods.UpdateModsAsync(Session.GetLoadoutUpdates().Select(e => e.ModId).ToList());
+                break;
+            case CrashAction.ReviewMissingDependencies:
+                Open("mods");
+                await Mods.ResolveMissingDependenciesAsync();
+                break;
+            case CrashAction.ReviewConflicts:
+                Open("mods");
+                Mods.ShowConflictsCommand.Execute(null);
+                break;
+            case CrashAction.OpenLogAnalysis:
+            case CrashAction.AnalyzeWithClaude:
+                Open("tools");
+                if (NavByKey("tools")?.Page is ToolsViewModel tools)
+                {
+                    tools.ShowLog(log);
+                    if (action == CrashAction.AnalyzeWithClaude) await tools.AnalyzeWithClaudeCommand.ExecuteAsync(null);
+                }
+                break;
+            case CrashAction.BuildSupportPackage:
+                Open("tools");
+                if (NavByKey("tools")?.Page is ToolsViewModel support)
+                {
+                    support.SetTabCommand.Execute("support");
+                    await support.BuildSupportPackageCommand.ExecuteAsync(null);
+                }
+                break;
+            case CrashAction.OpenLogFile:
+                if (File.Exists(log))
+                    try { Process.Start(new ProcessStartInfo(log) { UseShellExecute = true }); } catch { }
+                break;
+        }
+    }
+
+    /// <summary>At startup: a crash in a session the manager didn't watch
+    /// (the game started from Steam). A recent one opens the report; an
+    /// older one only shows on the launch panel.</summary>
+    private void CheckForUnseenCrash()
+    {
+        if (Session.FindUnseenCrash() is not { } report) return;
+        HasCrash = true;
+        Session.MarkCrashSeen(report);
+        if (DateTime.UtcNow - report.Log.WrittenUtc < TimeSpan.FromHours(12))
+            ShowCrashReport?.Invoke(report);
+    }
+
     private void OnSessionChanged()
     {
         // Events come on the UI thread (the session is UI-thread-affine).
+        HasCrash = Session.LastCrash != null;
         ProfileName = Session.ActiveProfile?.Name ?? "No profile yet";
         var ver = MmlInstall.DetectInstalledVersion(Session.ModsDir);
         LoaderVersion = string.IsNullOrEmpty(ver) ? "Mod Loader not found" : $"Mod Loader {ver}";

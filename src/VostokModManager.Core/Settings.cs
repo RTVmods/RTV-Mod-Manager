@@ -173,6 +173,10 @@ public class Settings
     /// in the active profile that VostokMods has newer versions of.</summary>
     public bool AskModUpdatesAtStartup { get; set; } = true;
 
+    /// <summary>The write time of the newest crashed game log the user has
+    /// already been shown, so the same crash isn't reported twice.</summary>
+    public DateTime LastCrashSeenUtc { get; set; }
+
     /// <summary>The one-time offer to turn off other save-slot mods in
     /// the saved profiles has been made.</summary>
     public bool SaveSlotsOtherModsAsked { get; set; }

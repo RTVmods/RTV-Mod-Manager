@@ -311,11 +311,17 @@ public static class GodotLogAnalyzer
                 var msg = im.Groups[2].Value.Trim();
                 if (msg.Length == 0) continue;
                 if (_reNoiseWarning.IsMatch(msg)) continue; // cosmetic spam
+                var hint = GuessMod(msg);
+                // Godot 4 puts the script on the next line: "   at: _ready
+                // (res://mods/<folder>/Main.gd:12)".
+                if (hint.Length == 0 && i + 1 < lines.Length
+                    && lines[i + 1].TrimStart().StartsWith("at:", StringComparison.Ordinal))
+                    hint = GuessMod(lines[i + 1]);
                 a.Issues.Add(new LogIssue
                 {
                     Severity = sev,
                     Message  = msg,
-                    ModHint  = GuessMod(msg),
+                    ModHint  = hint,
                     LineNo   = lineNo,
                 });
             }

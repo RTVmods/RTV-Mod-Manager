@@ -141,15 +141,17 @@ public sealed partial class ManagerSession
     private void StartGameWatch()
     {
         StopWatchingGame();
+        // A new launch: the last crash's "Review" no longer describes the loadout.
+        LastCrash = null;
         var cts = new CancellationTokenSource();
         _gameWatch = cts;
-        _gameWatchTask = WatchGameSessionAsync(cts);
+        _gameWatchTask = WatchGameSessionAsync(cts, DateTime.UtcNow);
     }
 
     /// <summary>Awaits the monitor and acts on the outcome. The await
     /// resumes on the caller's context, so the restore offer runs on the
     /// UI thread like every other session call.</summary>
-    private async Task<GameExit> WatchGameSessionAsync(CancellationTokenSource cts)
+    private async Task<GameExit> WatchGameSessionAsync(CancellationTokenSource cts, DateTime launchedUtc)
     {
         var exit = await GameMonitor.WatchAsync(cts.Token, phase =>
         {
@@ -159,8 +161,14 @@ public sealed partial class ManagerSession
         if (ReferenceEquals(_gameWatch, cts)) _gameWatch = null;
         cts.Dispose();
         if (cancelled) return exit;  // the app closed / a newer launch took over
+        // The session's log has the last word: the crash handler's block
+        // there is a crash even when the exit code read 0 or couldn't be
+        // read at all (the watch lost the process, or never found it).
+        var log = CrashLog.ReadNewest(launchedUtc.AddSeconds(-5));
+        if (exit.Kind != GameExitKind.LikelyCrash && log.HasCrashSignature)
+            exit = exit with { Kind = GameExitKind.LikelyCrash };
         Say(StatusArea.Launch, LaunchEndText(exit));
-        HandleGameExit(exit);
+        HandleGameExit(exit, log);
         // The game moved its save slots on (active slot, a new run): whatever
         // the exit, what the launch panel offers to continue has changed.
         RaiseChanged();
@@ -190,23 +198,26 @@ public sealed partial class ManagerSession
             "The game didn't appear within a minute. If Steam opened a window, "
             + "it may be behind this one.",
         GameExitKind.CleanExit or GameExitKind.ShortExit => "Game closed.",
-        GameExitKind.LikelyCrash => $"Game exited with code {exit.ExitCode}.",
+        GameExitKind.LikelyCrash => exit.ExitCode is 0 or -1
+            ? "The game crashed (its log has a crash report)."
+            : $"The game crashed (exit code {exit.ExitCode}).",
         _ => "",
     };
 
     /// <summary>A clean session promotes the last-launch checkpoint to
     /// last-known-good (the cfg state was validated by a real play); a
-    /// likely crash offers to restore a checkpoint.</summary>
-    internal void HandleGameExit(GameExit exit)
+    /// likely crash is reported with what the log says and the ways back.</summary>
+    internal void HandleGameExit(GameExit exit, CrashLogInfo? log = null)
     {
         switch (exit.Kind)
         {
             case GameExitKind.CleanExit:
                 CrashCheckpoint.PromoteToKnownGood();
+                LastCrash = null;
                 RaiseChanged();
                 break;
             case GameExitKind.LikelyCrash:
-                OfferCrashRestore(exit);
+                ReportCrash(exit, log ?? CrashLogInfo.None);
                 break;
         }
     }

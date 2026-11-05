@@ -35,6 +35,11 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         };
         Shell.ManagerUpdateUi = ManagerUpdateWindow.Runner(() => this, Shell.Session);
+        Shell.ShowCrashReport = report =>
+        {
+            var (action, ids) = CrashReportWindow.Show(this, report);
+            if (action is { } a) _ = Shell.RunCrashActionAsync(a, ids);
+        };
 
         // The Mods page's full windows (conflicts, dependencies, earlier
         // versions, drift review, the missing-dependency resolver, the link review).

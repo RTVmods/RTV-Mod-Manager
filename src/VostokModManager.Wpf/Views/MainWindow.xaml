@@ -261,6 +261,13 @@
                                     <Binding Path="LaunchStatusText" Converter="{StaticResource EmptyToCollapsed}" />
                                 </TextBlock.Visibility>
                             </TextBlock>
+                            <Button Style="{StaticResource Btn.Link}" Command="{Binding ReviewCrashCommand}" Margin="0,8,0,0"
+                                    HorizontalAlignment="Left" Foreground="{StaticResource B.SalmonText}"
+                                    Visibility="{Binding HasCrash, Converter={StaticResource VisibleWhen}}"
+                                    ToolTip="What the log says, the likely causes and the ways back"
+                                    AutomationProperties.Name="Review the last crash">
+                                <TextBlock Text="Last game crashed · Review" FontSize="13" TextWrapping="Wrap" />
+                            </Button>
                         </StackPanel>
                     </Border>
                 </DockPanel>

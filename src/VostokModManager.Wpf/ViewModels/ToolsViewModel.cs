@@ -48,6 +48,17 @@ public sealed partial class ToolsViewModel : PageViewModel
         SelectedLog = i >= 0 ? Logs[i] : null;
     }
 
+    /// <summary>Opens the Log analysis tab on `path` (the crash report's
+    /// "Read the log analysis"), re-reading the list so a log written
+    /// since the page was last shown is there.</summary>
+    public void ShowLog(string path)
+    {
+        Tab = "log";
+        LoadLogs();
+        var item = Logs.FirstOrDefault(l => string.Equals(l.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (item != null) SelectedLog = item;
+    }
+
     // ── Claude's reading of the log (AI edition) ──────────────────────
 
 #if AI_RESOLVER

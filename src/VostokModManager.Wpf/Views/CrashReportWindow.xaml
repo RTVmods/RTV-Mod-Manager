@@ -1,0 +1,107 @@
+<Window x:Class="VostokModManager.Wpf.Views.CrashReportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svc="clr-namespace:VostokModManager.Services;assembly=VostokModManager.Core"
+        xmlns:local="clr-namespace:VostokModManager.Wpf.Views"
+        Title="Crash report"
+        Width="900" Height="760" MinWidth="680" MinHeight="460"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource B.Rail}" Foreground="{StaticResource B.Text}"
+        FontFamily="{DynamicResource Font.Lora}" FontSize="{StaticResource Size.Body}" UseLayoutRounding="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="6" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
+    <Border BorderBrush="{StaticResource B.Edge}" BorderThickness="1" Background="{StaticResource B.Rail}">
+        <DockPanel Margin="28,24,28,22">
+            <TextBlock DockPanel.Dock="Top" Text="CRASH REPORT" Style="{StaticResource T.Label}" Foreground="{StaticResource B.SalmonText}" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Report.Headline}" Style="{StaticResource T.H2}" Margin="0,4,0,8" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Report.Summary}" Style="{StaticResource T.Body}" Foreground="{StaticResource B.Text2}"
+                       TextWrapping="Wrap" />
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Report.ExitMeaning}" Style="{StaticResource T.Muted}" TextWrapping="Wrap" Margin="0,6,0,0"
+                       Visibility="{Binding Report.ExitMeaning, Converter={StaticResource VisibleWhen}}" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0" LastChildFill="False">
+                <Button DockPanel.Dock="Left" Style="{StaticResource Btn.Link}" Content="Open the log file"
+                        Click="OnOpenLog" Visibility="{Binding Report.Log.Found, Converter={StaticResource VisibleWhen}}"
+                        ToolTip="{Binding Report.Log.LogPath}" VerticalAlignment="Center" />
+                <Button DockPanel.Dock="Right" Content="Close" MinWidth="96" IsCancel="True" Click="OnClose" />
+            </DockPanel>
+
+            <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" Margin="0,18,0,0" Focusable="False">
+                <StackPanel>
+                    <!-- likely causes -->
+                    <TextBlock Text="LIKELY CAUSES" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource T.Muted}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Nothing in the log or your recent changes points at a particular mod. The log analysis and a support package are the next places to look."
+                               Visibility="{Binding Report.HasSuspects, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                    <TextBlock Style="{StaticResource T.Muted}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Clues, not proof: a mod that logged last may only have been the last one busy. Ticked mods are the ones “Turn off” turns off."
+                               Visibility="{Binding Report.HasSuspects, Converter={StaticResource VisibleWhen}}" />
+                    <ItemsControl ItemsSource="{Binding Suspects}" Focusable="False" Margin="0,0,0,20">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:CrashSuspectItem}">
+                                <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,8">
+                                    <DockPanel>
+                                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IsChecked}" IsEnabled="{Binding Suspect.CanTurnOff}"
+                                                  VerticalAlignment="Top" Margin="0,2,10,0"
+                                                  AutomationProperties.Name="{Binding Suspect.Name}"
+                                                  ToolTip="{Binding CheckTip}" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Suspect.Name}" FontSize="15" FontWeight="SemiBold" ToolTip="{Binding Suspect.ModId}" />
+                                            <TextBlock Text="{Binding Suspect.Why}" FontSize="13" Foreground="{StaticResource B.Text2}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- ways forward -->
+                    <TextBlock Text="WAYS FORWARD" Style="{StaticResource T.Label}" Margin="0,0,0,6" />
+                    <ItemsControl ItemsSource="{Binding Steps}" Focusable="False" Margin="0,0,0,20">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:CrashStepItem}">
+                                <Border BorderBrush="{StaticResource B.HairlineSoft}" BorderThickness="0,0,0,1" Padding="0,10">
+                                    <DockPanel>
+                                        <Grid DockPanel.Dock="Right" Margin="16,0,0,0" VerticalAlignment="Center">
+                                            <Button Style="{StaticResource Btn.Primary}" Content="{Binding Step.Button}" MinWidth="110"
+                                                    Click="OnStep" Visibility="{Binding IsFirst, Converter={StaticResource VisibleWhen}}" />
+                                            <Button Content="{Binding Step.Button}" MinWidth="110"
+                                                    Click="OnStep" Visibility="{Binding IsFirst, Converter={StaticResource VisibleWhen}, ConverterParameter=invert}" />
+                                        </Grid>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Step.Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Step.Detail}" FontSize="13" Foreground="{StaticResource B.Text2}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- what changed since the last clean session -->
+                    <StackPanel Visibility="{Binding Report.HasChanges, Converter={StaticResource VisibleWhen}}" Margin="0,0,0,20">
+                        <TextBlock Style="{StaticResource T.Label}" Margin="0,0,0,6" Text="{Binding ChangesTitle}" />
+                        <ItemsControl ItemsSource="{Binding Report.ChangesSinceGood}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type svc:CrashChange}">
+                                    <TextBlock FontSize="13" Margin="0,2" TextWrapping="Wrap">
+                                        <Run Text="{Binding Name, Mode=OneWay}" Foreground="{StaticResource B.Text}" /><Run Text="  ·  " Foreground="{StaticResource B.Text3}" /><Run Text="{Binding What, Mode=OneWay}" Foreground="{StaticResource B.Text2}" />
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- the log's last lines -->
+                    <StackPanel Visibility="{Binding Report.HasTail, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Style="{StaticResource T.Label}" Margin="0,0,0,6" Text="{Binding TailTitle}" />
+                        <Border Style="{StaticResource Panel.Notice}">
+                            <TextBlock Text="{Binding TailText}" Style="{StaticResource T.Mono}" TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

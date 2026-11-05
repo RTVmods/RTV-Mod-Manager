@@ -47,6 +47,14 @@ internal sealed record ScreenshotRequest(string Page, string OutPath, int Width,
                 target = new Views.SetupWindow(vm) { Width = req.Width, Height = req.Height };
                 target.Show();
             }
+            else if (req.Page == "crash")
+            {
+                // The crash report for the sandbox's newest log, as after a watched crash.
+                var report = shell.Session.BuildCrashReport(new VostokModManager.Services.GameExit(
+                    VostokModManager.Services.GameExitKind.LikelyCrash, unchecked((int)0xC0000005), 312));
+                target = new Views.CrashReportWindow(report) { Width = req.Width, Height = req.Height };
+                target.Show();
+            }
             else if (req.Page == "library-picker")
             {
                 target = new Views.LibraryPickerWindow(new LibraryPickerViewModel(shell.Session))

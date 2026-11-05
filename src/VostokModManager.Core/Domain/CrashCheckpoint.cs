@@ -44,6 +44,10 @@ public static class CrashCheckpoint
             slot == CheckpointSlot.LastLaunch ? "last-launch" : "last-known-good");
 
     private static string CfgPath(CheckpointSlot s)     => System.IO.Path.Combine(DirFor(s), "mod_config.cfg");
+
+    /// <summary>The slot's copy of mod_config.cfg (read-only use: what
+    /// the mods were at that point).</summary>
+    public static string ConfigPathFor(CheckpointSlot s) => CfgPath(s);
     private static string ProfilePath(CheckpointSlot s) => System.IO.Path.Combine(DirFor(s), "profile.json");
     private static string MarkerPath(CheckpointSlot s)  => System.IO.Path.Combine(DirFor(s), "marker.json");
 
