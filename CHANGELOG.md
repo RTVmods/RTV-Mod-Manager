@@ -2,6 +2,10 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+- **Update your loadout's mods at startup.** When the startup check finds newer versions on VostokMods for mods that are on in your active profile, the manager asks you whether to update them. It lists each mod with its current and new version, all ticked. **Update** downloads the ticked ones; each mod's current file is backed up first, so it can be reverted. Mods that are off, locked or built in aren't offered. To stop the question, untick **At startup, offer to update the mods in my active profile** in Settings → Updates.
+
 ## 0.7.14 (2026-11-03)
 
 - **Tools no longer has the Mod Packager.** Tools now holds Log analysis and the Support package. Exporting a profile as a mod list or a modpack is still on the Profiles page (**Export…**).

@@ -68,7 +68,7 @@
                 <Border Style="{StaticResource Section}">
                     <StackPanel>
                         <TextBlock Text="Updates" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="The manager and the Mod Loader check GitHub for new releases at startup."
+                        <TextBlock Text="At startup the manager and the Mod Loader check GitHub for new releases, and your mods are checked on VostokMods."
                                    Style="{StaticResource T.Muted}" Margin="0,0,0,12" />
                         <DockPanel Margin="0,0,0,8">
                             <Button DockPanel.Dock="Right" Content="Check now" Command="{Binding CheckManagerCommand}" />
@@ -78,6 +78,8 @@
                             <Button DockPanel.Dock="Right" Content="Check now" Command="{Binding CheckLoaderCommand}" />
                             <TextBlock Text="{Binding LoaderStatus}" VerticalAlignment="Center" FontSize="14" />
                         </DockPanel>
+                        <CheckBox Content="At startup, offer to update the mods in my active profile that have new versions"
+                                  IsChecked="{Binding AskModUpdatesAtStartup}" Margin="0,14,0,0" />
                     </StackPanel>
                 </Border>
 

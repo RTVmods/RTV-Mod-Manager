@@ -530,6 +530,16 @@ public sealed partial class ModsViewModel : PageViewModel
         finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
     }
 
+    /// <summary>Updates the given mods with the download bands on their
+    /// rows (the startup offer's "Update").</summary>
+    public async Task UpdateModsAsync(IReadOnlyList<string> modIds)
+    {
+        if (Busy || modIds.Count == 0) return;
+        Busy = true;
+        try { await Session.UpdateAllAsync(DownloadReporter("mods"), modIds); }
+        finally { Busy = false; InstallProgress = ""; ClearDownloadBands(); }
+    }
+
     [RelayCommand]
     private async Task CheckUpdates()
     {

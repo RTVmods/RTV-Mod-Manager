@@ -38,6 +38,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] private bool _skipLoaderUi;
     [ObservableProperty] private bool _saveSlotsBuiltIn;
     [ObservableProperty] private bool _followGameFont;
+    [ObservableProperty] private bool _askModUpdatesAtStartup;
     [ObservableProperty] private string _gameFontNote = "";
     [ObservableProperty] private string _claudeStatus = "";
     [ObservableProperty] private string _managerStatus = "";
@@ -58,6 +59,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         SkipLoaderUi = _saved.SkipLoaderUi;
         SaveSlotsBuiltIn = _saved.SaveSlotsBuiltIn;
         FollowGameFont = _saved.FollowGameFont;
+        AskModUpdatesAtStartup = _saved.AskModUpdatesAtStartup;
         GameFontNote = Session.Registry.FindById(ManagerSession.CustomFontsModId) is { IsEnabled: true }
             ? $"Custom Fonts is on in this profile. The manager shows: {Services.GameFontTheme.Current}."
             : "Custom Fonts isn't on in this profile, so the manager uses Lora, the game's own font.";
@@ -78,6 +80,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnSkipLoaderUiChanged(bool value) => Touch();
     partial void OnSaveSlotsBuiltInChanged(bool value) => Touch();
     partial void OnFollowGameFontChanged(bool value) => Touch();
+    partial void OnAskModUpdatesAtStartupChanged(bool value) => Touch();
     private void Touch() { if (!_loading) Dirty = true; }
 
     [RelayCommand]
@@ -85,7 +88,8 @@ public sealed partial class SettingsViewModel : PageViewModel
     {
         var after = new SettingsValues(
             string.Equals(ModsDir, ManagerSession.SteamFallbackModsDir, StringComparison.OrdinalIgnoreCase) ? "" : ModsDir.Trim(),
-            ClaudePath.Trim(), GameSourcePath.Trim(), SkipLoaderUi, SaveSlotsBuiltIn, FollowGameFont);
+            ClaudePath.Trim(), GameSourcePath.Trim(), SkipLoaderUi, SaveSlotsBuiltIn, FollowGameFont,
+            AskModUpdatesAtStartup);
         var result = Session.ApplySettingsChange(_saved, after);
         if (result.RearmFolderWatcher) _shell.WatchModsFolder();
         _shell.RefreshGameFont();

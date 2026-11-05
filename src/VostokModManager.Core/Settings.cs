@@ -169,6 +169,10 @@ public class Settings
     /// manager's text uses the font picked for the game in its settings.</summary>
     public bool FollowGameFont { get; set; } = true;
 
+    /// <summary>After the startup update check, offer to update the mods
+    /// in the active profile that VostokMods has newer versions of.</summary>
+    public bool AskModUpdatesAtStartup { get; set; } = true;
+
     /// <summary>The one-time offer to turn off other save-slot mods in
     /// the saved profiles has been made.</summary>
     public bool SaveSlotsOtherModsAsked { get; set; }

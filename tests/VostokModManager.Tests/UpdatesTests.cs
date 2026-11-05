@@ -195,6 +195,57 @@ public class UpdatesTests
         Assert.Empty(s.GetOutdatedMods());
     }
 
+    /// <summary>alpha (on) and beta (off) both 1.0 with 1.1 on VostokMods.</summary>
+    private static ManagerSession LoadoutWithOneOffMod(Sandbox sb, ScriptedPrompt prompt)
+    {
+        sb.WriteCfg(Cfg(("alpha@1.0", true, 7), ("beta@1.0", false, 8)));
+        sb.AddMod("alpha", "1.0", name: "Alpha", extraManifest: Src("alpha"));
+        sb.AddMod("beta", "1.0", name: "Beta", extraManifest: Src("beta"));
+        var s = Offline(RefreshTests.OpenWithProfile(sb, prompt,
+            new ProfileMod { ModId = "alpha", Version = "1.0", IsEnabled = true, Priority = 7 },
+            new ProfileMod { ModId = "beta", Version = "1.0", IsEnabled = false, Priority = 8 }));
+        s.Refresh();
+        s.LatestVersions["vostokmods:alpha"] = "1.1";
+        s.LatestVersions["vostokmods:beta"] = "1.1";
+        return s;
+    }
+
+    [Fact]
+    public void Startup_offer_lists_only_the_outdated_mods_that_are_on()
+    {
+        using var sb = new Sandbox();
+        var prompt = new ScriptedPrompt();
+        var s = LoadoutWithOneOffMod(sb, prompt);
+        Assert.Equal(2, s.GetOutdatedMods().Count);
+
+        var picked = s.AskStartupModUpdates();
+
+        Assert.Equal(new[] { "alpha" }, picked);
+        Assert.Equal("pick:Mod updates", Assert.Single(prompt.Asked));
+        Assert.StartsWith("1 mod in ", prompt.Messages.Single().Message);
+    }
+
+    [Fact]
+    public void Startup_offer_stays_quiet_when_turned_off_or_declined()
+    {
+        using var sb = new Sandbox();
+        var prompt = new ScriptedPrompt();
+        var s = LoadoutWithOneOffMod(sb, prompt);
+
+        s.Settings.AskModUpdatesAtStartup = false;
+        Assert.Null(s.AskStartupModUpdates());
+        Assert.Empty(prompt.Asked);
+
+        s.Settings.AskModUpdatesAtStartup = true;
+        prompt.PickAnswer = _ => null;  // "Not now"
+        Assert.Null(s.AskStartupModUpdates());
+
+        s.LatestVersions["vostokmods:alpha"] = "1.0";  // nothing on is outdated
+        prompt.Asked.Clear();
+        Assert.Null(s.AskStartupModUpdates());
+        Assert.Empty(prompt.Asked);
+    }
+
     [Fact]
     public async Task A_failed_download_reports_the_error_and_leaves_the_mod_alone()
     {

@@ -402,6 +402,39 @@ public sealed partial class ManagerSession
             .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    /// <summary>The outdated mods that are on in the active profile (the
+    /// loadout the game will run), leaving out locked and built-in ones.</summary>
+    public List<ModEntry> GetLoadoutUpdates()
+        => GetOutdatedMods()
+            .Where(e => e.IsEnabled && !IsBuiltInActive(e.ModId))
+            .ToList();
+
+    /// <summary>The startup offer: when the active profile has mods with
+    /// updates (and the setting is on), a checklist of them, all ticked.
+    /// Returns the mod ids to update, or null when there is nothing to
+    /// update or the user said not now.</summary>
+    public IReadOnlyList<string>? AskStartupModUpdates()
+    {
+        if (!Settings.AskModUpdatesAtStartup || IsUpdating) return null;
+        var outdated = GetLoadoutUpdates();
+        if (outdated.Count == 0) return null;
+        var items = outdated.Select(e =>
+        {
+            var name = string.IsNullOrEmpty(e.DisplayName) ? e.ModId : e.DisplayName;
+            var latest = TryGetLatest(e, out var l) ? l : "?";
+            return new PickItem<string>(e.ModId, name, $"v{e.Version}  →  v{latest}");
+        }).ToList();
+        var profile = string.IsNullOrEmpty(Settings.ActiveProfileName)
+            ? "your active profile" : $"the {Settings.ActiveProfileName} profile";
+        var n = outdated.Count;
+        var picked = Prompt.Pick("Mod updates",
+            $"{n} mod{(n == 1 ? "" : "s")} in {profile} {(n == 1 ? "has" : "have")} a newer version on VostokMods. "
+            + "Tick the ones to update now. Each mod's current file is backed up first, so it can be reverted.\n\n"
+            + "You can turn this question off in Settings → Updates.",
+            items, "Update");
+        return picked is { Count: > 0 } ? picked : null;
+    }
+
     /// <summary>Updates every outdated mod (or the given ones) one after
     /// another, then re-checks versions once. Progress is reported per
     /// mod; the results list one entry per mod attempted.</summary>

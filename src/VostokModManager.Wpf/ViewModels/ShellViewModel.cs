@@ -338,6 +338,13 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 BeginStep("Checking your mods for updates on VostokMods");
                 await Session.CheckUpdatesAsync();
+                // Mods in the active profile with newer versions: offer
+                // to update them before the game is launched with the old ones.
+                if (Session.AskStartupModUpdates() is { } toUpdate)
+                {
+                    BeginStep($"Updating {toUpdate.Count} mod{(toUpdate.Count == 1 ? "" : "s")}");
+                    await Mods.UpdateModsAsync(toUpdate);
+                }
             }
             if (result.Has(StartupStep.CheckMmlVersion))
             {
