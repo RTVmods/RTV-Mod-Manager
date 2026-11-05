@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.15 (2026-11-06)
 
 - **Update your loadout's mods at startup.** When the startup check finds newer versions on VostokMods for mods that are on in your active profile, the manager asks you whether to update them. It lists each mod with its current and new version, all ticked. **Update** downloads the ticked ones; each mod's current file is backed up first, so it can be reverted. Mods that are off, locked or built in aren't offered. To stop the question, untick **At startup, offer to update the mods in my active profile** in Settings → Updates.
 - **A crash report instead of "restore a checkpoint?".** When the game crashes after a launch from the manager, a crash report opens:
