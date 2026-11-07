@@ -2,7 +2,7 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
-## Unreleased
+## 0.7.16 (2026-11-07)
 
 Ready for Metro Mod Loader 3.5.0.
 
