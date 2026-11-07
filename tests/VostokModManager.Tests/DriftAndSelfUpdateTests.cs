@@ -86,13 +86,13 @@ public class DriftAndSelfUpdateTests
     {
         using var sb = new Sandbox();
         File.WriteAllText(Path.Combine(sb.GameDir, "modloader.gd"), FakeModloader("3.4.1"));
-        File.WriteAllText(Path.Combine(sb.GameDir, "override.cfg"), "old");
+        File.WriteAllText(Path.Combine(sb.GameDir, "override.cfg"), "[display]\nwindow/size/mode=3\n\n[autoload]\nModLoader=\"*res://modloader.gd\"\n");
         var prompt = new ScriptedPrompt();
         var s = Offline(RefreshTests.OpenWithProfile(sb, prompt));
         s.UpdateNet.DownloadMmlAsset = (tag, asset, path) =>
         {
             Assert.Equal("v3.4.2", tag);
-            File.WriteAllText(path, asset == "modloader.gd" ? FakeModloader("3.4.2") : "new");
+            File.WriteAllText(path, asset == "modloader.gd" ? FakeModloader("3.4.2") : "[autoload_prepend]\nModLoader=\"*res://modloader.gd\"\n\n[autoload]\n");
             return Task.CompletedTask;
         };
         s.UpdateNet.FetchMmlRelease = () => Task.FromResult<MmlRelease?>(new MmlRelease { TagName = "v3.4.2", HtmlUrl = "u" });
@@ -102,7 +102,10 @@ public class DriftAndSelfUpdateTests
         Assert.True(await s.UpdateMmlAsync("v3.4.2"));
 
         Assert.Equal("3.4.2", MmlInstall.DetectInstalledVersion(sb.ModsDir));
-        Assert.Equal("new", File.ReadAllText(Path.Combine(sb.GameDir, "override.cfg")));
+        // override.cfg is merged, not replaced: the user's [display] stays and the
+        // pre-3.x [autoload] ModLoader line gives way to [autoload_prepend].
+        Assert.Equal("[display]\nwindow/size/mode=3\n\n[autoload]\n\n[autoload_prepend]\n\nModLoader=\"*res://modloader.gd\"\n",
+            File.ReadAllText(Path.Combine(sb.GameDir, "override.cfg")));
         Assert.Equal(2, Directory.GetFiles(sb.GameDir, "*.bak").Length);
         Assert.Empty(Directory.GetFiles(sb.GameDir, "*.download"));
         Assert.Contains("inform:MML updated", prompt.Asked);

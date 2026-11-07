@@ -197,7 +197,7 @@ public class SetupTests
         {
             File.WriteAllText(path, asset == "modloader.gd"
                 ? "extends Node\nconst MODLOADER_VERSION := \"3.4.2\"\n" + new string('#', 1200)
-                : "[autoload]");
+                : "[autoload_prepend]\nModLoader=\"*res://modloader.gd\"\n\n[autoload]\n");
             return Task.CompletedTask;
         };
         Assert.False(session.GetModLoaderStatus().Installed);

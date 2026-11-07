@@ -448,7 +448,32 @@ public class ModConfig
         {
             existing.RawValue = Quote(ActiveProfile);
             existing.RawText = null;
+            RetargetPendingMcmSwitch(settings);
         }
+    }
+
+    private const string McmPendingFromKey = "mcm_pending_from";
+    private const string McmPendingToKey = "mcm_pending_to";
+
+    /// <summary>MML 3.5 defers the MCM swap of a profile switch made in its
+    /// in-game menu to the next boot (`mcm_pending_from` → `mcm_pending_to`).
+    /// A switch made here before that boot would leave the loader restoring
+    /// the menu's pick under this profile, so the pending target follows the
+    /// switch, as a second switch in the loader's own menu does; switching
+    /// back to `from` cancels it. Without a pending switch nothing is added.</summary>
+    private void RetargetPendingMcmSwitch(Section settings)
+    {
+        var to = settings.Find(McmPendingToKey);
+        if (to == null || Unquote(to.RawValue).Length == 0) return;
+        var from = settings.Find(McmPendingFromKey);
+        if (from != null && Unquote(from.RawValue) == ActiveProfile)
+        {
+            settings.Remove(McmPendingFromKey);
+            settings.Remove(McmPendingToKey);
+            return;
+        }
+        to.RawValue = Quote(ActiveProfile);
+        to.RawText = null;
     }
 
     /// <summary>Godot's layout: a header, a blank line, the section's

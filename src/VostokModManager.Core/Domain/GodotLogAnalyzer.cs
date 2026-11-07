@@ -189,6 +189,12 @@ public static class GodotLogAnalyzer
         @"Hook declared:\s+(res://\S+)\s+::\s+(\S+)\s+\[(.+?)\]\s*$",
         RegexOptions.Compiled);
 
+    // MML 3.5 writes one line per script instead: "  [hooks] res://X.gd :: A, B [Mod]",
+    // with "*" for every method. Also Developer Mode only.
+    private static readonly Regex _reHooks35 = new(
+        @"\[hooks\]\s+(res://\S+)\s+::\s+(\*|[\w, ]+?)\s+\[([^\[\]]+)\]\s*$",
+        RegexOptions.Compiled);
+
     private static readonly Regex _reIssue = new(
         @"^(SCRIPT ERROR|ERROR|WARNING):\s*(.*)$",
         RegexOptions.Compiled);
@@ -304,6 +310,20 @@ public static class GodotLogAnalyzer
                 continue;
             }
 
+            var hm35 = _reHooks35.Match(line);
+            if (hm35.Success)
+            {
+                foreach (var method in hm35.Groups[2].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    a.Hooks.Add(new LogHook
+                    {
+                        VanillaPath = hm35.Groups[1].Value,
+                        Method      = method,
+                        ModName     = hm35.Groups[3].Value.Trim(),
+                        LineNo      = lineNo,
+                    });
+                continue;
+            }
+
             var im = _reIssue.Match(line);
             if (im.Success)
             {
@@ -335,7 +355,9 @@ public static class GodotLogAnalyzer
 
     /// <summary>Groups hook declarations by (path :: method); any target
     /// declared by 2+ distinct mods is a hook clash — multiple mods hook
-    /// the same function. Mods preserve declaration order.</summary>
+    /// the same function. Mods preserve declaration order. A "*" hook
+    /// (MML 3.5's every-method form) joins every named method hooked on
+    /// its script.</summary>
     private static List<HookClash> DeriveHookClashes(List<LogHook> hooks)
     {
         var byTarget = new Dictionary<string, HookClash>(StringComparer.Ordinal);
@@ -352,6 +374,13 @@ public static class GodotLogAnalyzer
                 order.Add(h.Target);
             }
             if (!hc.Mods.Contains(h.ModName)) hc.Mods.Add(h.ModName);
+        }
+        foreach (var hc in byTarget.Values.Where(c => c.Method != "*"))
+        {
+            if (!byTarget.TryGetValue($"{hc.VanillaPath} :: *", out var all))
+                continue;
+            foreach (var mod in all.Mods)
+                if (!hc.Mods.Contains(mod)) hc.Mods.Add(mod);
         }
         var result = new List<HookClash>();
         foreach (var t in order)

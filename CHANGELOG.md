@@ -2,6 +2,15 @@
 
 Builds are published on [GitHub Releases](https://github.com/RTVmods/RTV-Mod-Manager/releases) and on [VostokMods](https://vostokmods.net/mod/rtv-mod-manager). The manager updates itself from GitHub.
 
+## Unreleased
+
+Ready for Metro Mod Loader 3.5.0.
+
+- **Updating the Mod Loader keeps the rest of your `override.cfg`.** The loader's own entries are merged into the file in the game folder, as its installer does since 3.5.0. Other settings there (`[display]`, `[application]`, other autoloads) stay; before, the update replaced the whole file. A loader entry left under `[autoload]` by an old install is dropped.
+- **Log analysis reads 3.5's hook lines.** With the loader's Developer Mode on, 3.5 logs one `[hooks]` line per script instead of `Hook declared:` per method. Both are read. A mod that hooks every method of a script (`*`) now counts in each of that script's hook clashes.
+- **Profile switches keep the loader's per-profile MCM settings straight.** 3.5 remembers a profile switch made in its in-game menu and swaps the MCM folder at the next start. A switch from the manager, or from a save slot, before that start now moves that pending swap to the profile you picked (or cancels it when you go back), as a second switch in the loader's menu would. Before, the loader could restore the menu's profile's MCM settings under yours.
+- **Save Slots 0.4:** restarting into a slot's profile uses 3.5's restart, which the loader renamed. 3.4 is still supported.
+
 ## 0.7.15 (2026-11-06)
 
 - **Update your loadout's mods at startup.** When the startup check finds newer versions on VostokMods for mods that are on in your active profile, the manager asks you whether to update them. It lists each mod with its current and new version, all ticked. **Update** downloads the ticked ones; each mod's current file is backed up first, so it can be reverted. Mods that are off, locked or built in aren't offered. To stop the question, untick **At startup, offer to update the mods in my active profile** in Settings → Updates.

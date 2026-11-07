@@ -130,8 +130,8 @@ public sealed partial class ManagerSession
 
         var choice = Prompt.Choose("Update MML?",
             $"MML v{installed} is installed; latest is {latest}.\n\n"
-            + $"Download {latest}'s `modloader.gd` and `override.cfg` and replace the files in your "
-            + "game folder?\n\n"
+            + $"Download {latest}'s `modloader.gd`, replace the one in your game folder and merge its "
+            + "`override.cfg` into yours (your other settings in that file stay)?\n\n"
             + "Existing files will be backed up first as <name>.<timestamp>.bak alongside the "
             + "originals — if anything looks wrong after launch, restore the .bak files manually.",
             new[] { "Download + install", "Just open the releases page" });
@@ -141,10 +141,11 @@ public sealed partial class ManagerSession
     }
 
     /// <summary>Downloads `modloader.gd` and `override.cfg` from the
-    /// tag's release, backs up existing copies in the game folder and
-    /// replaces them. Both are downloaded to .download paths first, so a
-    /// failure on the second file leaves the first one's original
-    /// untouched. True when installed.</summary>
+    /// tag's release, backs up existing copies in the game folder,
+    /// replaces modloader.gd and merges the override.cfg template into the
+    /// existing one (MML's installer does the same since 3.5.0). Both are
+    /// downloaded to .download paths first, so a failure on the second
+    /// file leaves the first one's original untouched. True when installed.</summary>
     public async Task<bool> UpdateMmlAsync(string tag)
     {
         var gameDir = Path.GetDirectoryName(ModsDir);
@@ -183,6 +184,18 @@ public sealed partial class ManagerSession
                 throw new InvalidDataException(
                     "Downloaded modloader.gd doesn't look like a real MML build (no MODLOADER_VERSION "
                     + "constant). Aborting.");
+            var template = File.ReadAllText(overrideTmp);
+            if (!OverrideCfg.LooksLikeLoaderTemplate(template))
+                throw new InvalidDataException(
+                    "Downloaded override.cfg isn't the Mod Loader's (no [autoload_prepend] section). Aborting.");
+            // Keep whatever else the game folder's override.cfg sets.
+            if (File.Exists(overridePath))
+            {
+                var merged = OverrideCfg.Merge(File.ReadAllText(overridePath), template);
+                if (!OverrideCfg.LooksLikeLoaderTemplate(merged))
+                    throw new InvalidDataException("Merging override.cfg lost the [autoload_prepend] section. Aborting.");
+                File.WriteAllText(overrideTmp, merged, new System.Text.UTF8Encoding(false));
+            }
 
             // Back up existing files (same .timestamp.bak naming as the
             // .vmz patch flow).
